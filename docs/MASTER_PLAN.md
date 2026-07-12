@@ -12,10 +12,10 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 
 ## Current Sprint
 
-- Sprint 001.1: Repository Hardening
-- Status: Done
-- Scope: repository isolation, Git delivery readiness, dependency consistency,
-  architecture decisions, and validation
+- Sprint 002: Not Started
+- Status: Not Started
+- Next approved action: Sprint 002 planning only; implementation requires explicit
+  sprint approval
 
 ## Backlog
 
@@ -33,12 +33,12 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 
 ## Review
 
-- Sprint 001.1 implementation and validation results
-- Git identity correction
-- GitHub remote, pull request, and CI status
+- None
 
 ## Done
 
+- Sprint 001: Project Foundation
+- Sprint 001.1: Repository Hardening
 - Repository structure created
 - Basic health endpoints implemented
 - Initial documentation scaffold added
@@ -49,7 +49,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - ADR 0001 accepted for the frontend framework and package manager
 - Sprint 001 Git identity corrected using the approved repository-local identity
 - Intended empty GitHub repository verified
-- Draft pull request #1 opened against `main` without merging
+- Pull request #1 squash-merged into `main` as
+  `b3801c64fa09856d491317b0ebda45007c210ae0`
 - GitHub Actions backend and frontend checks passed for push and pull request events
 
 ## Decision Log
@@ -61,3 +62,6 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - 2026-07-12: Standardize on Node.js 22, npm 10, TypeScript, and Next.js 16.2.10.
 - 2026-07-12: Retain `frontend/` alongside `apps/api/` for Sprint 001.1; evaluate `apps/web/` later.
 - 2026-07-12: Complete Sprint 001.1 after local validation and GitHub Actions passed.
+- 2026-07-12: Finalize Sprint 001 and Sprint 001.1 through pull request #1 using a
+  squash merge (`b3801c64fa09856d491317b0ebda45007c210ae0`).
+- 2026-07-12: Keep Sprint 002 Not Started; the next approved action is planning only.
