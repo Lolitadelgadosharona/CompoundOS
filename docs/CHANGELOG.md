@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] - Sprint 001.1
+## [0.1.1] - 2026-07-12
 
 ### Changed
 
@@ -15,9 +15,17 @@
 
 - Corrected the Sprint 001 commit to use the approved repository-local Git identity
 - Verified the intended GitHub repository is empty before initial push
-- Opened draft pull request #1 against `main` without merging
+- Finalized Sprint 001 and Sprint 001.1 through pull request #1
+- Squash-merged the reviewed foundation into `main` as
+  `b3801c64fa09856d491317b0ebda45007c210ae0`
 - Confirmed GitHub Actions backend and frontend checks pass for push and pull
   request events
+
+### Status
+
+- Sprint 001: Done
+- Sprint 001.1: Done
+- Sprint 002: Not Started
 
 ## [0.1.0] - 2026-07-11
 
