@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] - Sprint 001 Review
+## [Unreleased] - Sprint 001 Complete
 
 ### Added
 
@@ -23,9 +23,12 @@
 
 ### Status
 
-- Sprint 001: Review
+- Sprint 001: Done and approved for merge after independent code review
+- Review conclusion: APPROVE WITH NON-BLOCKING FOLLOW-UP
+- Docker runtime verification remains an explicitly disclosed non-blocking
+  follow-up
 - Sprint 002: Not Started
-- This entry records foundation work and is not a product release
+- This entry records foundation completion and is not a product feature release
 
 ## [0.1.1] - 2026-07-12
 
