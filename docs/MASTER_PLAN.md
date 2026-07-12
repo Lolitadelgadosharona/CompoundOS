@@ -13,7 +13,7 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 ## Current Sprint
 
 - Sprint 001.1: Repository Hardening
-- Status: Review
+- Status: Done
 - Scope: repository isolation, Git delivery readiness, dependency consistency,
   architecture decisions, and validation
 
@@ -29,8 +29,7 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 
 ## In Progress
 
-- Push the hardening branch and prepare a draft pull request
-- Confirm GitHub Actions results
+- None
 
 ## Review
 
@@ -50,6 +49,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - ADR 0001 accepted for the frontend framework and package manager
 - Sprint 001 Git identity corrected using the approved repository-local identity
 - Intended empty GitHub repository verified
+- Draft pull request #1 opened against `main` without merging
+- GitHub Actions backend and frontend checks passed for push and pull request events
 
 ## Decision Log
 
@@ -59,3 +60,4 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - 2026-07-12: Isolate CompoundOS in a dedicated repository directory while preserving Sprint 001 history.
 - 2026-07-12: Standardize on Node.js 22, npm 10, TypeScript, and Next.js 16.2.10.
 - 2026-07-12: Retain `frontend/` alongside `apps/api/` for Sprint 001.1; evaluate `apps/web/` later.
+- 2026-07-12: Complete Sprint 001.1 after local validation and GitHub Actions passed.

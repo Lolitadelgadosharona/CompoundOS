@@ -15,7 +15,9 @@
 
 - Corrected the Sprint 001 commit to use the approved repository-local Git identity
 - Verified the intended GitHub repository is empty before initial push
-- Draft pull request and GitHub Actions validation are pending
+- Opened draft pull request #1 against `main` without merging
+- Confirmed GitHub Actions backend and frontend checks pass for push and pull
+  request events
 
 ## [0.1.0] - 2026-07-11
 
