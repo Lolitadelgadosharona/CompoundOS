@@ -17,6 +17,16 @@ CompoundOS is a long-term AI Family Office and Wealth Operating System. This Spr
 
 ## Local Development
 
+### Prerequisites
+
+- Node.js 22.x
+- npm 10.x (the repository standard; use the committed `package-lock.json`)
+- Python 3.9 or newer
+
+Sprint 001.1 uses Next.js 16.2.10 with TypeScript. See
+`docs/ADR/0001-frontend-framework-and-package-manager.md` for the accepted version
+and package-manager decision.
+
 ### Backend
 
 1. Create a virtual environment: `python3 -m venv .venv`
@@ -54,6 +64,12 @@ development-only placeholders and no real secrets.
 PostgreSQL, Redis, and Docker-based development are architectural targets. A
 Compose configuration is intentionally deferred until it can be validated in a
 Docker-enabled environment.
+
+## Monorepo Convention
+
+The current validated layout keeps the API in `apps/api/` and the web application
+in `frontend/`. A possible migration from `frontend/` to `apps/web/` is deferred
+to a separately approved sprint; Sprint 001.1 does not restructure working code.
 
 ## Notes
 

@@ -11,4 +11,4 @@ This directory records significant architectural decisions for CompoundOS.
 
 ## Current ADRs
 
-- No ADRs yet. The first sprint intentionally keeps the decision log in docs/MASTER_PLAN.md.
+- [ADR 0001: Frontend Framework and Package Manager](0001-frontend-framework-and-package-manager.md) — Accepted
