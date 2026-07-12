@@ -1,5 +1,32 @@
 # Changelog
 
+## [Unreleased] - Sprint 001 Review
+
+### Added
+
+- Frontend health endpoint test using the Node.js test runner
+- CI execution of the frontend health test
+- CI validation of the Docker Compose configuration
+- Dockerfiles for the existing `frontend/` and `apps/api/` applications
+- `compose.yaml` for the web, API, PostgreSQL, and Redis local stack
+- Docker build-context ignore files
+
+### Validation
+
+- Frontend lint, type-check, health test, production build, and production
+  dependency audit pass locally
+- Backend Ruff and pytest checks pass locally
+- Compose YAML, CI YAML, build contexts, dependency paths, and container commands
+  pass static consistency checks
+- Docker runtime verification was not completed because Docker is unavailable in
+  the current environment
+
+### Status
+
+- Sprint 001: Review
+- Sprint 002: Not Started
+- This entry records foundation work and is not a product release
+
 ## [0.1.1] - 2026-07-12
 
 ### Changed
