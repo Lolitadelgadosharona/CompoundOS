@@ -21,7 +21,7 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 ## Planning
 
 - Sprint 002 selected direction: Household Investment Policy + Decision Journal.
-- Planning pull request is pending.
+- Planning pull request #4 is Draft and under review.
 - Sprint 002 implementation is Not Started and requires explicit approval after
   the planning pull request merges.
 
@@ -41,9 +41,10 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 
 ## Review
 
-- Sprint 001 independent code review passed
-- Review conclusion: APPROVE WITH NON-BLOCKING FOLLOW-UP
-- Pull request #3 approved for merge
+- Planning PR #4 independent review result: REQUEST CHANGES — Documentation only.
+- Planning revisions cover lifecycle semantics, the single-household constraint,
+  localhost-only bindings, PostgreSQL integration testing, provisional disclaimer,
+  local retention boundary, and Definition of Done.
 
 ## Done
 
@@ -65,6 +66,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Frontend health endpoint automated test added and included in CI
 - Docker Compose and Dockerfiles added with static YAML, context, path, and command
   consistency validation
+- Pull request #3 squash-merged into `main` as
+  `e117a4d936872342dee2baa7012c76816a708d81`
 
 ## Decision Log
 
@@ -97,3 +100,16 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - 2026-07-13: Confirmed no AI, Guardian, broker integration, recommendations, or
   trading in Sprint 002.
 - 2026-07-13: Planning approval does not yet authorize implementation.
+- 2026-07-13: Standardized policy lifecycle as Draft → Published → Superseded.
+- 2026-07-13: Standardized journal lifecycle as Draft → Confirmed → Archived with
+  appended Correction revisions.
+- 2026-07-13: Required a database-enforced or transaction-safe single active
+  household constraint.
+- 2026-07-13: Required localhost-only host port bindings for the local MVP.
+- 2026-07-13: Required real PostgreSQL integration and transaction rollback tests.
+- 2026-07-13: Approved provisional local-MVP non-advisory copy.
+- 2026-07-13: Approved the temporary local-MVP retention and reset boundary.
+- 2026-07-13: Confirmed production compliance, authentication, export, backup, and
+  encryption remain deferred.
+- 2026-07-13: Planning PR #4 must merge before any separate Sprint 002
+  implementation approval; Sprint 002 remains Not Started.

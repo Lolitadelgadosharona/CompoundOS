@@ -29,6 +29,12 @@ recorded → review history that cannot be silently rewritten.
 ### Household Scope
 
 - Support exactly one household owned by the project owner.
+- The database may contain at most one active `HouseholdProfile`.
+- A second household-creation request returns an explicit conflict response, such
+  as HTTP 409.
+- A caller cannot bypass the constraint by supplying a different `household_id`.
+- This is a local single-household product constraint, not authentication or tenant
+  isolation.
 - Do not implement household members, invitations, roles, permissions,
   collaboration, multiple households, or multi-tenancy.
 - Use the fixed audit actor identifier `local-owner`.
@@ -75,12 +81,16 @@ rules, recommended values, or policy conclusions.
 
 ### Policy Lifecycle
 
-- Draft policies are editable.
-- A Published version cannot be modified in place.
-- Changing a Published policy requires a new version.
-- Historical versions are retained and cannot be silently overwritten.
-- A Published version cannot be physically deleted.
-- A version may be marked Superseded while remaining available in history.
+- Investment Policy states are `Draft`, `Published`, and `Superseded`.
+- A Draft is editable in place. Draft edits create `AuditEvent` records, but the
+  system need not snapshot every keystroke or autosave.
+- Publish creates an immutable Published `InvestmentPolicyVersion`.
+- A Published version cannot be modified in place or physically deleted.
+- Changing Published content requires creating a new Draft from that version.
+- Publishing the new Draft may mark the prior Published version Superseded.
+- Superseded changes status only and never changes historical version content.
+- The system never judges whether policy content is reasonable, compliant, or
+  suitable for the user.
 
 ### Decision Journal Minimum Fields
 
@@ -99,10 +109,14 @@ rules, recommended values, or policy conclusions.
 - `created_at`
 - `updated_at`
 
-All journal content is manually entered. A decision record references the selected
-Published policy version that was effective when the record was created. Confirmed
-records cannot be silently modified; corrections use an appended correction record
-or a new version. Confirmed records may be archived but not physically deleted.
+Decision Journal Entry states are `Draft`, `Confirmed`, and `Archived`. All content
+is manually entered. A Draft is editable. Confirm creates a Confirmed revision that
+cannot be silently rewritten and must reference a Published policy version.
+Confirmed revisions may be Archived but not physically deleted. Corrections append
+a Correction revision containing `corrected_entry_id`, `correction_reason`,
+`created_at`, and `actor`; they never overwrite the original Confirmed content.
+`updated_at` applies only to Draft content or status metadata and never implies
+in-place modification of Confirmed content.
 
 The system does not generate advice, scores, approvals, suitability conclusions,
 AI output, Guardian output, broker actions, trades, or transactions.
@@ -125,8 +139,14 @@ AI output, Guardian output, broker actions, trades, or transactions.
 
 ### Persistence Direction
 
-- Plan to use PostgreSQL during Sprint 002 implementation.
-- Do not use in-memory storage as formal persistence.
+- Use PostgreSQL as formal Sprint 002 persistence; product data cannot use
+  process-local memory as formal persistence.
+- Implementation requires migrations that can upgrade an empty database.
+- Multi-record business writes and their `AuditEvent` records commit in the same
+  database transaction and roll back together on failure.
+- CI requires a PostgreSQL service container or equivalent isolated PostgreSQL.
+- Repository/integration tests run against real PostgreSQL. SQLite or mocks may
+  support unit tests but cannot replace PostgreSQL integration tests.
 - Redis carries no Sprint 002 product logic.
 - This planning task creates no schema or migration; persistence design still
   requires implementation authorization and architecture review.
@@ -139,6 +159,37 @@ AI output, Guardian output, broker actions, trades, or transactions.
   review are separately approved.
 - Future README and product UI must display this limitation clearly.
 - Do not claim production-grade privacy or compliance readiness.
+- Host ports for web, API, PostgreSQL, and Redis default to `127.0.0.1` only, for
+  example `127.0.0.1:3000:3000`, `127.0.0.1:8000:8000`,
+  `127.0.0.1:5432:5432`, and `127.0.0.1:6379:6379`.
+- Containers may listen on `0.0.0.0` internally when required. Localhost host-port
+  binding is not a substitute for authentication or production security.
+
+### Approved Local-MVP Non-Advisory Copy
+
+The following provisional copy must be visible on first entry to the core flow,
+before publishing a policy, and before confirming a decision journal entry:
+
+> CompoundOS records information you enter. It does not evaluate whether an
+> investment policy or decision is suitable, appropriate, or likely to succeed.
+> Policy links and validations are for recordkeeping only and do not constitute
+> investment, tax, or legal advice.
+
+This is temporary local-MVP copy, is not represented as lawyer-reviewed, and must
+receive legal and compliance review before any remote, production, or commercial
+use. Sprint 002 does not implement complex consent management.
+
+### Approved Local-MVP Retention Boundary
+
+- Sprint 002 provides no data export and no general-purpose hard-delete API.
+- Published policy versions, Confirmed journal revisions, and `AuditEvent` records
+  cannot be physically deleted.
+- Drafts may be discarded before publication or confirmation.
+- A documented development-only database reset command may clear all local data.
+- Database reset is not a product deletion feature.
+- Backup, long-term retention, user export, compliance deletion, and encryption-key
+  management are deferred to future approved sprints and become blockers before
+  any non-local or production use.
 
 ### Docker Boundary
 
@@ -269,25 +320,27 @@ request merges.
    context approved for this sprint.
 3. The user records long-term goals, time horizons, liquidity needs, and risk
    boundary statements in their own words.
-4. The user reviews and explicitly confirms a version of the household investment
-   policy.
+4. The user reviews a Draft and explicitly publishes an immutable Published policy
+   version.
 5. The user creates a decision-journal entry describing an idea or decision,
    rationale, counterarguments, assumptions, uncertainties, and decision status.
-6. The user links the entry to one or more approved policy statements without the
-   system judging compliance or quality.
-7. The user reviews the saved entry and its policy-version references.
-8. Later edits create traceable revisions rather than silently rewriting history.
+6. The user links the journal Draft to the Published policy version in effect
+   without the system judging compliance or quality.
+7. The user confirms the journal entry, creating an immutable Confirmed revision.
+8. The user reviews policy versions, journal corrections, and audit history that
+   cannot be silently rewritten.
 
 ## 6. Proposed Scope
 
 - Exactly one household workspace for the project owner in local development.
 - Structured capture of owner-provided household planning context.
-- Draft and confirmed policy records with explicit version identifiers.
+- Draft policies and immutable Published policy versions with explicit identifiers.
 - Decision-journal creation and read views.
 - Structured fields for rationale, counterarguments, assumptions, uncertainties,
   and status.
-- Links from journal entries to confirmed policy statements or sections.
-- Append-only audit events for create, confirm, revise, and archive actions.
+- Links from Confirmed journal revisions to Published policy versions.
+- Audit events for create, edit draft, publish policy, confirm journal, correct,
+  archive, and supersede actions.
 - Neutral, non-advisory labels and disclaimers.
 - Minimal end-to-end UI and API contracts necessary to demonstrate the workflow.
 
@@ -311,13 +364,13 @@ request merges.
 ## 8. Proposed Frontend Scope
 
 - Household profile form and read-only summary.
-- Policy editor organized by approved conceptual categories, with draft/confirm
-  states and visible version metadata.
+- Policy editor organized by approved conceptual categories, with Draft, Published,
+  and Superseded states and visible version metadata.
 - Decision-journal form and detail view.
-- Policy-link selector that only references confirmed user-authored policy content.
+- Policy-link selector that only references Published user-authored policy versions.
 - Revision/audit timeline showing actor label, action, and timestamp.
-- Persistent non-advisory messaging and clear distinction between user input and
-  system metadata.
+- Approved local-MVP non-advisory copy on flow entry, before policy publication,
+  and before journal confirmation.
 - Accessible validation messages for missing required recordkeeping fields.
 
 No visual design, component library, route structure, or state-management choice
@@ -327,8 +380,12 @@ is approved by this proposal.
 
 - API contracts for household profile, policy drafts/versions, journal entries,
   policy links, and audit-event reads.
+- Enforce at most one active household transactionally; return a clear conflict
+  response such as HTTP 409 for any second creation attempt, regardless of a
+  caller-supplied `household_id`.
 - Input validation for required recordkeeping fields and allowed lifecycle states.
-- Explicit policy confirmation and revision operations.
+- Explicit policy publish/supersede operations and journal confirm/correct/archive
+  operations.
 - Server-generated identifiers, timestamps, version references, and audit events.
 - Neutral retrieval only; no recommendation, scoring, rules evaluation, or alerts.
 
@@ -346,33 +403,50 @@ These are domain concepts, not database schemas:
 - **RiskBoundaryStatement:** Freeform owner statement, not a computed tolerance or
   system threshold.
 - **InvestmentPolicy:** Stable identity for a household policy.
-- **InvestmentPolicyVersion:** Immutable snapshot of a draft or confirmed policy.
+- **InvestmentPolicyDraft:** Editable working policy content derived initially or
+  from a Published version.
+- **InvestmentPolicyVersion:** Immutable Published policy content with Published or
+  Superseded status.
 - **PolicyStatement:** Versioned, user-authored policy section or statement.
-- **DecisionJournalEntry:** Decision record with lifecycle state and timestamps.
+- **DecisionJournalEntry:** Stable identity for a decision journal.
+- **DecisionJournalRevision:** Draft, Confirmed, Archived, or Correction revision;
+  a Correction includes `corrected_entry_id`, `correction_reason`, `created_at`,
+  and `actor` without overwriting original Confirmed content.
 - **DecisionArgument:** Supporting or opposing reason supplied by the user.
 - **DecisionAssumption:** User-stated assumption and optional uncertainty note.
 - **PolicyReference:** Link from a journal entry to a specific policy version and
   statement.
-- **AuditEvent:** Append-only record of a meaningful state change.
+- **AuditEvent:** Append-only record of create, edit draft, publish policy, confirm
+  journal, correct, archive, and supersede actions.
 
 ## 11. API Endpoint Proposals (Contracts Only)
 
 Names are illustrative and not approved routes:
 
-- `POST /api/households` — create a household profile from owner-provided fields.
+- `POST /api/households` — create the sole active household profile; return HTTP
+  409 when one already exists, including attempts using a different supplied ID.
 - `GET /api/households/{household_id}` — retrieve the profile.
 - `PATCH /api/households/{household_id}` — revise allowed profile fields and emit
   an audit event.
 - `POST /api/households/{household_id}/policies` — create a policy draft.
 - `GET /api/policies/{policy_id}` — retrieve current policy metadata.
-- `POST /api/policies/{policy_id}/versions` — save a new immutable draft version.
-- `POST /api/policies/{policy_id}/versions/{version_id}/confirm` — explicitly
-  confirm a version; no evaluation is performed.
+- `POST /api/policies/{policy_id}/drafts` — create a new editable Draft, optionally
+  derived from a Published version.
+- `PATCH /api/policies/{policy_id}/drafts/{draft_id}` — edit a Draft and emit an
+  AuditEvent without requiring a full snapshot per keystroke/autosave.
+- `POST /api/policies/{policy_id}/versions/{version_id}/publish` — publish an
+  immutable version; no evaluation is performed.
 - `GET /api/policies/{policy_id}/versions` — list version metadata.
 - `POST /api/households/{household_id}/journal-entries` — create a journal entry.
 - `GET /api/journal-entries/{entry_id}` — retrieve an entry and policy references.
-- `PATCH /api/journal-entries/{entry_id}` — create an auditable revision according
-  to the approved immutability model.
+- `PATCH /api/journal-entries/{entry_id}/draft` — edit only the journal Draft and
+  emit an AuditEvent; never mutate Confirmed content.
+- `POST /api/journal-entries/{entry_id}/confirm` — create a Confirmed revision that
+  references a Published policy version.
+- `POST /api/journal-entries/{entry_id}/corrections` — append a Correction revision
+  without overwriting Confirmed content.
+- `POST /api/journal-entries/{entry_id}/archive` — archive a Confirmed revision
+  without physical deletion.
 - `GET /api/households/{household_id}/audit-events` — retrieve audit history.
 
 Contracts must use neutral errors and never return advice, eligibility, score,
@@ -380,13 +454,15 @@ approval, or trade instructions.
 
 ## 12. Auditability Requirements
 
-- Every confirmed policy version has a stable identifier and confirmation time.
+- Every Published policy version has a stable identifier and publication time.
 - Journal policy links target a specific immutable policy version.
-- Create, confirm, revise, status-change, archive, and link-change actions are
-  attributable and timestamped.
-- Historical confirmed policy content cannot be silently overwritten.
-- Journal history behavior—immutable entries versus explicit revisions—must be
-  owner-approved before implementation.
+- Create, edit draft, publish policy, confirm journal, correct, archive, supersede,
+  and link-change actions are attributable and timestamped.
+- Historical Published policy and Confirmed journal content cannot be silently
+  overwritten.
+- Draft edits create AuditEvents without requiring a full content snapshot for
+  every keystroke or autosave.
+- Business writes and AuditEvents commit or roll back in one PostgreSQL transaction.
 - Audit events distinguish user-entered content from server-generated metadata.
 - Time source, timezone display, retention, deletion, and correction semantics are
   documented and tested.
@@ -431,13 +507,31 @@ approval, or trade instructions.
 
 Proposed criteria, subject to approval:
 
-- A user can create and retrieve one household profile using only approved fields.
-- A user can create, review, and explicitly confirm a policy version.
+- A user can create and retrieve the sole active household profile using only
+  approved fields.
+- A second household creation attempt, including one with a different supplied
+  `household_id`, returns an explicit conflict such as HTTP 409.
+- A user can edit a policy Draft and publish an immutable Published version.
+- Publishing a later Draft can mark the prior Published version Superseded without
+  changing its historical content.
+- User-entered target allocation percentages must total exactly 100%; the system
+  provides no recommended allocation.
 - A user can create and retrieve a journal entry with rationale,
   counterarguments, assumptions, and uncertainties.
-- A journal entry can reference a specific confirmed policy version and statement.
-- Revisions preserve the approved historical/audit representation.
-- The UI clearly labels user-authored data and displays non-advisory language.
+- A Confirmed journal revision references a specific Published policy version.
+- Corrections append the required correction metadata and preserve original
+  Confirmed content; archive never physically deletes a Confirmed revision.
+- AuditEvents cover create, edit draft, publish, confirm, correct, archive, and
+  supersede operations.
+- The approved provisional non-advisory copy appears on core-flow entry, before
+  policy publication, and before journal confirmation.
+- `docker compose config` shows web, API, PostgreSQL, and Redis host ports bound by
+  default to `127.0.0.1`, with no default `0.0.0.0` host publication.
+- Any future remote access requires a separate sprint and security approval.
+- PostgreSQL migrations upgrade an empty database successfully.
+- Repository/integration tests run against real isolated PostgreSQL.
+- Multi-record business writes and AuditEvents commit atomically and roll back
+  together on failure.
 - APIs never return recommendations, scores, eligibility, alerts, or trade actions.
 - Automated tests cover validation, version linkage, audit events, API contracts,
   and the demonstrable frontend journey.
@@ -447,14 +541,22 @@ Proposed criteria, subject to approval:
 
 ## 17. Test Strategy
 
-- **Domain tests:** lifecycle transitions, version immutability, policy references,
-  required fields, and audit-event creation.
-- **API tests:** contract shapes, invalid identifiers, validation errors,
-  concurrency behavior once approved, and absence of advisory outputs.
-- **Frontend tests:** form validation, draft/confirm flow, journal capture, policy
-  linking, audit timeline, and disclaimer presence.
-- **End-to-end test:** create profile → confirm policy → record journal entry → link
-  policy → inspect history.
+- **Domain tests:** Draft → Published → Superseded policy transitions; Draft →
+  Confirmed → Archived journal transitions; correction immutability; target
+  allocation totaling 100%; policy-version references; and AuditEvent creation.
+- **API tests:** contract shapes, invalid identifiers, a second household returning
+  HTTP 409 even with a different supplied ID, lifecycle conflicts, validation
+  errors, and absence of advisory outputs.
+- **PostgreSQL integration tests:** run repositories and migrations against real
+  isolated PostgreSQL; verify empty-database migration and transactional rollback
+  of both business records and AuditEvents. SQLite or mocks do not replace these.
+- **Frontend tests:** form validation, policy publish flow, journal confirmation and
+  correction flow, policy linking, audit timeline, and provisional disclaimer at
+  all three required points.
+- **Infrastructure tests:** statically inspect expanded Compose configuration for
+  `127.0.0.1` host bindings and absence of default `0.0.0.0` publication.
+- **End-to-end test:** create sole profile → publish policy → confirm journal entry
+  referencing that Published version → append correction → inspect immutable history.
 - **Security/privacy tests:** sensitive-field redaction in logs/errors and rejected
   overlong or malformed content.
 - **Regression tests:** all Sprint 001 health and CI checks.
@@ -477,56 +579,70 @@ Proposed criteria, subject to approval:
 
 - **Recordkeeping perceived as advice:** Use neutral language, user-authored labels,
   disclaimers, and compliance review; do not score or interpret policy.
-- **Sensitive household data without authentication:** Restrict approved deployment
-  scope or make authentication a prerequisite in a separately approved decision.
-- **Audit history conflicts with deletion rights:** Resolve retention/correction
-  semantics before implementation.
+- **Sensitive household data without authentication:** Enforce local-only host
+  bindings and prohibit remote deployment; authentication requires a separate
+  approved sprint.
+- **Audit history conflicts with deletion rights:** Apply the approved local-MVP
+  retention/reset boundary and require a production policy before non-local use.
 - **Scope expands into a rule engine:** Treat policy links as references only and
   prohibit automated evaluation.
 - **Prescriptive templates invent rules:** Start with approved neutral categories
   and freeform owner statements, subject to owner review.
 - **Over-modeling early:** Approve the smallest end-to-end entities and defer
   portfolio, market, member, and collaboration models.
-- **Ambiguous household ownership:** Decide single-household and actor assumptions
-  before coding.
+- **Single-household constraint bypass:** Enforce at most one active profile in the
+  database/transaction layer and test alternate-ID creation conflicts.
 
 ## 20. Dependencies
 
 - Final implementation approval after the planning pull request merges.
-- Resolution of any architecture or compliance question promoted to a blocker
-  before implementation approval.
-- Compliance review of language, retention, and intended deployment boundary.
-- Architecture decisions for persistence, audit behavior, identifiers, and
-  authentication/deployment boundary.
-- Approved UX copy for non-advisory notices and confirmations.
+- Approved detailed PostgreSQL schema, migrations, transaction boundaries,
+  repositories, and audit implementation plan.
+- CI access to an isolated real PostgreSQL service for blocking integration tests.
+- Implementation of the approved provisional non-advisory copy and local-only
+  boundary; final legal review is deferred until non-local or production use.
 - Docker runtime verification remains a non-blocking Sprint 001 backlog item; run
   it when Docker is available, otherwise disclose that it was not completed.
+
+Final production legal copy, production retention, authentication, full application
+Docker runtime, export, backup, and encryption-key management are not blockers for
+local MVP development. They become blockers before remote, production, or
+commercial use.
 
 No new software dependency is approved by this planning document.
 
 ## 21. Definition of Done
 
-Proposed definition, not approved:
+Proposed local-MVP definition, subject to final implementation approval:
 
-- Project owner has approved one option, scope, non-goals, and all blocking
-  decisions.
-- Approved end-to-end workflow meets its acceptance criteria.
-- Audit and explainability requirements are implemented and tested.
-- No advice, trading, broker, AI agent, Guardian, authentication, or unapproved
-  rule behavior has been introduced.
-- Privacy/security and deployment limitations are documented and enforced.
-- Tests, lint, type-check, build, and CI pass.
+- The approved household → policy Draft → target allocation → Published version →
+  Confirmed journal → immutable history loop is complete.
+- Policy and journal lifecycle, immutability, correction, archive, and supersede
+  tests pass.
+- Single-active-household constraint and second-create HTTP 409 tests pass.
+- Target allocation total-equals-100% validation tests pass without generating a
+  recommended allocation.
+- Real PostgreSQL migration, repository, and integration tests pass in CI.
+- Business-write and AuditEvent transaction rollback tests pass.
+- Expanded Compose host-port configuration defaults to `127.0.0.1` and has no
+  default `0.0.0.0` host publication.
+- The provisional non-advisory copy appears at all three approved checkpoints and
+  its display tests pass.
+- No recommendations, AI, Guardian, broker, trading, actual holdings, accounts, or
+  monetary data are implemented.
+- Lint, type-check, tests, build, and CI pass.
 - Required product, architecture, ADR, API, privacy, and changelog documentation is
   current.
-- Independent review confirms implementation matches the approved Sprint 002
+- Independent code review confirms implementation matches the approved Sprint 002
   scope.
 
 ## 22. Estimated Implementation Sequence
 
 This sequence is an estimate only and does not authorize work:
 
-1. Resolve blocking product, compliance, privacy, audit, and architecture questions.
-2. Approve a narrow PRD amendment, API contracts, entity concepts, and ADRs.
+1. Obtain explicit implementation approval after this planning PR merges.
+2. Approve a narrow PRD amendment, PostgreSQL design, API contracts, entity
+   concepts, transactions, migrations, and ADRs.
 3. Establish domain validation and audit behavior with tests.
 4. Add the minimal approved persistence layer and migrations.
 5. Implement household profile and policy version APIs.
@@ -538,9 +654,9 @@ This sequence is an estimate only and does not authorize work:
 ## 23. Decisions Requiring Project-Owner Approval
 
 - Detailed implementation architecture and final acceptance-test wording.
-- Non-advisory disclaimer and consent language.
 - PostgreSQL schema, migration, transaction, and repository design.
-- Retention, export, deletion, backup, and encryption expectations.
+- Final production disclaimer, retention, export, deletion, backup, and encryption
+  requirements before any non-local use.
 - Any decision to expand beyond local-only, no-auth operation.
 
 ## 24. Planning Outcome

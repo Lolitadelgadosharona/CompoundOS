@@ -27,10 +27,14 @@ merges.
 - Confirmed Docker runtime validation remains non-blocking with accurate disclosure
   when Docker is unavailable.
 
+### Resolved for the Local MVP on 2026-07-13
+
+- Provisional non-advisory copy and its three display checkpoints.
+- Temporary no-export/no-general-hard-delete boundary, immutable-record retention,
+  Draft discard behavior, and development-only full database reset.
+
 ### Open but Non-Blocking for the Local MVP
 
-- Final non-advisory disclaimer and consent copy.
-- Long-term retention, export, broader deletion, backup, and encryption policy.
 - Detailed PostgreSQL schema, migrations, transactions, and repository boundaries.
 - Final visual design and exact acceptance-test wording.
 - Jurisdiction-specific requirements for any future non-local deployment.
@@ -105,7 +109,9 @@ merges.
   approved deployment context or multiple isolated households?
 - **Why answer is needed:** Multi-tenancy changes identifiers, isolation,
   authorization, testing, and deletion behavior.
-- **Recommended default:** One household for the first demonstrable workflow.
+- **Recommended default:** Enforce at most one active HouseholdProfile in the
+  database/transaction layer; any second create returns HTTP 409 and cannot be
+  bypassed with a different supplied ID.
 - **Other options:** Multiple households without users, or full tenant isolation.
 - **Impact:** Multiple households likely requires authentication/authorization,
   which is currently excluded and needs separate architectural approval.
@@ -239,19 +245,24 @@ merges.
 
 ### C1. What non-advisory language is required?
 
-- **Status:** Open — non-blocking for the approved local MVP boundary.
+- **Status:** Resolved for local MVP; legal review deferred before any non-local or
+  production use.
 
 - **Question:** Approve the notices, consent, and terminology that distinguish
   user recordkeeping from investment advice or suitability review.
 - **Why answer is needed:** Policy and decision interfaces could otherwise appear
   to endorse a strategy or decision.
-- **Recommended default:** Prominent owner-authored-record notice and explicit
-  statement that links and validation do not assess investment merit.
+- **Recommended default:** Display the approved provisional copy on core-flow entry,
+  before policy publication, and before journal confirmation: “CompoundOS records
+  information you enter. It does not evaluate whether an investment policy or
+  decision is suitable, appropriate, or likely to succeed. Policy links and
+  validations are for recordkeeping only and do not constitute investment, tax,
+  or legal advice.” Do not claim lawyer review or implement complex consent.
 - **Other options:** Legal-review-provided language, per-action attestation, or no
   notice.
 - **Impact:** Insufficient language is a release blocker; repeated attestations may
   increase UX friction.
-- **Blocks implementation:** No — exact copy remains a non-blocking review item.
+- **Blocks implementation:** No — resolved for the local MVP.
 
 ### C2. Which jurisdictions and retention duties apply?
 
@@ -280,7 +291,9 @@ merges.
 - **Why answer is needed:** Sensitive household data cannot be safely exposed
   remotely without identity and access controls.
 - **Recommended default:** Local, single-user demonstration only; no production or
-  shared deployment.
+  shared deployment. Web, API, PostgreSQL, and Redis host ports default to
+  `127.0.0.1`; containers may listen on `0.0.0.0` internally. This is not a
+  substitute for authentication or production security.
 - **Other options:** Add authentication through separate approval, anonymized demo
   data only, or defer implementation.
 - **Impact:** Remote use makes authentication/authorization and security review
@@ -289,19 +302,22 @@ merges.
 
 ### PS2. What are the retention, export, and deletion expectations?
 
-- **Status:** Open — non-blocking for the approved local MVP boundary.
+- **Status:** Resolved for local MVP; production retention/export/deletion policy
+  deferred.
 
 - **Question:** Define how long records live and whether users need export or
   deletion in the first approved workflow.
 - **Why answer is needed:** These requirements shape audit architecture and data
   model boundaries.
-- **Recommended default:** Define retention before implementation; keep export and
-  deletion out of scope unless compliance makes them mandatory.
+- **Recommended default:** No export or general hard-delete API; Published policy
+  versions, Confirmed journal revisions, and AuditEvents cannot be physically
+  deleted; Drafts may be discarded; a documented development-only database reset
+  may clear all local data but is not a product deletion feature.
 - **Other options:** Immediate export/delete, indefinite retention, configurable
   policy, or ephemeral demo data.
 - **Impact:** Export/delete adds contracts and security tests; indefinite retention
   increases privacy exposure; ephemeral data reduces demonstration realism.
-- **Blocks implementation:** No — open but non-blocking for the local MVP.
+- **Blocks implementation:** No — resolved for the local MVP.
 
 ## UX
 
@@ -332,7 +348,10 @@ merges.
 - **Why answer is needed:** Audit/version semantics depend on transactions,
   constraints, and persistence behavior.
 - **Recommended default:** PostgreSQL behind explicit repository boundaries;
-  schema, migrations, and transactions require implementation approval and review.
+  migrations upgrade an empty database; business records and AuditEvents commit or
+  roll back together; CI and repository integration tests use real isolated
+  PostgreSQL. SQLite/mocks may support unit tests but cannot replace integration
+  tests. Redis carries no product logic.
 - **Other options:** In-memory prototype, file-based persistence, or defer storage.
 - **Impact:** In-memory is faster but cannot demonstrate durable audit history;
   PostgreSQL requires migrations, schema, transactions, and Docker/runtime work.
@@ -364,10 +383,11 @@ merges.
   security/compliance gates, and whether Docker runtime verification is required.
 - **Why answer is needed:** A sprint cannot start safely without an agreed finish
   line and release boundary.
-- **Recommended default:** All approved user journey and audit tests pass; existing
-  CI remains green; privacy/compliance decisions are documented; independent
-  review passes; run Docker runtime validation when Docker is available, otherwise
-  disclose accurately that it was not completed.
+- **Recommended default:** Require the approved journey, lifecycle/immutability,
+  single-household, allocation-100%, real-PostgreSQL, transaction rollback,
+  localhost binding, disclaimer-display, prohibited-scope, standard CI, and
+  independent-review gates. Run full Docker runtime validation when available;
+  otherwise disclose accurately that it was not completed.
 - **Other options:** Require Docker runtime, require authentication, require legal
   review, or permit a local-only prototype with explicit limitations.
 - **Impact:** Stronger gates increase confidence and schedule; weaker gates restrict
