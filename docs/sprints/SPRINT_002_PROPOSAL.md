@@ -28,11 +28,15 @@ recorded → review history that cannot be silently rewritten.
 
 ### Household Scope
 
-- Support exactly one household owned by the project owner.
-- The database may contain at most one active `HouseholdProfile`.
-- A second household-creation request returns an explicit conflict response, such
-  as HTTP 409.
+- Support at most one household profile owned by the project owner.
+- The database may contain at most one `HouseholdProfile` in total.
+- The first household-creation request succeeds. Every later creation request
+  returns an explicit conflict response, such as HTTP 409.
 - A caller cannot bypass the constraint by supplying a different `household_id`.
+- Sprint 002 does not implement `HouseholdProfile` archive, deactivate, hard
+  delete, or replacement behavior. A development-only full database reset may
+  clear the profile, after which it may be created again.
+- Any future household replacement lifecycle requires separate approval.
 - This is a local single-household product constraint, not authentication or tenant
   isolation.
 - Do not implement household members, invitations, roles, permissions,
@@ -84,7 +88,14 @@ rules, recommended values, or policy conclusions.
 - Investment Policy states are `Draft`, `Published`, and `Superseded`.
 - A Draft is editable in place. Draft edits create `AuditEvent` records, but the
   system need not snapshot every keystroke or autosave.
-- Publish creates an immutable Published `InvestmentPolicyVersion`.
+- Publishing an existing `InvestmentPolicyDraft` creates an immutable Published
+  `InvestmentPolicyVersion` and writes the corresponding `AuditEvent` in the same
+  transaction.
+- The publish operation may mark the prior Published version Superseded in that
+  transaction when needed.
+- A Published version or nonexistent object cannot be used as the Draft input to
+  publish. The exact response contract remains an implementation architecture
+  decision.
 - A Published version cannot be modified in place or physically deleted.
 - Changing Published content requires creating a new Draft from that version.
 - Publishing the new Draft may mark the prior Published version Superseded.
@@ -112,9 +123,14 @@ rules, recommended values, or policy conclusions.
 Decision Journal Entry states are `Draft`, `Confirmed`, and `Archived`. All content
 is manually entered. A Draft is editable. Confirm creates a Confirmed revision that
 cannot be silently rewritten and must reference a Published policy version.
-Confirmed revisions may be Archived but not physically deleted. Corrections append
-a Correction revision containing `corrected_entry_id`, `correction_reason`,
-`created_at`, and `actor`; they never overwrite the original Confirmed content.
+Confirmed revisions may be marked Archived but not physically deleted.
+`DecisionCorrection` is an append-only correction record, not an Entry lifecycle
+state. It references the corrected Confirmed revision and contains
+`corrected_entry_id`, `correction_reason`, `created_at`, and `actor`. It never
+overwrites the original Confirmed content and cannot be modified in place or
+physically deleted after creation. Creating it emits an `AuditEvent`. Any future
+`revision_type` design is deferred to implementation schema review rather than
+being specified as an enum here.
 `updated_at` applies only to Draft content or status metadata and never implies
 in-place modification of Confirmed content.
 
@@ -380,9 +396,11 @@ is approved by this proposal.
 
 - API contracts for household profile, policy drafts/versions, journal entries,
   policy links, and audit-event reads.
-- Enforce at most one active household transactionally; return a clear conflict
-  response such as HTTP 409 for any second creation attempt, regardless of a
-  caller-supplied `household_id`.
+- Enforce at most one household profile in total transactionally; return a clear
+  conflict response such as HTTP 409 for any second creation attempt, regardless
+  of a caller-supplied `household_id`.
+- Do not provide household archive, deactivate, hard-delete, or replacement
+  operations in Sprint 002.
 - Input validation for required recordkeeping fields and allowed lifecycle states.
 - Explicit policy publish/supersede operations and journal confirm/correct/archive
   operations.
@@ -409,9 +427,15 @@ These are domain concepts, not database schemas:
   Superseded status.
 - **PolicyStatement:** Versioned, user-authored policy section or statement.
 - **DecisionJournalEntry:** Stable identity for a decision journal.
-- **DecisionJournalRevision:** Draft, Confirmed, Archived, or Correction revision;
-  a Correction includes `corrected_entry_id`, `correction_reason`, `created_at`,
-  and `actor` without overwriting original Confirmed content.
+- **DecisionJournalRevision:** Represents editable Draft content or an immutable
+  Confirmed revision. A Confirmed revision may be marked Archived; Confirmed
+  content cannot be modified in place.
+- **DecisionCorrection:** Append-only record that references the corrected
+  Confirmed revision and contains `corrected_entry_id`, `correction_reason`,
+  `created_at`, and `actor`. It does not overwrite original content and cannot be
+  modified in place or physically deleted after creation. A `revision_type`, if
+  later needed, belongs to implementation schema design and is not prescribed
+  here.
 - **DecisionArgument:** Supporting or opposing reason supplied by the user.
 - **DecisionAssumption:** User-stated assumption and optional uncertainty note.
 - **PolicyReference:** Link from a journal entry to a specific policy version and
@@ -423,7 +447,7 @@ These are domain concepts, not database schemas:
 
 Names are illustrative and not approved routes:
 
-- `POST /api/households` — create the sole active household profile; return HTTP
+- `POST /api/households` — create the sole household profile; return HTTP
   409 when one already exists, including attempts using a different supplied ID.
 - `GET /api/households/{household_id}` — retrieve the profile.
 - `PATCH /api/households/{household_id}` — revise allowed profile fields and emit
@@ -434,8 +458,12 @@ Names are illustrative and not approved routes:
   derived from a Published version.
 - `PATCH /api/policies/{policy_id}/drafts/{draft_id}` — edit a Draft and emit an
   AuditEvent without requiring a full snapshot per keystroke/autosave.
-- `POST /api/policies/{policy_id}/versions/{version_id}/publish` — publish an
-  immutable version; no evaluation is performed.
+- `POST /api/policies/{policy_id}/drafts/{draft_id}/publish` — publish an existing
+  Draft by creating an immutable Published `InvestmentPolicyVersion`, writing its
+  `AuditEvent` in the same transaction, and, when needed, marking the prior
+  Published version Superseded. Reject a Published or nonexistent object as Draft
+  input. The exact response contract is deferred to implementation architecture
+  design; no evaluation is performed.
 - `GET /api/policies/{policy_id}/versions` — list version metadata.
 - `POST /api/households/{household_id}/journal-entries` — create a journal entry.
 - `GET /api/journal-entries/{entry_id}` — retrieve an entry and policy references.
@@ -443,8 +471,9 @@ Names are illustrative and not approved routes:
   emit an AuditEvent; never mutate Confirmed content.
 - `POST /api/journal-entries/{entry_id}/confirm` — create a Confirmed revision that
   references a Published policy version.
-- `POST /api/journal-entries/{entry_id}/corrections` — append a Correction revision
-  without overwriting Confirmed content.
+- `POST /api/journal-entries/{entry_id}/revisions/{revision_id}/corrections` —
+  append an immutable `DecisionCorrection` referencing the specified Confirmed
+  revision, without overwriting Confirmed content, and emit an AuditEvent.
 - `POST /api/journal-entries/{entry_id}/archive` — archive a Confirmed revision
   without physical deletion.
 - `GET /api/households/{household_id}/audit-events` — retrieve audit history.
@@ -507,11 +536,17 @@ approval, or trade instructions.
 
 Proposed criteria, subject to approval:
 
-- A user can create and retrieve the sole active household profile using only
+- A user can create and retrieve the sole household profile using only
   approved fields.
 - A second household creation attempt, including one with a different supplied
   `household_id`, returns an explicit conflict such as HTTP 409.
-- A user can edit a policy Draft and publish an immutable Published version.
+- No household archive, deactivate, hard-delete, or replacement operation exists;
+  only a development-only full database reset permits creation again.
+- A user can edit an existing policy Draft and publish it through
+  `POST /api/policies/{policy_id}/drafts/{draft_id}/publish`, creating an immutable
+  Published version and an AuditEvent atomically.
+- Publishing rejects a Published or nonexistent object as Draft input; its exact
+  response contract is finalized during implementation architecture design.
 - Publishing a later Draft can mark the prior Published version Superseded without
   changing its historical content.
 - User-entered target allocation percentages must total exactly 100%; the system
@@ -519,8 +554,10 @@ Proposed criteria, subject to approval:
 - A user can create and retrieve a journal entry with rationale,
   counterarguments, assumptions, and uncertainties.
 - A Confirmed journal revision references a specific Published policy version.
-- Corrections append the required correction metadata and preserve original
-  Confirmed content; archive never physically deletes a Confirmed revision.
+- A `DecisionCorrection` references a Confirmed revision, appends the required
+  correction metadata, emits an AuditEvent, and preserves original Confirmed
+  content. It cannot be modified in place or physically deleted; archive is only
+  a lifecycle state of a Confirmed revision and never physically deletes it.
 - AuditEvents cover create, edit draft, publish, confirm, correct, archive, and
   supersede operations.
 - The approved provisional non-advisory copy appears on core-flow entry, before
@@ -541,11 +578,15 @@ Proposed criteria, subject to approval:
 
 ## 17. Test Strategy
 
-- **Domain tests:** Draft → Published → Superseded policy transitions; Draft →
-  Confirmed → Archived journal transitions; correction immutability; target
-  allocation totaling 100%; policy-version references; and AuditEvent creation.
+- **Domain tests:** Draft → Published → Superseded policy transitions; publishing
+  an existing Draft while rejecting Published or nonexistent inputs; Draft →
+  Confirmed → Archived journal transitions; append-only `DecisionCorrection`
+  behavior outside the lifecycle state machine; target allocation totaling 100%;
+  policy-version references; and AuditEvent creation.
 - **API tests:** contract shapes, invalid identifiers, a second household returning
-  HTTP 409 even with a different supplied ID, lifecycle conflicts, validation
+  HTTP 409 even with a different supplied ID, absence of household archive,
+  deactivate, hard-delete, and replacement operations, policy Draft publication,
+  correction references to Confirmed revisions, lifecycle conflicts, validation
   errors, and absence of advisory outputs.
 - **PostgreSQL integration tests:** run repositories and migrations against real
   isolated PostgreSQL; verify empty-database migration and transactional rollback
@@ -590,8 +631,9 @@ Proposed criteria, subject to approval:
   and freeform owner statements, subject to owner review.
 - **Over-modeling early:** Approve the smallest end-to-end entities and defer
   portfolio, market, member, and collaboration models.
-- **Single-household constraint bypass:** Enforce at most one active profile in the
-  database/transaction layer and test alternate-ID creation conflicts.
+- **Single-household constraint bypass:** Enforce at most one profile in total in
+  the database/transaction layer and test alternate-ID creation conflicts. Provide
+  no archive, deactivate, hard-delete, or replacement lifecycle in Sprint 002.
 
 ## 20. Dependencies
 
@@ -619,7 +661,8 @@ Proposed local-MVP definition, subject to final implementation approval:
   Confirmed journal → immutable history loop is complete.
 - Policy and journal lifecycle, immutability, correction, archive, and supersede
   tests pass.
-- Single-active-household constraint and second-create HTTP 409 tests pass.
+- Single-total-household constraint, second-create HTTP 409, and prohibited
+  household lifecycle-operation tests pass.
 - Target allocation total-equals-100% validation tests pass without generating a
   recommended allocation.
 - Real PostgreSQL migration, repository, and integration tests pass in CI.

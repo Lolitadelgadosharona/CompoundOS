@@ -21,9 +21,10 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 ## Planning
 
 - Sprint 002 selected direction: Household Investment Policy + Decision Journal.
-- Planning pull request #4 is Draft and under review.
-- Sprint 002 implementation is Not Started and requires explicit approval after
-  the planning pull request merges.
+- Planning pull request #4 completed independent planning review and is approved
+  for merge.
+- Sprint 002 implementation remains Not Started. Merging the planning pull request
+  does not authorize implementation; separate explicit approval is still required.
 
 ## Backlog
 
@@ -41,10 +42,11 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 
 ## Review
 
-- Planning PR #4 independent review result: REQUEST CHANGES — Documentation only.
-- Planning revisions cover lifecycle semantics, the single-household constraint,
-  localhost-only bindings, PostgreSQL integration testing, provisional disclaimer,
-  local retention boundary, and Definition of Done.
+- Planning PR #4 initial review requested documentation changes.
+- Required planning changes were addressed.
+- Final planning review conclusion: APPROVE.
+- Planning PR #4 approved for merge.
+- Sprint 002 implementation remains Not Started.
 
 ## Done
 
@@ -102,9 +104,9 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - 2026-07-13: Planning approval does not yet authorize implementation.
 - 2026-07-13: Standardized policy lifecycle as Draft → Published → Superseded.
 - 2026-07-13: Standardized journal lifecycle as Draft → Confirmed → Archived with
-  appended Correction revisions.
-- 2026-07-13: Required a database-enforced or transaction-safe single active
-  household constraint.
+  appended DecisionCorrection records outside the lifecycle state machine.
+- 2026-07-13: Required a database-enforced or transaction-safe constraint allowing
+  at most one total HouseholdProfile.
 - 2026-07-13: Required localhost-only host port bindings for the local MVP.
 - 2026-07-13: Required real PostgreSQL integration and transaction rollback tests.
 - 2026-07-13: Approved provisional local-MVP non-advisory copy.
@@ -113,3 +115,12 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   encryption remain deferred.
 - 2026-07-13: Planning PR #4 must merge before any separate Sprint 002
   implementation approval; Sprint 002 remains Not Started.
+- 2026-07-13: Corrected the policy publish contract to publish an
+  InvestmentPolicyDraft.
+- 2026-07-13: Confirmed DecisionCorrection is an append-only correction record,
+  not a journal lifecycle state.
+- 2026-07-13: Confirmed Sprint 002 permits at most one total HouseholdProfile and
+  defines no household archive or inactive lifecycle.
+- 2026-07-13: Planning PR #4 final independent review passed.
+- 2026-07-13: Planning PR #4 approved for merge.
+- 2026-07-13: Planning merge does not authorize Sprint 002 implementation.

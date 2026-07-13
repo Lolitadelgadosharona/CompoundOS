@@ -11,16 +11,19 @@ merges.
 ### Resolved on 2026-07-13
 
 - Selected Option A: Household Investment Policy + Decision Journal.
-- Approved one household owned by the project owner; no members, collaboration,
-  roles, permissions, multiple households, or multi-tenancy.
+- Approved at most one total household profile owned by the project owner; no
+  archive, deactivate, hard-delete, replacement, members, collaboration, roles,
+  permissions, multiple households, or multi-tenancy. A development-only full
+  database reset is the sole way to permit creation again.
 - Approved local-development-only operation with no authentication and no public
   deployment.
 - Approved the minimum household fields and fixed audit actor `local-owner`.
 - Approved user-entered policy categories, target asset-class percentages totaling
-  100%, Published version immutability, and Superseded history.
+  100%, publication of an existing Draft into an immutable Published version, and
+  Superseded history.
 - Approved the decision-journal fields, Published policy-version references,
-  appended corrections, archive behavior, and no physical deletion of confirmed
-  records.
+  append-only `DecisionCorrection` records outside the journal lifecycle state
+  machine, archive behavior, and no physical deletion of confirmed records.
 - Approved PostgreSQL as formal persistence direction; Redis has no product logic.
 - Confirmed no actual holdings, accounts, monetary data, market data, AI, Guardian,
   broker integration, recommendations, suitability conclusions, or trading.
@@ -109,9 +112,12 @@ merges.
   approved deployment context or multiple isolated households?
 - **Why answer is needed:** Multi-tenancy changes identifiers, isolation,
   authorization, testing, and deletion behavior.
-- **Recommended default:** Enforce at most one active HouseholdProfile in the
-  database/transaction layer; any second create returns HTTP 409 and cannot be
-  bypassed with a different supplied ID.
+- **Recommended default:** Enforce at most one total `HouseholdProfile` in the
+  database/transaction layer. The first create succeeds; every later create
+  returns HTTP 409 and cannot be bypassed with a different supplied ID. Sprint 002
+  defines no household archive, deactivate, hard-delete, or replacement lifecycle.
+  A development-only full database reset may clear the profile and permit creation
+  again; any future replacement behavior requires separate approval.
 - **Other options:** Multiple households without users, or full tenant isolation.
 - **Impact:** Multiple households likely requires authentication/authorization,
   which is currently excluded and needs separate architectural approval.
@@ -145,8 +151,12 @@ merges.
 - **Why answer is needed:** Auditability requires clear draft, confirmation, and
   revision semantics.
 - **Recommended default:** Explicit confirmation creates an immutable Published
-  version; changes require a new version, and the prior version may be marked
-  Superseded but cannot be physically deleted.
+  version from an existing Draft through illustrative contract
+  `POST /api/policies/{policy_id}/drafts/{draft_id}/publish`; the same transaction
+  creates an AuditEvent and may mark the prior Published version Superseded.
+  Published or nonexistent objects cannot be used as Draft input. Changes require
+  a new Draft, and the prior version cannot be physically deleted. The exact
+  response contract remains an implementation architecture decision.
 - **Other options:** Editable confirmed records, approval by another actor, or no
   confirmation lifecycle.
 - **Impact:** Editable history weakens auditability; multi-actor approval requires
@@ -200,8 +210,14 @@ merges.
 - **Question:** Define revision, correction, archive, and deletion behavior.
 - **Why answer is needed:** Audit integrity may conflict with privacy and correction
   rights.
-- **Recommended default:** Confirmed records cannot be silently edited or physically
-  deleted; use appended correction records or new versions and allow archive.
+- **Recommended default:** Journal lifecycle states are only Draft, Confirmed, and
+  Archived. A `DecisionJournalRevision` represents Draft content or an immutable
+  Confirmed revision, which may be marked Archived. `DecisionCorrection` is a
+  separate append-only record, not a lifecycle state; it references a Confirmed
+  revision, contains `corrected_entry_id`, `correction_reason`, `created_at`, and
+  `actor`, emits an AuditEvent, and cannot be modified in place or physically
+  deleted. It never overwrites original content. Any `revision_type` design is
+  deferred to implementation schema review.
 - **Other options:** Fully editable entries, hard delete, or append-only with no
   correction.
 - **Impact:** Each choice changes storage, audit, UX, privacy, and compliance design.
@@ -384,10 +400,11 @@ merges.
 - **Why answer is needed:** A sprint cannot start safely without an agreed finish
   line and release boundary.
 - **Recommended default:** Require the approved journey, lifecycle/immutability,
-  single-household, allocation-100%, real-PostgreSQL, transaction rollback,
-  localhost binding, disclaimer-display, prohibited-scope, standard CI, and
-  independent-review gates. Run full Docker runtime validation when available;
-  otherwise disclose accurately that it was not completed.
+  single-total-household, policy-Draft publication, append-only correction,
+  allocation-100%, real-PostgreSQL, transaction rollback, localhost binding,
+  disclaimer-display, prohibited-scope, standard CI, and independent-review gates.
+  Run full Docker runtime validation when available; otherwise disclose accurately
+  that it was not completed.
 - **Other options:** Require Docker runtime, require authentication, require legal
   review, or permit a local-only prototype with explicit limitations.
 - **Impact:** Stronger gates increase confidence and schedule; weaker gates restrict
