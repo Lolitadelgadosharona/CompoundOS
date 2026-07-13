@@ -2,10 +2,151 @@
 
 ## Status
 
-**Proposed — Not Approved**
+**Selected for Implementation Planning — Implementation Not Started**
 
-This document supports planning and owner review only. It does not authorize
-implementation, product behavior, investment rules, or Sprint 002 execution.
+This document records approved product-planning decisions. It does not authorize
+Sprint 002 implementation. Implementation still requires explicit final approval
+after the planning pull request is reviewed and merged.
+
+## Product Owner Decision
+
+- **Selected proposal:** A — Household Investment Policy + Decision Journal
+- **Product owner decision date:** 2026-07-13
+- **Planning status:** Selected for implementation planning
+- **Implementation status:** Not Started
+- **Approval gate:** Implementation requires explicit final approval after this
+  planning pull request merges
+
+## Approved MVP Loop
+
+Single household profile → investment policy draft → target asset allocation
+percentages → explicitly confirm and publish a policy version → create a decision
+journal entry → reference the policy version in effect when the decision was
+recorded → review history that cannot be silently rewritten.
+
+## Approved Product Boundaries
+
+### Household Scope
+
+- Support exactly one household owned by the project owner.
+- Do not implement household members, invitations, roles, permissions,
+  collaboration, multiple households, or multi-tenancy.
+- Use the fixed audit actor identifier `local-owner`.
+- `local-owner` identifies local single-user development mode; it is not an
+  authenticated identity.
+
+### Minimum Household Profile
+
+- `household_name`
+- `base_currency`
+- `investment_horizon`
+- `liquidity_needs`
+- `risk_statement`
+- `notes`
+
+`base_currency` expresses policy context only. Sprint 002 performs no currency
+conversion or monetary calculation and stores no household-member personal
+identity information.
+
+### Investment Policy Categories
+
+- `objectives`
+- `time_horizon`
+- `liquidity`
+- `target_asset_allocation`
+- `diversification`
+- `contribution_policy`
+- `rebalancing_policy`
+- `prohibited_assets`
+- `leverage_policy`
+- `decision_process`
+- `notes`
+
+All policy content is entered by the user. CompoundOS does not generate investment
+rules, recommended values, or policy conclusions.
+
+### Target Asset Allocation
+
+- Store only user-entered asset-class names and target percentages.
+- Target percentages must total 100%.
+- Do not recommend percentages or provide a preset “best” allocation.
+- Do not store or compare actual holdings.
+- Do not calculate drift or generate rebalancing suggestions.
+
+### Policy Lifecycle
+
+- Draft policies are editable.
+- A Published version cannot be modified in place.
+- Changing a Published policy requires a new version.
+- Historical versions are retained and cannot be silently overwritten.
+- A Published version cannot be physically deleted.
+- A version may be marked Superseded while remaining available in history.
+
+### Decision Journal Minimum Fields
+
+- `title`
+- `decision_date`
+- `decision_type`
+- `summary`
+- `supporting_reasons`
+- `opposing_reasons`
+- `assumptions`
+- `uncertainties`
+- `policy_version_reference`
+- `final_decision`
+- `review_date`
+- `status`
+- `created_at`
+- `updated_at`
+
+All journal content is manually entered. A decision record references the selected
+Published policy version that was effective when the record was created. Confirmed
+records cannot be silently modified; corrections use an appended correction record
+or a new version. Confirmed records may be archived but not physically deleted.
+
+The system does not generate advice, scores, approvals, suitability conclusions,
+AI output, Guardian output, broker actions, trades, or transactions.
+
+### Risk, Guardian, and AI Boundaries
+
+- `risk_statement` is user-authored free text only.
+- Do not define Guardian thresholds, run risk detection, or trigger notifications.
+- Do not implement AI generation, summaries, scoring, discussions, agents, or AI
+  Investment Committee behavior.
+- Preserve policy versions and journal records only as auditable context for
+  separately approved future work.
+
+### Asset and Monetary Data Boundary
+
+- Do not store actual holdings, securities quantities, accounts, balances,
+  investment amounts, cost basis, current prices, returns, or transactions.
+- Target allocation percentages are policy statements, not portfolio data.
+- Do not connect market data or brokers.
+
+### Persistence Direction
+
+- Plan to use PostgreSQL during Sprint 002 implementation.
+- Do not use in-memory storage as formal persistence.
+- Redis carries no Sprint 002 product logic.
+- This planning task creates no schema or migration; persistence design still
+  requires implementation authorization and architecture review.
+
+### Local-Only Security Boundary
+
+- Sprint 002 has no authentication.
+- Operation is limited to local development.
+- Public internet deployment is prohibited until authentication and security
+  review are separately approved.
+- Future README and product UI must display this limitation clearly.
+- Do not claim production-grade privacy or compliance readiness.
+
+### Docker Boundary
+
+- Full Docker runtime verification remains a non-blocking Backlog item.
+- If the Sprint 002 execution environment provides Docker, Definition of Done
+  requires runtime verification.
+- If Docker remains unavailable, completion reporting must disclose that fact
+  accurately and must not fabricate validation.
 
 ## 1. Problem Statement
 
@@ -108,16 +249,17 @@ questions, and approves detailed scope.
 
 ## 4. Recommended Option and Rationale
 
-**Recommendation: Option A — Household Investment Policy + Decision Journal.**
+**Selected direction: Option A — Household Investment Policy + Decision Journal.**
 
-**Approval state: Not approved.**
+**Implementation approval state: Not Started; not yet authorized.**
 
-Option A provides the strongest foundation for CompoundOS's discipline and
+The product owner selected Option A because it provides the strongest foundation
+for CompoundOS's discipline and
 explainability principles while avoiding market data, portfolio calculations, and
 rule-engine semantics. It creates policy provenance needed by Options B and C and
-by future Guardian or committee work. The recommendation is conditional on owner
-approval of the data boundaries, policy-authoring model, audit behavior, and
-non-advisory language listed in the open-questions document.
+by future Guardian or committee work. The approved product boundaries are recorded
+above; implementation still depends on final approval after this planning pull
+request merges.
 
 ## 5. Proposed User Journey
 
@@ -138,8 +280,7 @@ non-advisory language listed in the open-questions document.
 
 ## 6. Proposed Scope
 
-- One household workspace for a planning/demo context; multi-household behavior
-  requires an explicit owner decision.
+- Exactly one household workspace for the project owner in local development.
 - Structured capture of owner-provided household planning context.
 - Draft and confirmed policy records with explicit version identifiers.
 - Decision-journal creation and read views.
@@ -159,10 +300,12 @@ non-advisory language listed in the open-questions document.
 - AI agents, AI Investment Committee behavior, AI-generated analysis, or voting.
 - Guardian monitoring, alerts, thresholds, or escalation.
 - Rule engines, automated eligibility, scores, rankings, or pass/fail conclusions.
-- Authentication, authorization, invitations, or multi-user permissions unless a
-  separate architecture decision explicitly approves them.
+- Authentication, authorization, invitations, household members, collaboration,
+  multiple households, and multi-tenancy.
 - Prescriptive investment policy templates or invented investment rules.
 - Database schema or migrations during planning.
+- Actual holdings, securities quantities, accounts, balances, investment amounts,
+  costs, prices, returns, or transactions.
 - Notifications, document uploads, OCR, imports, or exports.
 
 ## 8. Proposed Frontend Scope
@@ -196,10 +339,10 @@ implementation decisions requiring architecture review.
 
 These are domain concepts, not database schemas:
 
-- **HouseholdProfile:** Household display identity and approved planning context.
+- **HouseholdProfile:** The approved minimum fields for the one local household.
 - **HouseholdGoal:** User-authored objective, horizon, priority label, and notes.
-- **LiquidityNeed:** User-authored timing, description, and uncertainty notes;
-  amount semantics require approval.
+- **LiquidityNeed:** User-authored description and timing context without monetary
+  calculations.
 - **RiskBoundaryStatement:** Freeform owner statement, not a computed tolerance or
   system threshold.
 - **InvestmentPolicy:** Stable identity for a household policy.
@@ -349,14 +492,15 @@ Proposed criteria, subject to approval:
 
 ## 20. Dependencies
 
-- Project-owner selection and approval of a candidate option.
-- Answers to blocking questions in `SPRINT_002_OPEN_QUESTIONS.md`.
+- Final implementation approval after the planning pull request merges.
+- Resolution of any architecture or compliance question promoted to a blocker
+  before implementation approval.
 - Compliance review of language, retention, and intended deployment boundary.
 - Architecture decisions for persistence, audit behavior, identifiers, and
   authentication/deployment boundary.
 - Approved UX copy for non-advisory notices and confirmations.
-- Docker runtime verification remains a separate Sprint 001 backlog item and is
-  not an implementation dependency unless the owner makes it a gate.
+- Docker runtime verification remains a non-blocking Sprint 001 backlog item; run
+  it when Docker is available, otherwise disclose that it was not completed.
 
 No new software dependency is approved by this planning document.
 
@@ -393,21 +537,14 @@ This sequence is an estimate only and does not authorize work:
 
 ## 23. Decisions Requiring Project-Owner Approval
 
-- Final candidate option and sprint objective.
-- Intended user and whether only one household is supported.
-- Exact household fields and data-minimization boundary.
-- Policy categories, drafting/confirmation semantics, and allowed terminology.
-- Journal lifecycle, revision, deletion, and correction semantics.
-- Whether monetary amounts, risk labels, or instrument identifiers are in scope.
+- Detailed implementation architecture and final acceptance-test wording.
 - Non-advisory disclaimer and consent language.
-- Intended deployment boundary without authentication.
-- Persistence technology and audit-history architecture.
+- PostgreSQL schema, migration, transaction, and repository design.
 - Retention, export, deletion, backup, and encryption expectations.
-- Whether Docker runtime verification is a gate for Sprint 002 implementation.
-- Acceptance criteria and Definition of Done.
+- Any decision to expand beyond local-only, no-auth operation.
 
 ## 24. Planning Outcome
 
-Option A is recommended for owner consideration, but no option is approved. Sprint
-002 remains Not Started until the project owner explicitly approves a scope and
-authorizes implementation.
+Option A has been selected for implementation planning with the approved boundaries
+in this document. Sprint 002 remains Not Started until this planning pull request
+merges and the project owner separately authorizes implementation.

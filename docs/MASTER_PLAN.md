@@ -20,8 +20,10 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 
 ## Planning
 
-- Sprint 002 proposal is being prepared.
-- Sprint 002 implementation is not approved.
+- Sprint 002 selected direction: Household Investment Policy + Decision Journal.
+- Planning pull request is pending.
+- Sprint 002 implementation is Not Started and requires explicit approval after
+  the planning pull request merges.
 
 ## Backlog
 
@@ -87,3 +89,11 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - 2026-07-12: Approve pull request #3 for merge; Sprint 002 remains Not Started.
 - 2026-07-13: Sprint 002 planning authorized.
 - 2026-07-13: Planning does not authorize Sprint 002 implementation.
+- 2026-07-13: Selected Sprint 002 candidate A, Household Investment Policy +
+  Decision Journal.
+- 2026-07-13: Approved the single-household, local-only, no-authentication boundary.
+- 2026-07-13: Approved user-entered target allocation percentages while prohibiting
+  actual holdings, accounts, and monetary data.
+- 2026-07-13: Confirmed no AI, Guardian, broker integration, recommendations, or
+  trading in Sprint 002.
+- 2026-07-13: Planning approval does not yet authorize implementation.

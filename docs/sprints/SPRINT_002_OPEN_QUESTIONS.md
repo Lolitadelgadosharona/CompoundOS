@@ -2,12 +2,56 @@
 
 ## Status
 
-Planning questions only. Sprint 002 is **Not Started** and implementation is not
-approved. Recommended defaults below are proposals, not product decisions.
+Planning decisions and remaining questions only. Sprint 002 implementation is
+**Not Started** and still requires explicit approval after the planning pull request
+merges.
+
+## Resolution Summary
+
+### Resolved on 2026-07-13
+
+- Selected Option A: Household Investment Policy + Decision Journal.
+- Approved one household owned by the project owner; no members, collaboration,
+  roles, permissions, multiple households, or multi-tenancy.
+- Approved local-development-only operation with no authentication and no public
+  deployment.
+- Approved the minimum household fields and fixed audit actor `local-owner`.
+- Approved user-entered policy categories, target asset-class percentages totaling
+  100%, Published version immutability, and Superseded history.
+- Approved the decision-journal fields, Published policy-version references,
+  appended corrections, archive behavior, and no physical deletion of confirmed
+  records.
+- Approved PostgreSQL as formal persistence direction; Redis has no product logic.
+- Confirmed no actual holdings, accounts, monetary data, market data, AI, Guardian,
+  broker integration, recommendations, suitability conclusions, or trading.
+- Confirmed Docker runtime validation remains non-blocking with accurate disclosure
+  when Docker is unavailable.
+
+### Open but Non-Blocking for the Local MVP
+
+- Final non-advisory disclaimer and consent copy.
+- Long-term retention, export, broader deletion, backup, and encryption policy.
+- Detailed PostgreSQL schema, migrations, transactions, and repository boundaries.
+- Final visual design and exact acceptance-test wording.
+- Jurisdiction-specific requirements for any future non-local deployment.
+
+### Deferred to Future Sprints
+
+- Household member collaboration, invitations, roles, permissions, multi-household,
+  and multi-tenant support.
+- Authentication, authorization, private remote environments, and public deployment.
+- Actual holdings, securities quantities, accounts, balances, monetary amounts,
+  costs, prices, returns, market data, and transactions.
+- Guardian rules, thresholds, monitoring, alerts, and notifications.
+- AI agents, AI generation, summarization, scoring, and AI Investment Committee
+  behavior.
+- Broker integrations, recommendations, eligibility engines, and trading.
 
 ## Product
 
 ### P1. Which candidate should define Sprint 002?
+
+- **Status:** Resolved by product-owner decision on 2026-07-13.
 
 - **Question:** Choose A: Household Investment Policy + Decision Journal, B:
   Portfolio Snapshot + Manual Holdings, C: Investment Idea Intake + Rule-Based
@@ -19,9 +63,11 @@ approved. Recommended defaults below are proposals, not product decisions.
 - **Impact:** A establishes policy/audit context; B prioritizes valuation and
   portfolio modeling; C requires approved rule semantics and carries greater
   advice risk.
-- **Blocks implementation:** Yes.
+- **Blocks implementation:** No — resolved by product-owner decision.
 
 ### P2. Who is the first intended user?
+
+- **Status:** Resolved by product-owner decision on 2026-07-13.
 
 - **Question:** Is the first user a single household owner recording their own
   information, a family-office professional, or another role?
@@ -31,24 +77,29 @@ approved. Recommended defaults below are proposals, not product decisions.
 - **Other options:** Family-office operator, adviser, multiple household members.
 - **Impact:** Professional or multi-member use adds permissions, fiduciary,
   collaboration, and recordkeeping concerns that may make this sprint infeasible.
-- **Blocks implementation:** Yes.
+- **Blocks implementation:** No — resolved by product-owner decision.
 
 ## Household Profile
 
 ### H1. What is the minimum household profile?
 
+- **Status:** Resolved by product-owner decision on 2026-07-13.
+
 - **Question:** Which fields are necessary beyond a display name?
 - **Why answer is needed:** Household data is sensitive, and unnecessary fields
   increase privacy and compliance exposure.
-- **Recommended default:** Display name plus optional freeform planning context;
-  exclude legal names, addresses, tax identifiers, birth dates, and contact data.
+- **Recommended default:** Use the approved fields `household_name`, `base_currency`,
+  `investment_horizon`, `liquidity_needs`, `risk_statement`, and `notes`; exclude
+  member identity information and monetary calculations.
 - **Other options:** Structured members, demographics, jurisdictions, dependents,
   or legal entities.
 - **Impact:** More structured personal data increases security, consent, and
   authentication requirements.
-- **Blocks implementation:** Yes.
+- **Blocks implementation:** No — resolved by product-owner decision.
 
 ### H2. Is Sprint 002 single-household only?
+
+- **Status:** Resolved by product-owner decision on 2026-07-13.
 
 - **Question:** Should the system support exactly one household record in the
   approved deployment context or multiple isolated households?
@@ -58,84 +109,103 @@ approved. Recommended defaults below are proposals, not product decisions.
 - **Other options:** Multiple households without users, or full tenant isolation.
 - **Impact:** Multiple households likely requires authentication/authorization,
   which is currently excluded and needs separate architectural approval.
-- **Blocks implementation:** Yes.
+- **Blocks implementation:** No — resolved by product-owner decision.
 
 ## Investment Policy
 
 ### IP1. Which policy categories may be captured?
 
+- **Status:** Resolved by product-owner decision on 2026-07-13.
+
 - **Question:** Approve the neutral categories allowed in the policy editor.
 - **Why answer is needed:** Categories can become implicit investment rules if the
   system invents or prescribes them.
-- **Recommended default:** Goals, time horizons, liquidity needs, risk boundary
-  statements, and freeform owner notes only.
+- **Recommended default:** Use the approved user-authored categories: `objectives`,
+  `time_horizon`, `liquidity`, `target_asset_allocation`, `diversification`,
+  `contribution_policy`, `rebalancing_policy`, `prohibited_assets`,
+  `leverage_policy`, `decision_process`, and `notes`.
 - **Other options:** Asset allocation, prohibited assets, concentration limits,
   tax constraints, rebalancing, or return targets.
 - **Impact:** Numeric limits or asset rules require formal rule governance and may
   enable evaluation behavior outside the recommended sprint.
-- **Blocks implementation:** Yes.
+- **Blocks implementation:** No — resolved by product-owner decision.
 
-### IP2. What makes a policy version “confirmed”?
+### IP2. What makes a policy version “Published”?
 
-- **Question:** Is explicit user confirmation sufficient, and can a confirmed
-  version later be edited?
+- **Status:** Resolved by product-owner decision on 2026-07-13.
+
+- **Question:** Is explicit user confirmation sufficient to create a Published
+  version, and can that version later be edited?
 - **Why answer is needed:** Auditability requires clear draft, confirmation, and
   revision semantics.
-- **Recommended default:** Explicit confirmation creates an immutable version;
-  changes require a new draft/version.
+- **Recommended default:** Explicit confirmation creates an immutable Published
+  version; changes require a new version, and the prior version may be marked
+  Superseded but cannot be physically deleted.
 - **Other options:** Editable confirmed records, approval by another actor, or no
   confirmation lifecycle.
 - **Impact:** Editable history weakens auditability; multi-actor approval requires
   identity and permissions.
-- **Blocks implementation:** Yes.
+- **Blocks implementation:** No — resolved by product-owner decision.
 
 ## Portfolio Data
 
 ### PD1. Is any portfolio or holdings data allowed in Sprint 002?
 
+- **Status:** Resolved by product-owner decision on 2026-07-13.
+
 - **Question:** May a journal mention an asset or amount, or must all portfolio
   structures be deferred?
 - **Why answer is needed:** Structured instruments, values, and positions can pull
   Option A into portfolio, pricing, and suitability scope.
-- **Recommended default:** No portfolio/holding entities; allow only a user-entered
-  decision title and narrative, with no valuation or market-data behavior.
+- **Recommended default:** Permit only user-entered target asset-class percentages
+  totaling 100%; exclude actual holdings, accounts, quantities, balances, amounts,
+  prices, costs, returns, valuation, and market data.
 - **Other options:** Optional instrument label, user-entered amount, or full manual
   holdings.
 - **Impact:** Structured identifiers or amounts add validation, privacy, precision,
   and potentially advice/compliance requirements.
-- **Blocks implementation:** Yes.
+- **Blocks implementation:** No — resolved by product-owner decision.
 
 ## Decision Journal
 
 ### DJ1. Which journal fields are required?
 
+- **Status:** Resolved by product-owner decision on 2026-07-13.
+
 - **Question:** Approve the minimum content necessary for a meaningful decision
   record.
 - **Why answer is needed:** Too few fields undermine discipline; prescriptive fields
   could imply a system-endorsed investment method.
-- **Recommended default:** Title, decision/status label, rationale,
-  counterarguments, assumptions, uncertainties, and policy references.
+- **Recommended default:** Use the approved minimum fields: `title`,
+  `decision_date`, `decision_type`, `summary`, `supporting_reasons`,
+  `opposing_reasons`, `assumptions`, `uncertainties`,
+  `policy_version_reference`, `final_decision`, `review_date`, `status`,
+  `created_at`, and `updated_at`.
 - **Other options:** Evidence links, expected outcome, price, amount, review date,
   confidence score, or attachments.
 - **Impact:** Scores and expected outcomes risk recommendation semantics; attachments
   and links expand privacy and content-security scope.
-- **Blocks implementation:** Yes.
+- **Blocks implementation:** No — resolved by product-owner decision.
 
 ### DJ2. Can journal history be edited or deleted?
+
+- **Status:** Resolved by product-owner decision on 2026-07-13.
 
 - **Question:** Define revision, correction, archive, and deletion behavior.
 - **Why answer is needed:** Audit integrity may conflict with privacy and correction
   rights.
-- **Recommended default:** Preserve immutable revisions; allow archive and explicit
-  correction events; defer hard deletion pending compliance review.
+- **Recommended default:** Confirmed records cannot be silently edited or physically
+  deleted; use appended correction records or new versions and allow archive.
 - **Other options:** Fully editable entries, hard delete, or append-only with no
   correction.
 - **Impact:** Each choice changes storage, audit, UX, privacy, and compliance design.
-- **Blocks implementation:** Yes.
+- **Blocks implementation:** No — resolved by product-owner decision.
 
 ## Risk and Guardian Boundaries
 
 ### RG1. How must policy “risk boundaries” be represented?
+
+- **Status:** Resolved by product-owner decision on 2026-07-13.
 
 - **Question:** Are they freeform user statements only, or may they include numeric
   thresholds?
@@ -146,11 +216,13 @@ approved. Recommended defaults below are proposals, not product decisions.
 - **Other options:** Structured numeric limits, categories, or severity levels.
 - **Impact:** Structured limits require approved Guardian/rule architecture and are
   outside the recommended Sprint 002 boundary.
-- **Blocks implementation:** Yes.
+- **Blocks implementation:** No — resolved by product-owner decision.
 
 ## AI Investment Committee Boundaries
 
 ### AI1. May AI generate, summarize, or critique policy or journal content?
+
+- **Status:** Resolved by product-owner decision on 2026-07-13.
 
 - **Question:** Confirm whether any AI behavior is allowed.
 - **Why answer is needed:** AI-generated language could be mistaken for advice and
@@ -161,11 +233,13 @@ approved. Recommended defaults below are proposals, not product decisions.
   committee review.
 - **Impact:** Any AI option requires separate safety, explainability, model,
   evaluation, privacy, and architecture approval.
-- **Blocks implementation:** Yes.
+- **Blocks implementation:** No — resolved by product-owner decision.
 
 ## Compliance
 
 ### C1. What non-advisory language is required?
+
+- **Status:** Open — non-blocking for the approved local MVP boundary.
 
 - **Question:** Approve the notices, consent, and terminology that distinguish
   user recordkeeping from investment advice or suitability review.
@@ -177,9 +251,11 @@ approved. Recommended defaults below are proposals, not product decisions.
   notice.
 - **Impact:** Insufficient language is a release blocker; repeated attestations may
   increase UX friction.
-- **Blocks implementation:** Yes, pending owner/compliance approval.
+- **Blocks implementation:** No — exact copy remains a non-blocking review item.
 
 ### C2. Which jurisdictions and retention duties apply?
+
+- **Status:** Open — non-blocking for the approved local MVP boundary.
 
 - **Question:** Identify intended initial jurisdiction and whether advisory,
   fiduciary, household-record, or financial-record retention rules apply.
@@ -191,11 +267,13 @@ approved. Recommended defaults below are proposals, not product decisions.
   consumer launch.
 - **Impact:** Production use may require authentication, consent, retention,
   disclosures, exports, and formal compliance controls beyond Sprint 002.
-- **Blocks implementation:** Yes for production; no for documentation-only planning.
+- **Blocks implementation:** No for the local MVP; future deployment remains deferred.
 
 ## Privacy and Security
 
 ### PS1. What deployment boundary is allowed without authentication?
+
+- **Status:** Resolved by product-owner decision on 2026-07-13.
 
 - **Question:** May Sprint 002 be implemented for local/demo use only, or must
   remote/multi-user access be supported?
@@ -207,9 +285,11 @@ approved. Recommended defaults below are proposals, not product decisions.
   data only, or defer implementation.
 - **Impact:** Remote use makes authentication/authorization and security review
   prerequisites, expanding scope materially.
-- **Blocks implementation:** Yes.
+- **Blocks implementation:** No — resolved by product-owner decision.
 
 ### PS2. What are the retention, export, and deletion expectations?
+
+- **Status:** Open — non-blocking for the approved local MVP boundary.
 
 - **Question:** Define how long records live and whether users need export or
   deletion in the first approved workflow.
@@ -221,39 +301,46 @@ approved. Recommended defaults below are proposals, not product decisions.
   policy, or ephemeral demo data.
 - **Impact:** Export/delete adds contracts and security tests; indefinite retention
   increases privacy exposure; ephemeral data reduces demonstration realism.
-- **Blocks implementation:** Yes.
+- **Blocks implementation:** No — open but non-blocking for the local MVP.
 
 ## UX
 
 ### UX1. What is the smallest acceptable demonstration?
 
+- **Status:** Resolved by product-owner decision on 2026-07-13.
+
 - **Question:** Approve the exact screens and completion path.
 - **Why answer is needed:** Without a fixed journey, policy editing and journal UI
   can expand into collaboration, analytics, or design-system work.
-- **Recommended default:** Profile summary, policy draft/confirm, journal create,
-  journal detail with policy link, and audit timeline.
+- **Recommended default:** Demonstrate the approved loop: single household profile,
+  policy draft, target allocation percentages, Published policy version, decision
+  journal, policy-version reference, and non-silent audit history.
 - **Other options:** Wizard, dashboard, templates, search, list filters, responsive
   polish, or collaboration.
 - **Impact:** Additional surfaces increase implementation and test scope without
   improving the core discipline loop.
-- **Blocks implementation:** Yes.
+- **Blocks implementation:** No — resolved by product-owner decision.
 
 ## Technical Architecture
 
 ### TA1. What persistence approach is approved?
 
+- **Status:** Resolved by product-owner decision on 2026-07-13.
+
 - **Question:** Should an approved implementation use PostgreSQL immediately, an
   in-memory demo, or another repository abstraction?
 - **Why answer is needed:** Audit/version semantics depend on transactions,
   constraints, and persistence behavior.
-- **Recommended default:** PostgreSQL behind explicit repository boundaries, but
-  only after an ADR and schema review are approved.
+- **Recommended default:** PostgreSQL behind explicit repository boundaries;
+  schema, migrations, and transactions require implementation approval and review.
 - **Other options:** In-memory prototype, file-based persistence, or defer storage.
 - **Impact:** In-memory is faster but cannot demonstrate durable audit history;
   PostgreSQL requires migrations, schema, transactions, and Docker/runtime work.
-- **Blocks implementation:** Yes.
+- **Blocks implementation:** No — resolved by product-owner decision.
 
 ### TA2. How are actors represented without authentication?
+
+- **Status:** Resolved by product-owner decision on 2026-07-13.
 
 - **Question:** What actor identifier appears in audit events before identity is
   implemented?
@@ -265,11 +352,13 @@ approved. Recommended defaults below are proposals, not product decisions.
   first.
 - **Impact:** User-entered labels are not trustworthy; anonymous weakens audit;
   authentication is a major separately approved scope.
-- **Blocks implementation:** Yes.
+- **Blocks implementation:** No — resolved by product-owner decision.
 
 ## Definition of Done
 
 ### DOD1. Which gates are mandatory before Sprint 002 can be marked Done?
+
+- **Status:** Resolved by product-owner decision on 2026-07-13.
 
 - **Question:** Approve the acceptance criteria, documentation, independent review,
   security/compliance gates, and whether Docker runtime verification is required.
@@ -277,17 +366,19 @@ approved. Recommended defaults below are proposals, not product decisions.
   line and release boundary.
 - **Recommended default:** All approved user journey and audit tests pass; existing
   CI remains green; privacy/compliance decisions are documented; independent
-  review passes; Docker runtime is a gate only if the owner explicitly promotes
-  the existing backlog item.
+  review passes; run Docker runtime validation when Docker is available, otherwise
+  disclose accurately that it was not completed.
 - **Other options:** Require Docker runtime, require authentication, require legal
   review, or permit a local-only prototype with explicit limitations.
 - **Impact:** Stronger gates increase confidence and schedule; weaker gates restrict
   deployment and must be clearly disclosed.
-- **Blocks implementation:** Yes.
+- **Blocks implementation:** No — resolved by product-owner decision.
 
-## Blocking-Question Summary
+## Decision and Follow-Up Summary
 
-The following must be answered before implementation authorization:
+The product-scope questions below are resolved or explicitly non-blocking. Sprint
+002 remains Not Started because implementation still requires a separate final
+approval after this planning pull request merges:
 
 1. P1 — candidate selection.
 2. P2 — intended user.
