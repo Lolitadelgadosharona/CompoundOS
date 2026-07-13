@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] - Sprint 002 Slice 1 In Progress
+## [Unreleased] - Sprint 002 Slice 1 Complete
 
 ### Added
 
@@ -29,10 +29,25 @@
 - Real PostgreSQL and Compose checks run in GitHub CI
 - Local test runs may skip PostgreSQL-marked tests when `TEST_DATABASE_URL` is not
   configured; the explicit CI-required mode fails instead of skipping
-- Independent review initially concluded REQUEST CHANGES for three blocking
-  findings; the scoped fixes remain in Slice 1 Review pending re-review
+- Independent review initially concluded REQUEST CHANGES; the PostgreSQL CI gate,
+  database constraints, and audit refresh UX findings were resolved
+- Final independent review conclusion: APPROVE WITH NON-BLOCKING FOLLOW-UP
 - Docker CLI is unavailable in the local implementation environment, so full
-  local application runtime verification remains pending
+  Docker runtime and browser-path verification remains pending
+
+### Non-blocking Follow-ups
+
+- Complete full Docker runtime and browser-path validation
+- Align `NEXT_PUBLIC_API_URL` with Docker's build-time public environment behavior
+- Split Python runtime and development dependencies before production hardening
+- Design AuditEvent pagination before higher-volume event sources are introduced
+
+### Status
+
+- Sprint 002 Slice 1 is complete and approved for merge.
+- This completes one implementation slice, not Sprint 002 as a whole.
+- Sprint 002 remains In Progress; Slice 2 is not authorized and Not Started.
+- This local-only foundation is not a production-readiness claim or product release.
 
 ## [Unreleased] - Sprint 001 Complete
 

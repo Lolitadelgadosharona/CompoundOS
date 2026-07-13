@@ -17,9 +17,9 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Scope: final foundation verification, frontend health test, and Docker-based
   local development configuration
 - Sprint 002: In Progress
-- Current approved work: Implementation Slice 1 — Household and Persistence
-  Foundation
-- Slice 2: Not approved
+- Completed work: Implementation Slice 1 — Household and Persistence Foundation
+- Current implementation authorization: none
+- Slice 2: Not authorized / Not Started
 
 ## Planning
 
@@ -45,8 +45,7 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 
 ## In Progress
 
-- Sprint 002 Slice 1: HouseholdProfile, PostgreSQL persistence, AuditEvent, and
-  the local-only household UI
+- Sprint 002 remains In Progress; no further implementation slice is authorized.
 
 ## Review
 
@@ -54,16 +53,16 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Required planning changes were addressed.
 - Final planning review conclusion: APPROVE.
 - Planning PR #4 approved for merge.
-- Sprint 002 Slice 1 requires independent review before it can be accepted.
-- Sprint 002 Slice 1 independent review conclusion: REQUEST CHANGES.
-- Review finding M-1 requires CI to fail rather than skip when real PostgreSQL
-  tests are explicitly required but `TEST_DATABASE_URL` is unavailable.
-- Review finding M-2 requires the approved technical field limits to be enforced
-  by named PostgreSQL constraints as well as Pydantic validation.
-- Review finding M-3 requires mutation success and AuditEvent refresh failure to
-  remain visibly distinct, with a GET-only audit retry.
-- The three blocking review findings are addressed on the Slice 1 branch and
-  remain in Review pending validation and independent re-review.
+- Sprint 002 Slice 1 initial review conclusion: REQUEST CHANGES.
+- Review finding M-1 was resolved with an explicit real PostgreSQL CI gate that
+  cannot silently skip in required mode.
+- Review finding M-2 was resolved with matching named PostgreSQL and Pydantic
+  safety constraints.
+- Review finding M-3 was resolved by separating mutation success from audit
+  refresh failure and providing a GET-only retry.
+- Sprint 002 Slice 1 final independent review conclusion: APPROVE WITH
+  NON-BLOCKING FOLLOW-UP.
+- Pull request #5 approved for merge.
 - Sprint 002 remains In Progress; Slice 2 is not authorized.
 
 ## Done
@@ -88,6 +87,13 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   consistency validation
 - Pull request #3 squash-merged into `main` as
   `e117a4d936872342dee2baa7012c76816a708d81`
+- Sprint 002 Slice 1: Household and Persistence Foundation
+- HouseholdProfile vertical create, read, update, and audit workflow
+- PostgreSQL persistence managed through explicit Alembic migration
+- Database-enforced singleton HouseholdProfile constraint
+- Atomic HouseholdProfile and AuditEvent writes
+- Local-only Household UI with independent audit refresh recovery
+- Real PostgreSQL CI gate with required-mode skip prevention
 
 ## Decision Log
 
@@ -155,3 +161,12 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - 2026-07-13: Treat a successful household mutation and a failed audit refresh as
   separate outcomes, and retry only the audit GET.
 - 2026-07-13: Slice 1 remains in Review and Slice 2 remains unauthorized.
+- 2026-07-13: Sprint 002 Slice 1 final independent review passed with the
+  conclusion APPROVE WITH NON-BLOCKING FOLLOW-UP.
+- 2026-07-13: Review finding M-1 is resolved by the required real PostgreSQL CI gate.
+- 2026-07-13: Review finding M-2 is resolved by named database safety constraints.
+- 2026-07-13: Review finding M-3 is resolved by independent audit refresh UX and
+  GET-only retry behavior.
+- 2026-07-13: Pull request #5 is approved for merge.
+- 2026-07-13: Sprint 002 remains In Progress; Slice 2 remains unauthorized and
+  Not Started.
