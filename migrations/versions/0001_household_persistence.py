@@ -22,8 +22,8 @@ def upgrade() -> None:
         "household_profiles",
         sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("singleton_key", sa.Boolean(), server_default=sa.text("true"), nullable=False),
-        sa.Column("household_name", sa.String(length=200), nullable=False),
-        sa.Column("base_currency", sa.String(length=3), nullable=False),
+        sa.Column("household_name", sa.Text(), nullable=False),
+        sa.Column("base_currency", sa.Text(), nullable=False),
         sa.Column("investment_horizon", sa.Text(), nullable=False),
         sa.Column("liquidity_needs", sa.Text(), nullable=False),
         sa.Column("risk_statement", sa.Text(), nullable=False),
@@ -35,6 +35,30 @@ def upgrade() -> None:
             "updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
         ),
         sa.CheckConstraint("singleton_key", name="ck_household_profiles_singleton_key"),
+        sa.CheckConstraint(
+            "char_length(household_name) BETWEEN 1 AND 200",
+            name="ck_household_profiles_name_length",
+        ),
+        sa.CheckConstraint(
+            "base_currency ~ '^[A-Z]{3}$'",
+            name="ck_household_profiles_currency_format",
+        ),
+        sa.CheckConstraint(
+            "char_length(investment_horizon) <= 2000",
+            name="ck_household_profiles_investment_horizon_length",
+        ),
+        sa.CheckConstraint(
+            "char_length(liquidity_needs) <= 4000",
+            name="ck_household_profiles_liquidity_needs_length",
+        ),
+        sa.CheckConstraint(
+            "char_length(risk_statement) <= 4000",
+            name="ck_household_profiles_risk_statement_length",
+        ),
+        sa.CheckConstraint(
+            "char_length(notes) <= 8000",
+            name="ck_household_profiles_notes_length",
+        ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("singleton_key", name="uq_household_profiles_singleton_key"),
     )

@@ -13,11 +13,20 @@ from apps.api.database import get_session
 from apps.api.main import app
 
 
+def postgres_test_database_url() -> str:
+    database_url = os.environ.get("TEST_DATABASE_URL", "").strip()
+    if database_url:
+        return database_url
+    if os.environ.get("COMPOUNDOS_REQUIRE_POSTGRES_TESTS") == "1":
+        pytest.fail(
+            "CompoundOS CI requires real PostgreSQL tests, but TEST_DATABASE_URL is missing"
+        )
+    pytest.skip("TEST_DATABASE_URL is required for PostgreSQL integration tests")
+
+
 @pytest.fixture(scope="session")
 def postgres_engine() -> Engine:
-    database_url = os.environ.get("TEST_DATABASE_URL")
-    if not database_url:
-        pytest.skip("TEST_DATABASE_URL is required for PostgreSQL integration tests")
+    database_url = postgres_test_database_url()
     engine = create_engine(database_url, pool_pre_ping=True)
     try:
         with engine.connect() as connection:

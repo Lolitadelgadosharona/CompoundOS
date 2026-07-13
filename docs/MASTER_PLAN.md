@@ -32,6 +32,10 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 ## Backlog
 
 - Complete Docker runtime verification in a Docker-enabled environment
+- Align `NEXT_PUBLIC_API_URL` with the Docker build-time public environment model
+- Split Python runtime and development dependencies before production hardening
+- Design AuditEvent pagination before introducing higher-volume event sources
+- Complete browser-path validation with the full Docker runtime stack
 - Decide whether to migrate `frontend/` to `apps/web/`
 - Add backend domain modules
 - Introduce data persistence and orchestration
@@ -51,6 +55,15 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Final planning review conclusion: APPROVE.
 - Planning PR #4 approved for merge.
 - Sprint 002 Slice 1 requires independent review before it can be accepted.
+- Sprint 002 Slice 1 independent review conclusion: REQUEST CHANGES.
+- Review finding M-1 requires CI to fail rather than skip when real PostgreSQL
+  tests are explicitly required but `TEST_DATABASE_URL` is unavailable.
+- Review finding M-2 requires the approved technical field limits to be enforced
+  by named PostgreSQL constraints as well as Pydantic validation.
+- Review finding M-3 requires mutation success and AuditEvent refresh failure to
+  remain visibly distinct, with a GET-only audit retry.
+- The three blocking review findings are addressed on the Slice 1 branch and
+  remain in Review pending validation and independent re-review.
 - Sprint 002 remains In Progress; Slice 2 is not authorized.
 
 ## Done
@@ -133,3 +146,12 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - 2026-07-13: Slice 1 scope is limited to HouseholdProfile, PostgreSQL,
   AuditEvent, and the household UI.
 - 2026-07-13: Later Sprint 002 slices remain unauthorized.
+- 2026-07-13: Sprint 002 Slice 1 independent review requested changes for the
+  PostgreSQL CI gate, database safety constraints, and post-mutation audit refresh UX.
+- 2026-07-13: Preserve local PostgreSQL-test skipping when no database is
+  configured, but prohibit skips when the CompoundOS CI gate is enabled.
+- 2026-07-13: Mirror approved input-safety limits in Pydantic and named PostgreSQL
+  constraints; these technical limits are not investment rules.
+- 2026-07-13: Treat a successful household mutation and a failed audit refresh as
+  separate outcomes, and retry only the audit GET.
+- 2026-07-13: Slice 1 remains in Review and Slice 2 remains unauthorized.

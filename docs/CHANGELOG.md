@@ -9,6 +9,9 @@
 - Explicit Alembic migration for `household_profiles` and `audit_events`
 - Local-only Household page with create, summary, edit, validation, error, and audit states
 - Real PostgreSQL CI service, migration, singleton, and transaction rollback checks
+- A project-specific CI gate that fails if required real PostgreSQL tests cannot run
+- Named PostgreSQL checks mirroring every approved HouseholdProfile field limit
+- Independent audit loading/error state and GET-only retry after a successful mutation
 - ADR 0002 for synchronous PostgreSQL persistence and transaction boundaries
 
 ### Boundaries
@@ -24,6 +27,10 @@
   type-check, tests, production build, dependency audit, Alembic offline SQL,
   YAML parsing, localhost binding inspection, and secret scan pass
 - Real PostgreSQL and Compose checks run in GitHub CI
+- Local test runs may skip PostgreSQL-marked tests when `TEST_DATABASE_URL` is not
+  configured; the explicit CI-required mode fails instead of skipping
+- Independent review initially concluded REQUEST CHANGES for three blocking
+  findings; the scoped fixes remain in Slice 1 Review pending re-review
 - Docker CLI is unavailable in the local implementation environment, so full
   local application runtime verification remains pending
 

@@ -28,14 +28,6 @@ const EMPTY_FORM: HouseholdInput = {
   notes: "",
 };
 
-async function fetchHouseholdData() {
-  const [profile, auditEvents] = await Promise.all([
-    getCurrentHousehold(),
-    getAuditEvents(),
-  ]);
-  return { profile, auditEvents };
-}
-
 type HouseholdFormProps = {
   initialValue: HouseholdInput;
   submitLabel: string;
@@ -169,27 +161,47 @@ function HouseholdSummary({ profile }: { profile: HouseholdProfile }) {
   );
 }
 
-function AuditTimeline({ events }: { events: AuditEvent[] }) {
+type AuditTimelineProps = {
+  error: string | null;
+  events: AuditEvent[];
+  loading: boolean;
+  onRetry: () => void;
+};
+
+function AuditTimeline({ error, events, loading, onRetry }: AuditTimelineProps) {
   return (
     <section className="panel" aria-labelledby="audit-heading">
       <div className="section-heading">
         <p className="eyebrow">Read-only history</p>
         <h2 id="audit-heading">Audit timeline</h2>
       </div>
-      {events.length === 0 ? (
-        <p>No audit events yet.</p>
-      ) : (
-        <ol className="timeline">
-          {events.map((event) => (
-            <li key={event.id}>
-              <strong>{event.action === "household.created" ? "Profile created" : "Profile updated"}</strong>
-              <span>{new Date(event.occurred_at).toLocaleString()}</span>
-              <span>Actor: {event.actor}</span>
-              <span>Fields: {event.metadata.changed_fields?.join(", ") ?? "None"}</span>
-            </li>
-          ))}
-        </ol>
-      )}
+      {error ? (
+        <div className="error-panel" role="alert">
+          <p>{error}</p>
+          <button disabled={loading} onClick={onRetry} type="button">
+            {loading ? "Retrying audit timeline…" : "Retry audit timeline"}
+          </button>
+        </div>
+      ) : null}
+      {loading && !error ? <p role="status">Loading audit timeline…</p> : null}
+      {!loading ? (
+        events.length === 0 ? (
+          <p>No audit events yet.</p>
+        ) : (
+          <ol className="timeline">
+            {events.map((event) => (
+              <li key={event.id}>
+                <strong>
+                  {event.action === "household.created" ? "Profile created" : "Profile updated"}
+                </strong>
+                <span>{new Date(event.occurred_at).toLocaleString()}</span>
+                <span>Actor: {event.actor}</span>
+                <span>Fields: {event.metadata.changed_fields?.join(", ") ?? "None"}</span>
+              </li>
+            ))}
+          </ol>
+        )
+      ) : null}
     </section>
   );
 }
@@ -199,15 +211,16 @@ export function HouseholdClient() {
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [auditLoading, setAuditLoading] = useState(true);
+  const [auditError, setAuditError] = useState<string | null>(null);
+  const [savedMessage, setSavedMessage] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
 
-  async function reload() {
+  async function reloadProfile() {
     setLoading(true);
     setLoadError(null);
     try {
-      const result = await fetchHouseholdData();
-      setProfile(result.profile);
-      setAuditEvents(result.auditEvents);
+      setProfile(await getCurrentHousehold());
     } catch (caught) {
       setLoadError(
         caught instanceof HouseholdApiError ? caught.message : "Unable to load household data.",
@@ -217,13 +230,28 @@ export function HouseholdClient() {
     }
   }
 
+  async function refreshAuditEvents(afterSuccessfulMutation = false) {
+    setAuditLoading(true);
+    setAuditError(null);
+    try {
+      setAuditEvents(await getAuditEvents());
+    } catch {
+      setAuditError(
+        afterSuccessfulMutation
+          ? "The household profile is saved, but the audit timeline could not be refreshed."
+          : "The household profile is available, but the audit timeline could not be loaded.",
+      );
+    } finally {
+      setAuditLoading(false);
+    }
+  }
+
   useEffect(() => {
     let active = true;
-    void fetchHouseholdData()
+    void getCurrentHousehold()
       .then((result) => {
         if (!active) return;
-        setProfile(result.profile);
-        setAuditEvents(result.auditEvents);
+        setProfile(result);
       })
       .catch((caught: unknown) => {
         if (!active) return;
@@ -234,6 +262,22 @@ export function HouseholdClient() {
       .finally(() => {
         if (active) setLoading(false);
       });
+
+    void getAuditEvents()
+      .then((events) => {
+        if (!active) return;
+        setAuditEvents(events);
+        setAuditError(null);
+      })
+      .catch(() => {
+        if (!active) return;
+        setAuditError(
+          "The household profile is available, but the audit timeline could not be loaded.",
+        );
+      })
+      .finally(() => {
+        if (active) setAuditLoading(false);
+      });
     return () => {
       active = false;
     };
@@ -242,14 +286,16 @@ export function HouseholdClient() {
   async function handleCreate(value: HouseholdInput) {
     const created = await createHousehold(value);
     setProfile(created);
-    setAuditEvents(await getAuditEvents());
+    setSavedMessage("Household profile saved.");
+    await refreshAuditEvents(true);
   }
 
   async function handleUpdate(value: HouseholdInput) {
     const updated = await updateHousehold(value);
     setProfile(updated);
-    setAuditEvents(await getAuditEvents());
     setEditing(false);
+    setSavedMessage("Household profile saved.");
+    await refreshAuditEvents(true);
   }
 
   return (
@@ -273,9 +319,11 @@ export function HouseholdClient() {
       {loadError ? (
         <div className="error-panel" role="alert">
           <p>{loadError}</p>
-          <button onClick={() => void reload()} type="button">Try again</button>
+          <button onClick={() => void reloadProfile()} type="button">Try again</button>
         </div>
       ) : null}
+
+      {savedMessage ? <p role="status">{savedMessage}</p> : null}
 
       {!loading && !loadError && !profile ? (
         <section className="panel" aria-labelledby="create-heading">
@@ -295,7 +343,17 @@ export function HouseholdClient() {
                 <p className="eyebrow">Current profile</p>
                 <h2 id="summary-heading">{profile.household_name}</h2>
               </div>
-              {!editing ? <button onClick={() => setEditing(true)} type="button">Edit profile</button> : null}
+              {!editing ? (
+                <button
+                  onClick={() => {
+                    setSavedMessage(null);
+                    setEditing(true);
+                  }}
+                  type="button"
+                >
+                  Edit profile
+                </button>
+              ) : null}
             </div>
             {editing ? (
               <HouseholdForm
@@ -308,7 +366,12 @@ export function HouseholdClient() {
               <HouseholdSummary profile={profile} />
             )}
           </section>
-          <AuditTimeline events={auditEvents} />
+          <AuditTimeline
+            error={auditError}
+            events={auditEvents}
+            loading={auditLoading}
+            onRetry={() => void refreshAuditEvents()}
+          />
         </>
       ) : null}
     </main>

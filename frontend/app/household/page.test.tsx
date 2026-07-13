@@ -27,6 +27,13 @@ const auditEvent = {
   metadata: { changed_fields: ["household_name"] },
 };
 
+const updatedAuditEvent = {
+  ...auditEvent,
+  id: "event-2",
+  action: "household.updated",
+  occurred_at: "2026-07-13T00:01:00Z",
+};
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -115,15 +122,13 @@ describe("HouseholdClient", () => {
   });
 
   it("shows a singleton conflict returned by the API", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+    const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
         if (init?.method === "POST") {
           return jsonResponse({ detail: "A household profile already exists" }, 409);
         }
         return jsonResponse({ detail: "Not found" }, 404);
-      }),
-    );
+      });
+    vi.stubGlobal("fetch", fetchMock);
     render(<HouseholdClient />);
     await screen.findByRole("heading", { name: "Create the household profile" });
     await userEvent.type(screen.getByLabelText("Household name"), "Another Household");
@@ -132,6 +137,121 @@ describe("HouseholdClient", () => {
     await waitFor(() => {
       expect(screen.getByRole("alert").textContent).toContain("already exists");
     });
+    expect((screen.getByLabelText("Household name") as HTMLInputElement).value).toBe(
+      "Another Household",
+    );
+    expect(screen.queryByText("Household profile saved.")).toBeNull();
+    expect(
+      fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/audit-events")),
+    ).toHaveLength(1);
+  });
+
+  it("keeps a created profile visible and retries only its failed audit refresh", async () => {
+    let created = false;
+    let auditRequests = 0;
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === "POST") {
+        created = true;
+        return jsonResponse(profile, 201);
+      }
+      if (url.endsWith("/audit-events")) {
+        auditRequests += 1;
+        if (!created) return jsonResponse([]);
+        if (auditRequests === 2) return jsonResponse({ detail: "Unavailable" }, 503);
+        return jsonResponse([auditEvent]);
+      }
+      return created ? jsonResponse(profile) : jsonResponse({ detail: "Not found" }, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<HouseholdClient />);
+    await screen.findByRole("heading", { name: "Create the household profile" });
+
+    await userEvent.type(screen.getByLabelText("Household name"), profile.household_name);
+    await userEvent.click(screen.getByRole("button", { name: "Create profile" }));
+
+    expect(await screen.findByRole("heading", { name: profile.household_name })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Create the household profile" })).toBeNull();
+    expect(screen.getByText("Household profile saved.")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain(
+      "saved, but the audit timeline could not be refreshed",
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Retry audit timeline" }));
+    expect(await screen.findByText("Profile created")).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.queryByText(/could not be refreshed/)).toBeNull();
+    });
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(0);
+    expect(auditRequests).toBe(3);
+  });
+
+  it("keeps an updated profile visible and retries only its failed audit refresh", async () => {
+    let current = profile;
+    let auditRequests = 0;
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === "PATCH") {
+        current = { ...profile, household_name: "Updated Household" };
+        return jsonResponse(current);
+      }
+      if (url.endsWith("/audit-events")) {
+        auditRequests += 1;
+        if (auditRequests === 2) return jsonResponse({ detail: "Unavailable" }, 503);
+        return jsonResponse(auditRequests === 1 ? [auditEvent] : [auditEvent, updatedAuditEvent]);
+      }
+      return jsonResponse(current);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<HouseholdClient />);
+    await screen.findByRole("heading", { name: profile.household_name });
+
+    await userEvent.click(screen.getByRole("button", { name: "Edit profile" }));
+    const nameInput = screen.getByLabelText("Household name");
+    await userEvent.clear(nameInput);
+    await userEvent.type(nameInput, "Updated Household");
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByRole("heading", { name: "Updated Household" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull();
+    expect(screen.getByText("Household profile saved.")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain(
+      "saved, but the audit timeline could not be refreshed",
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Retry audit timeline" }));
+    expect(await screen.findByText("Profile updated")).toBeTruthy();
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(1);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+    expect(auditRequests).toBe(3);
+  });
+
+  it("shows an existing profile when the initial audit request fails", async () => {
+    let auditRequests = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        if (String(input).endsWith("/audit-events")) {
+          auditRequests += 1;
+          if (auditRequests === 1) return jsonResponse({ detail: "Unavailable" }, 503);
+          return jsonResponse([auditEvent]);
+        }
+        return jsonResponse(profile);
+      }),
+    );
+    render(<HouseholdClient />);
+
+    expect(await screen.findByRole("heading", { name: profile.household_name })).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain(
+      "profile is available, but the audit timeline could not be loaded",
+    );
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: "Retry audit timeline" }));
+    expect(await screen.findByText("Profile created")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(auditRequests).toBe(2);
   });
 
   it("does not render prohibited product surfaces", async () => {

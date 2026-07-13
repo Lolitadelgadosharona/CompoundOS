@@ -19,6 +19,8 @@ CompoundOS will use a modular monorepo with a Next.js frontend, a FastAPI backen
 - Validation: real PostgreSQL integration tests plus pytest and Ruff for the
   backend; Vitest, ESLint, TypeScript, and the Next.js production build for the
   frontend
+- Safety constraints: Pydantic performs request validation and named PostgreSQL
+  checks independently enforce the same character limits and currency format
 
 ## Module Boundaries
 
@@ -45,6 +47,11 @@ The database singleton uses a required boolean sentinel constrained to true and
 unique across `household_profiles`. It prevents concurrent requests from storing
 two profiles; the API maps the resulting integrity conflict to HTTP 409.
 
+Frontend household mutations and AuditEvent refreshes have separate outcomes. A
+successful mutation updates the profile and exits edit mode even if the following
+audit GET fails. The timeline retains prior data, shows an independent error, and
+offers a GET-only retry; mutations are never automatically replayed.
+
 ## Migration and CI
 
 Alembic revision `0001_household_persistence` upgrades an empty database and
@@ -52,7 +59,10 @@ creates only the two approved product tables. The initial downgrade is provided
 for development, without promising a production downgrade strategy. CI starts an
 isolated PostgreSQL 16 service, runs `alembic upgrade head` and `alembic current`,
 then runs repository/API/rollback tests against that real database. SQLite and
-mocks do not replace these integration tests.
+mocks do not replace these integration tests. CI sets the project-specific
+`COMPOUNDOS_REQUIRE_POSTGRES_TESTS=1` gate and runs the `postgres`-marked suite
+explicitly. A missing test database fails in that mode; local runs without a
+configured PostgreSQL database may skip the marked integration suite.
 
 ## Local Network Boundary
 

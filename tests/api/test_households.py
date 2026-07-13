@@ -4,12 +4,12 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import func, inspect, select
+from sqlalchemy import func, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from apps.api.models import AuditEvent, HouseholdProfile
-from apps.api.schemas import HouseholdCreate, HouseholdUpdate
+from apps.api.schemas import HouseholdCreate, HouseholdResponse, HouseholdUpdate
 from apps.api.services import households as household_service
 
 HOUSEHOLD_PAYLOAD: dict[str, str] = {
@@ -19,6 +19,17 @@ HOUSEHOLD_PAYLOAD: dict[str, str] = {
     "liquidity_needs": "User-entered liquidity context",
     "risk_statement": "User-entered risk context",
     "notes": "Private household notes",
+}
+
+pytestmark = pytest.mark.postgres
+
+HOUSEHOLD_CHECK_CONSTRAINTS = {
+    "ck_household_profiles_name_length",
+    "ck_household_profiles_currency_format",
+    "ck_household_profiles_investment_horizon_length",
+    "ck_household_profiles_liquidity_needs_length",
+    "ck_household_profiles_risk_statement_length",
+    "ck_household_profiles_notes_length",
 }
 
 
@@ -132,6 +143,72 @@ def test_database_singleton_constraint_is_enforced(db_session: Session) -> None:
         db_session.commit()
     db_session.rollback()
     assert db_session.scalar(select(func.count()).select_from(HouseholdProfile)) == 1
+
+
+@pytest.mark.parametrize(
+    ("constraint_name", "overrides"),
+    [
+        ("ck_household_profiles_name_length", {"household_name": ""}),
+        ("ck_household_profiles_name_length", {"household_name": "x" * 201}),
+        ("ck_household_profiles_currency_format", {"base_currency": "usd"}),
+        (
+            "ck_household_profiles_investment_horizon_length",
+            {"investment_horizon": "x" * 2_001},
+        ),
+        ("ck_household_profiles_liquidity_needs_length", {"liquidity_needs": "x" * 4_001}),
+        ("ck_household_profiles_risk_statement_length", {"risk_statement": "x" * 4_001}),
+        ("ck_household_profiles_notes_length", {"notes": "x" * 8_001}),
+    ],
+)
+def test_database_rejects_values_outside_named_safety_constraints(
+    db_session: Session,
+    constraint_name: str,
+    overrides: dict[str, str],
+) -> None:
+    db_session.add(HouseholdProfile(**{**HOUSEHOLD_PAYLOAD, **overrides}))
+
+    with pytest.raises(IntegrityError) as exc_info:
+        db_session.commit()
+
+    assert exc_info.value.orig.diag.constraint_name == constraint_name
+    db_session.rollback()
+    assert db_session.scalar(select(func.count()).select_from(HouseholdProfile)) == 0
+    assert db_session.scalar(select(text("1"))) == 1
+
+
+def test_database_accepts_unicode_at_character_limits_and_response_schema(
+    db_session: Session,
+) -> None:
+    household = HouseholdProfile(
+        **{
+            **HOUSEHOLD_PAYLOAD,
+            "household_name": "家" * 200,
+            "investment_horizon": "期" * 2_000,
+            "liquidity_needs": "流" * 4_000,
+            "risk_statement": "险" * 4_000,
+            "notes": "注" * 8_000,
+        }
+    )
+    db_session.add(household)
+    db_session.commit()
+
+    response = HouseholdResponse.model_validate(household)
+    assert len(response.household_name) == 200
+    assert len(response.notes) == 8_000
+
+
+def test_migration_installs_all_named_household_check_constraints(postgres_engine) -> None:
+    constraints = {
+        constraint["name"]
+        for constraint in inspect(postgres_engine).get_check_constraints("household_profiles")
+    }
+    assert HOUSEHOLD_CHECK_CONSTRAINTS <= constraints
+
+
+def test_required_postgres_suite_uses_live_postgresql(postgres_engine) -> None:
+    with postgres_engine.connect() as connection:
+        version = connection.scalar(text("SELECT current_setting('server_version_num')::int"))
+        assert version >= 160000
 
 
 def test_audit_failure_rolls_back_household_create(

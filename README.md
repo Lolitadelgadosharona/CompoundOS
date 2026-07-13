@@ -80,11 +80,19 @@ The frontend is available at `http://127.0.0.1:3000`; its health endpoint is
 
 - Database migration: `alembic upgrade head && alembic current`
 - Backend lint: `ruff check apps tests`
-- Backend tests: `TEST_DATABASE_URL="$DATABASE_URL" pytest -q`
+- Backend tests without a local PostgreSQL URL: `pytest -q` (the explicitly marked
+  PostgreSQL integration suite is skipped)
+- Real PostgreSQL tests: `TEST_DATABASE_URL="$DATABASE_URL" pytest -q -m postgres -ra`
+- CI-equivalent PostgreSQL gate:
+  `COMPOUNDOS_REQUIRE_POSTGRES_TESTS=1 TEST_DATABASE_URL="$DATABASE_URL" pytest -q -m postgres -ra`
 - Frontend lint: `npm --prefix frontend run lint`
 - Frontend type check: `npm --prefix frontend run type-check`
 - Frontend tests: `npm --prefix frontend test`
 - Frontend production build: `npm --prefix frontend run build`
+
+The project-specific required-mode flag intentionally fails when
+`TEST_DATABASE_URL` is missing or empty. It prevents CI configuration regressions
+from turning required PostgreSQL coverage into a successful skipped test run.
 
 ## Environment Variables
 

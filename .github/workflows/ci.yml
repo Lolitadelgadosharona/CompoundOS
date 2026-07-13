@@ -60,6 +60,7 @@ jobs:
     env:
       DATABASE_URL: postgresql+psycopg://compoundos:ci-only-password@127.0.0.1:5432/compoundos_test
       TEST_DATABASE_URL: postgresql+psycopg://compoundos:ci-only-password@127.0.0.1:5432/compoundos_test
+      COMPOUNDOS_REQUIRE_POSTGRES_TESTS: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -75,8 +76,12 @@ jobs:
           alembic current
       - name: Run backend lint
         run: ruff check apps tests
-      - name: Run backend tests
-        run: pytest -q
+      - name: Verify PostgreSQL test gate configuration
+        run: test -n "$TEST_DATABASE_URL"
+      - name: Run backend tests without PostgreSQL marker
+        run: pytest -q -m "not postgres"
+      - name: Run real PostgreSQL tests
+        run: pytest -q -m postgres -ra
 
   frontend:
     runs-on: ubuntu-latest

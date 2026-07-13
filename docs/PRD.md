@@ -29,7 +29,9 @@ context without interpreting it or providing investment advice.
 - `notes`: optional free text, at most 8,000 characters
 
 These are input-safety limits, not investment rules. `base_currency` is stored as
-context only; no conversion occurs. `risk_statement` is never interpreted.
+context only; no conversion occurs. `risk_statement` is never interpreted. The
+same limits are enforced in the API contract and by named PostgreSQL constraints
+using character length rather than byte length.
 
 ## Lifecycle and Audit Boundary
 
@@ -64,6 +66,11 @@ context only; no conversion occurs. `risk_statement` is never interpreted.
   real PostgreSQL.
 - Household UI covers loading, empty, create, summary, edit, 409, error, and audit
   states with the required local-only and non-advisory notices.
+- A successful create/update remains visibly successful if the following audit
+  refresh fails; the existing timeline remains available and a retry performs only
+  the audit GET without replaying the mutation.
+- CI explicitly requires the PostgreSQL-marked suite and fails rather than skips
+  when its real database URL is unavailable.
 - Existing health, lint, type-check, test, build, audit, Compose, and CI checks pass.
 
 ## Explicit Non-Goals for Slice 1
