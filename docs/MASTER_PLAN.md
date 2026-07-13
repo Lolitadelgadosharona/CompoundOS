@@ -12,14 +12,15 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 
 ## Current Sprint
 
-- Sprint 002: Not Started
-- Status: Not Started
-- Next approved action: Sprint 002 planning only; implementation requires explicit
-  sprint approval
+- Sprint 001: Project Foundation
+- Status: Done
+- Scope: final foundation verification, frontend health test, and Docker-based
+  local development configuration
+- Sprint 002: Not Started; implementation has not been authorized
 
 ## Backlog
 
-- Add and validate Docker-based local development configuration
+- Complete Docker runtime verification in a Docker-enabled environment
 - Decide whether to migrate `frontend/` to `apps/web/`
 - Add backend domain modules
 - Introduce data persistence and orchestration
@@ -33,7 +34,9 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 
 ## Review
 
-- None
+- Sprint 001 independent code review passed
+- Review conclusion: APPROVE WITH NON-BLOCKING FOLLOW-UP
+- Pull request #3 approved for merge
 
 ## Done
 
@@ -52,6 +55,9 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Pull request #1 squash-merged into `main` as
   `b3801c64fa09856d491317b0ebda45007c210ae0`
 - GitHub Actions backend and frontend checks passed for push and pull request events
+- Frontend health endpoint automated test added and included in CI
+- Docker Compose and Dockerfiles added with static YAML, context, path, and command
+  consistency validation
 
 ## Decision Log
 
@@ -65,3 +71,12 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - 2026-07-12: Finalize Sprint 001 and Sprint 001.1 through pull request #1 using a
   squash merge (`b3801c64fa09856d491317b0ebda45007c210ae0`).
 - 2026-07-12: Keep Sprint 002 Not Started; the next approved action is planning only.
+- 2026-07-12: Reopen Sprint 001 in Review to add the approved Docker development
+  configuration and frontend health test without beginning Sprint 002.
+- 2026-07-12: Record Docker runtime verification as pending; do not claim container
+  validation until Docker is available.
+- 2026-07-12: Sprint 001 independent code review passed with the conclusion
+  APPROVE WITH NON-BLOCKING FOLLOW-UP.
+- 2026-07-12: Treat Docker runtime verification as a non-blocking follow-up and
+  retain it in the Backlog.
+- 2026-07-12: Approve pull request #3 for merge; Sprint 002 remains Not Started.

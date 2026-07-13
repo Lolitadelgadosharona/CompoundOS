@@ -9,10 +9,11 @@ CompoundOS will use a modular monorepo with a Next.js frontend, a FastAPI backen
 - Frontend: Next.js 16.2.10 App Router application with TypeScript in `frontend/`
 - Backend: minimal FastAPI service in `apps/api/`
 - Data: PostgreSQL and Redis are planned but not connected in Sprint 001
-- Local infrastructure: Docker-based development is planned; Compose is deferred
-  until it can be validated in a Docker-enabled environment
+- Local infrastructure: `compose.yaml` defines the web, API, PostgreSQL, and Redis
+  services using Dockerfiles aligned with the current repository paths; runtime
+  verification remains pending in a Docker-enabled environment
 - Validation: pytest and Ruff for the backend; ESLint, TypeScript, and the Next.js
-  production build for the frontend
+  health test and production build for the frontend
 
 ## Repository Layout Decision
 
@@ -36,5 +37,5 @@ and CI toolchain.
 
 - Add shared contracts between frontend and backend.
 - Define deployment and environment strategy.
-- Add and validate Docker-based local infrastructure.
+- Complete Docker build and runtime verification in a Docker-enabled environment.
 - Decide whether to migrate `frontend/` to `apps/web/` in a later approved sprint.

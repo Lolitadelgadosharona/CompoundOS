@@ -6,6 +6,15 @@ on:
   pull_request:
 
 jobs:
+  infrastructure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect Docker Compose version
+        run: docker compose version
+      - name: Validate Docker Compose configuration
+        run: docker compose config
+
   backend:
     runs-on: ubuntu-latest
     steps:
@@ -42,5 +51,7 @@ jobs:
         run: npm run lint
       - name: Run frontend type check
         run: npm run type-check
+      - name: Run frontend tests
+        run: npm test
       - name: Build frontend
         run: npm run build

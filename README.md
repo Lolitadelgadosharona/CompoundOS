@@ -52,6 +52,7 @@ The frontend is available at `http://localhost:3000`; its health endpoint is
 - Backend tests: `pytest -q tests/api`
 - Frontend lint: `npm --prefix frontend run lint`
 - Frontend type check: `npm --prefix frontend run type-check`
+- Frontend tests: `npm --prefix frontend test`
 - Frontend production build: `npm --prefix frontend run build`
 
 ## Environment Variables
@@ -61,9 +62,20 @@ development-only placeholders and no real secrets.
 
 ## Local Infrastructure
 
-PostgreSQL, Redis, and Docker-based development are architectural targets. A
-Compose configuration is intentionally deferred until it can be validated in a
-Docker-enabled environment.
+The containerized local stack includes the Next.js frontend, FastAPI backend,
+PostgreSQL, and Redis:
+
+1. Copy `.env.example` to `.env` if local overrides are needed.
+2. Validate the configuration: `docker compose config`
+3. Build and start the stack: `docker compose up --build -d`
+4. Check service state: `docker compose ps`
+5. Verify `http://localhost:3000/api/health` and
+   `http://localhost:8000/health`.
+6. Stop the stack: `docker compose down`
+
+The Compose file and Docker build paths have been statically validated. Docker
+runtime verification remains pending because Docker is not installed in the
+current validation environment.
 
 ## Monorepo Convention
 
