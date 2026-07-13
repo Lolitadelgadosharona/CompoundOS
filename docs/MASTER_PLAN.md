@@ -18,6 +18,14 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   local development configuration
 - Sprint 002: Not Started; implementation has not been authorized
 
+## Planning
+
+- Sprint 002 selected direction: Household Investment Policy + Decision Journal.
+- Planning pull request #4 completed independent planning review and is approved
+  for merge.
+- Sprint 002 implementation remains Not Started. Merging the planning pull request
+  does not authorize implementation; separate explicit approval is still required.
+
 ## Backlog
 
 - Complete Docker runtime verification in a Docker-enabled environment
@@ -34,9 +42,11 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 
 ## Review
 
-- Sprint 001 independent code review passed
-- Review conclusion: APPROVE WITH NON-BLOCKING FOLLOW-UP
-- Pull request #3 approved for merge
+- Planning PR #4 initial review requested documentation changes.
+- Required planning changes were addressed.
+- Final planning review conclusion: APPROVE.
+- Planning PR #4 approved for merge.
+- Sprint 002 implementation remains Not Started.
 
 ## Done
 
@@ -58,6 +68,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Frontend health endpoint automated test added and included in CI
 - Docker Compose and Dockerfiles added with static YAML, context, path, and command
   consistency validation
+- Pull request #3 squash-merged into `main` as
+  `e117a4d936872342dee2baa7012c76816a708d81`
 
 ## Decision Log
 
@@ -80,3 +92,35 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - 2026-07-12: Treat Docker runtime verification as a non-blocking follow-up and
   retain it in the Backlog.
 - 2026-07-12: Approve pull request #3 for merge; Sprint 002 remains Not Started.
+- 2026-07-13: Sprint 002 planning authorized.
+- 2026-07-13: Planning does not authorize Sprint 002 implementation.
+- 2026-07-13: Selected Sprint 002 candidate A, Household Investment Policy +
+  Decision Journal.
+- 2026-07-13: Approved the single-household, local-only, no-authentication boundary.
+- 2026-07-13: Approved user-entered target allocation percentages while prohibiting
+  actual holdings, accounts, and monetary data.
+- 2026-07-13: Confirmed no AI, Guardian, broker integration, recommendations, or
+  trading in Sprint 002.
+- 2026-07-13: Planning approval does not yet authorize implementation.
+- 2026-07-13: Standardized policy lifecycle as Draft → Published → Superseded.
+- 2026-07-13: Standardized journal lifecycle as Draft → Confirmed → Archived with
+  appended DecisionCorrection records outside the lifecycle state machine.
+- 2026-07-13: Required a database-enforced or transaction-safe constraint allowing
+  at most one total HouseholdProfile.
+- 2026-07-13: Required localhost-only host port bindings for the local MVP.
+- 2026-07-13: Required real PostgreSQL integration and transaction rollback tests.
+- 2026-07-13: Approved provisional local-MVP non-advisory copy.
+- 2026-07-13: Approved the temporary local-MVP retention and reset boundary.
+- 2026-07-13: Confirmed production compliance, authentication, export, backup, and
+  encryption remain deferred.
+- 2026-07-13: Planning PR #4 must merge before any separate Sprint 002
+  implementation approval; Sprint 002 remains Not Started.
+- 2026-07-13: Corrected the policy publish contract to publish an
+  InvestmentPolicyDraft.
+- 2026-07-13: Confirmed DecisionCorrection is an append-only correction record,
+  not a journal lifecycle state.
+- 2026-07-13: Confirmed Sprint 002 permits at most one total HouseholdProfile and
+  defines no household archive or inactive lifecycle.
+- 2026-07-13: Planning PR #4 final independent review passed.
+- 2026-07-13: Planning PR #4 approved for merge.
+- 2026-07-13: Planning merge does not authorize Sprint 002 implementation.
