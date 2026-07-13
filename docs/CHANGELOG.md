@@ -1,5 +1,54 @@
 # Changelog
 
+## [Unreleased] - Sprint 002 Slice 1 Complete
+
+### Added
+
+- PostgreSQL-backed sole HouseholdProfile create, current-read, and update APIs
+- Atomic append-only AuditEvent creation and read-only timeline API
+- Explicit Alembic migration for `household_profiles` and `audit_events`
+- Local-only Household page with create, summary, edit, validation, error, and audit states
+- Real PostgreSQL CI service, migration, singleton, and transaction rollback checks
+- A project-specific CI gate that fails if required real PostgreSQL tests cannot run
+- Named PostgreSQL checks mirroring every approved HouseholdProfile field limit
+- Independent audit loading/error state and GET-only retry after a successful mutation
+- ADR 0002 for synchronous PostgreSQL persistence and transaction boundaries
+
+### Boundaries
+
+- All host ports default to `127.0.0.1`; no authentication or public deployment
+- No Policy, Allocation, Journal, AI, Guardian, Broker, recommendation, trading,
+  actual holdings, accounts, or monetary data
+- Sprint 002 is not complete, and Slice 2 is not authorized
+
+### Validation Status
+
+- Local Ruff, backend tests available without PostgreSQL, frontend lint,
+  type-check, tests, production build, dependency audit, Alembic offline SQL,
+  YAML parsing, localhost binding inspection, and secret scan pass
+- Real PostgreSQL and Compose checks run in GitHub CI
+- Local test runs may skip PostgreSQL-marked tests when `TEST_DATABASE_URL` is not
+  configured; the explicit CI-required mode fails instead of skipping
+- Independent review initially concluded REQUEST CHANGES; the PostgreSQL CI gate,
+  database constraints, and audit refresh UX findings were resolved
+- Final independent review conclusion: APPROVE WITH NON-BLOCKING FOLLOW-UP
+- Docker CLI is unavailable in the local implementation environment, so full
+  Docker runtime and browser-path verification remains pending
+
+### Non-blocking Follow-ups
+
+- Complete full Docker runtime and browser-path validation
+- Align `NEXT_PUBLIC_API_URL` with Docker's build-time public environment behavior
+- Split Python runtime and development dependencies before production hardening
+- Design AuditEvent pagination before higher-volume event sources are introduced
+
+### Status
+
+- Sprint 002 Slice 1 is complete and approved for merge.
+- This completes one implementation slice, not Sprint 002 as a whole.
+- Sprint 002 remains In Progress; Slice 2 is not authorized and Not Started.
+- This local-only foundation is not a production-readiness claim or product release.
+
 ## [Unreleased] - Sprint 001 Complete
 
 ### Added
