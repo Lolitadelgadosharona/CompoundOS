@@ -18,6 +18,11 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   local development configuration
 - Sprint 002: Not Started; implementation has not been authorized
 
+## Planning
+
+- Sprint 002 proposal is being prepared.
+- Sprint 002 implementation is not approved.
+
 ## Backlog
 
 - Complete Docker runtime verification in a Docker-enabled environment
@@ -80,3 +85,5 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - 2026-07-12: Treat Docker runtime verification as a non-blocking follow-up and
   retain it in the Backlog.
 - 2026-07-12: Approve pull request #3 for merge; Sprint 002 remains Not Started.
+- 2026-07-13: Sprint 002 planning authorized.
+- 2026-07-13: Planning does not authorize Sprint 002 implementation.
