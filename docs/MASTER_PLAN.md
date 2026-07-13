@@ -16,15 +16,18 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Status: Done
 - Scope: final foundation verification, frontend health test, and Docker-based
   local development configuration
-- Sprint 002: Not Started; implementation has not been authorized
+- Sprint 002: In Progress
+- Current approved work: Implementation Slice 1 — Household and Persistence
+  Foundation
+- Slice 2: Not approved
 
 ## Planning
 
 - Sprint 002 selected direction: Household Investment Policy + Decision Journal.
 - Planning pull request #4 completed independent planning review and is approved
   for merge.
-- Sprint 002 implementation remains Not Started. Merging the planning pull request
-  does not authorize implementation; separate explicit approval is still required.
+- Planning is complete. Sprint 002 Slice 1 implementation is authorized; later
+  implementation slices remain unauthorized.
 
 ## Backlog
 
@@ -38,7 +41,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 
 ## In Progress
 
-- None
+- Sprint 002 Slice 1: HouseholdProfile, PostgreSQL persistence, AuditEvent, and
+  the local-only household UI
 
 ## Review
 
@@ -46,7 +50,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Required planning changes were addressed.
 - Final planning review conclusion: APPROVE.
 - Planning PR #4 approved for merge.
-- Sprint 002 implementation remains Not Started.
+- Sprint 002 Slice 1 requires independent review before it can be accepted.
+- Sprint 002 remains In Progress; Slice 2 is not authorized.
 
 ## Done
 
@@ -124,3 +129,7 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - 2026-07-13: Planning PR #4 final independent review passed.
 - 2026-07-13: Planning PR #4 approved for merge.
 - 2026-07-13: Planning merge does not authorize Sprint 002 implementation.
+- 2026-07-13: Sprint 002 Slice 1 implementation authorized.
+- 2026-07-13: Slice 1 scope is limited to HouseholdProfile, PostgreSQL,
+  AuditEvent, and the household UI.
+- 2026-07-13: Later Sprint 002 slices remain unauthorized.

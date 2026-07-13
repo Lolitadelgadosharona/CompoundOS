@@ -1,5 +1,32 @@
 # Changelog
 
+## [Unreleased] - Sprint 002 Slice 1 In Progress
+
+### Added
+
+- PostgreSQL-backed sole HouseholdProfile create, current-read, and update APIs
+- Atomic append-only AuditEvent creation and read-only timeline API
+- Explicit Alembic migration for `household_profiles` and `audit_events`
+- Local-only Household page with create, summary, edit, validation, error, and audit states
+- Real PostgreSQL CI service, migration, singleton, and transaction rollback checks
+- ADR 0002 for synchronous PostgreSQL persistence and transaction boundaries
+
+### Boundaries
+
+- All host ports default to `127.0.0.1`; no authentication or public deployment
+- No Policy, Allocation, Journal, AI, Guardian, Broker, recommendation, trading,
+  actual holdings, accounts, or monetary data
+- Sprint 002 is not complete, and Slice 2 is not authorized
+
+### Validation Status
+
+- Local Ruff, backend tests available without PostgreSQL, frontend lint,
+  type-check, tests, production build, dependency audit, Alembic offline SQL,
+  YAML parsing, localhost binding inspection, and secret scan pass
+- Real PostgreSQL and Compose checks run in GitHub CI
+- Docker CLI is unavailable in the local implementation environment, so full
+  local application runtime verification remains pending
+
 ## [Unreleased] - Sprint 001 Complete
 
 ### Added
