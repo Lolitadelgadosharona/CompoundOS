@@ -68,4 +68,5 @@ class AuditEventResponse(BaseModel):
     entity_type: str
     entity_id: UUID
     occurred_at: datetime
+    sequence_number: int
     metadata: dict[str, Any] = Field(validation_alias="event_metadata")

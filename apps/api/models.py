@@ -1,19 +1,25 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from decimal import Decimal
+from typing import Any, Optional
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Identity,
     Index,
+    Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -75,7 +81,8 @@ class HouseholdProfile(Base):
 class AuditEvent(Base):
     __tablename__ = "audit_events"
     __table_args__ = (
-        Index("ix_audit_events_household_order", "household_id", "occurred_at", "id"),
+        Index("ix_audit_events_household_order", "household_id", "sequence_number"),
+        UniqueConstraint("sequence_number", name="uq_audit_events_sequence_number"),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
@@ -92,3 +99,261 @@ class AuditEvent(Base):
     event_metadata: Mapped[dict[str, Any]] = mapped_column(
         "metadata", JSONB, nullable=False, default=dict
     )
+    sequence_number: Mapped[int] = mapped_column(
+        BigInteger, Identity(always=True), nullable=False
+    )
+
+
+POLICY_TEXT_COLUMNS: tuple[tuple[str, int], ...] = (
+    ("objectives", 4_000),
+    ("time_horizon", 2_000),
+    ("liquidity", 4_000),
+    ("diversification", 4_000),
+    ("contribution_policy", 4_000),
+    ("rebalancing_policy", 4_000),
+    ("prohibited_assets", 4_000),
+    ("leverage_policy", 4_000),
+    ("decision_process", 4_000),
+    ("notes", 8_000),
+)
+
+
+def policy_text_constraints(table_name: str) -> tuple[CheckConstraint, ...]:
+    return tuple(
+        CheckConstraint(
+            f"char_length({column_name}) <= {maximum}",
+            name=f"ck_{table_name}_{column_name}_length",
+        )
+        for column_name, maximum in POLICY_TEXT_COLUMNS
+    )
+
+
+class InvestmentPolicy(Base):
+    __tablename__ = "investment_policies"
+    __table_args__ = (
+        UniqueConstraint("household_id", name="uq_investment_policies_household_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    household_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "household_profiles.id",
+            name="fk_investment_policies_household_id_household_profiles",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class InvestmentPolicyVersion(Base):
+    __tablename__ = "investment_policy_versions"
+    __table_args__ = (
+        CheckConstraint(
+            "version_number > 0",
+            name="ck_investment_policy_versions_version_number_positive",
+        ),
+        CheckConstraint(
+            "status IN ('published', 'superseded')",
+            name="ck_investment_policy_versions_status",
+        ),
+        CheckConstraint(
+            "(status = 'published' AND superseded_at IS NULL) "
+            "OR (status = 'superseded' AND superseded_at IS NOT NULL)",
+            name="ck_investment_policy_versions_status_timestamps",
+        ),
+        *policy_text_constraints("investment_policy_versions"),
+        UniqueConstraint(
+            "policy_id",
+            "version_number",
+            name="uq_investment_policy_versions_policy_version",
+        ),
+        Index(
+            "uq_investment_policy_versions_current_published",
+            "policy_id",
+            unique=True,
+            postgresql_where=text("status = 'published'"),
+        ),
+        Index(
+            "ix_investment_policy_versions_policy_history",
+            "policy_id",
+            text("version_number DESC"),
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    policy_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "investment_policies.id",
+            name="fk_investment_policy_versions_policy_id_investment_policies",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    objectives: Mapped[str] = mapped_column(Text, nullable=False)
+    time_horizon: Mapped[str] = mapped_column(Text, nullable=False)
+    liquidity: Mapped[str] = mapped_column(Text, nullable=False)
+    diversification: Mapped[str] = mapped_column(Text, nullable=False)
+    contribution_policy: Mapped[str] = mapped_column(Text, nullable=False)
+    rebalancing_policy: Mapped[str] = mapped_column(Text, nullable=False)
+    prohibited_assets: Mapped[str] = mapped_column(Text, nullable=False)
+    leverage_policy: Mapped[str] = mapped_column(Text, nullable=False)
+    decision_process: Mapped[str] = mapped_column(Text, nullable=False)
+    notes: Mapped[str] = mapped_column(Text, nullable=False)
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    sealed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    superseded_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class InvestmentPolicyDraft(Base):
+    __tablename__ = "investment_policy_drafts"
+    __table_args__ = (
+        CheckConstraint(
+            "revision > 0", name="ck_investment_policy_drafts_revision_positive"
+        ),
+        *policy_text_constraints("investment_policy_drafts"),
+        UniqueConstraint("policy_id", name="uq_investment_policy_drafts_policy_id"),
+        Index("ix_investment_policy_drafts_source_version_id", "source_version_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    policy_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "investment_policies.id",
+            name="fk_investment_policy_drafts_policy_id_investment_policies",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    source_version_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            "investment_policy_versions.id",
+            name="fk_investment_policy_drafts_source_version_id_versions",
+            ondelete="RESTRICT",
+        ),
+        nullable=True,
+    )
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    objectives: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    time_horizon: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    liquidity: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    diversification: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    contribution_policy: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    rebalancing_policy: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    prohibited_assets: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    leverage_policy: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    decision_process: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class InvestmentPolicyDraftAllocation(Base):
+    __tablename__ = "investment_policy_draft_allocations"
+    __table_args__ = (
+        CheckConstraint(
+            "char_length(asset_class_name) BETWEEN 1 AND 200",
+            name="ck_investment_policy_draft_allocations_name_length",
+        ),
+        CheckConstraint(
+            "char_length(normalized_asset_class_name) BETWEEN 1 AND 200",
+            name="ck_investment_policy_draft_allocations_normalized_name_length",
+        ),
+        CheckConstraint(
+            "target_percentage > 0.00 AND target_percentage <= 100.00",
+            name="ck_investment_policy_draft_allocations_percentage_range",
+        ),
+        CheckConstraint(
+            "sort_order >= 0",
+            name="ck_investment_policy_draft_allocations_sort_order_nonnegative",
+        ),
+        UniqueConstraint(
+            "draft_id",
+            "normalized_asset_class_name",
+            name="uq_investment_policy_draft_allocations_normalized_name",
+        ),
+        UniqueConstraint(
+            "draft_id",
+            "sort_order",
+            name="uq_investment_policy_draft_allocations_sort_order",
+        ),
+        Index("ix_investment_policy_draft_allocations_draft_id", "draft_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    draft_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "investment_policy_drafts.id",
+            name="fk_policy_draft_allocations_draft_id_policy_drafts",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    )
+    asset_class_name: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_asset_class_name: Mapped[str] = mapped_column(Text, nullable=False)
+    target_percentage: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class InvestmentPolicyVersionAllocation(Base):
+    __tablename__ = "investment_policy_version_allocations"
+    __table_args__ = (
+        CheckConstraint(
+            "char_length(asset_class_name) BETWEEN 1 AND 200",
+            name="ck_investment_policy_version_allocations_name_length",
+        ),
+        CheckConstraint(
+            "char_length(normalized_asset_class_name) BETWEEN 1 AND 200",
+            name="ck_investment_policy_version_allocations_normalized_name_length",
+        ),
+        CheckConstraint(
+            "target_percentage > 0.00 AND target_percentage <= 100.00",
+            name="ck_investment_policy_version_allocations_percentage_range",
+        ),
+        CheckConstraint(
+            "sort_order >= 0",
+            name="ck_investment_policy_version_allocations_sort_order_nonnegative",
+        ),
+        UniqueConstraint(
+            "version_id",
+            "normalized_asset_class_name",
+            name="uq_investment_policy_version_allocations_normalized_name",
+        ),
+        UniqueConstraint(
+            "version_id",
+            "sort_order",
+            name="uq_investment_policy_version_allocations_sort_order",
+        ),
+        Index(
+            "ix_investment_policy_version_allocations_version_order",
+            "version_id",
+            "sort_order",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    version_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "investment_policy_versions.id",
+            name="fk_policy_version_allocations_version_id_policy_versions",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    asset_class_name: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_asset_class_name: Mapped[str] = mapped_column(Text, nullable=False)
+    target_percentage: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False)

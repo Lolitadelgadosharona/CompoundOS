@@ -59,6 +59,7 @@ def test_create_get_and_audit_household(api_client: TestClient) -> None:
     assert audit.status_code == 200
     events = audit.json()
     assert len(events) == 1
+    assert events[0]["sequence_number"] > 0
     assert events[0]["actor"] == "local-owner"
     assert events[0]["action"] == "household.created"
     assert events[0]["metadata"] == {"changed_fields": sorted(HOUSEHOLD_PAYLOAD)}
@@ -106,6 +107,7 @@ def test_patch_updates_allowed_fields_and_appends_ordered_audit_event(
 
     events = api_client.get("/api/households/current/audit-events").json()
     assert [event["action"] for event in events] == ["household.created", "household.updated"]
+    assert events[0]["sequence_number"] < events[1]["sequence_number"]
     assert events[1]["metadata"] == {"changed_fields": ["household_name", "notes"]}
     assert "Updated private notes" not in str(events)
 
@@ -246,4 +248,12 @@ def test_audit_failure_rolls_back_household_update(
 
 def test_migration_contains_only_approved_product_tables(postgres_engine) -> None:
     tables = set(inspect(postgres_engine).get_table_names())
-    assert tables - {"alembic_version"} == {"household_profiles", "audit_events"}
+    assert tables - {"alembic_version"} == {
+        "audit_events",
+        "household_profiles",
+        "investment_policies",
+        "investment_policy_draft_allocations",
+        "investment_policy_drafts",
+        "investment_policy_version_allocations",
+        "investment_policy_versions",
+    }

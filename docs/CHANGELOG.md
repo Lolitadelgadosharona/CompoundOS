@@ -1,5 +1,47 @@
 # Changelog
 
+## [Unreleased] - Sprint 002 Slice 2A Complete
+
+### Added
+
+- Alembic revision `0002_investment_policy_foundation`
+- Five approved Investment Policy, Draft, allocation, and Version persistence tables
+- Database-generated unique AuditEvent insertion sequence with preserved Slice 1 data
+- Named Policy cardinality, version, allocation, normalization, and range constraints
+- PostgreSQL immutable Version and Version-allocation trigger functions
+- Deferred commit-time sealing enforcement
+- SQLAlchemy mappings aligned with the migration
+- Real PostgreSQL tests for fresh and incremental migration, downgrade/re-upgrade,
+  constraints, triggers, rollback, and insertion sequencing
+- ADR 0003 documenting immutable Policy snapshot persistence
+
+### Boundaries
+
+- Slice 2A adds no Policy repository workflow, service, API endpoint, Pydantic
+  Policy contract, or frontend `/policy` experience.
+- No recommendation, Guardian, AI, Broker, trading, authentication, Slice 2B,
+  Slice 2C, or Slice 3 behavior is included.
+- AuditEvent sequence values provide deterministic database insertion order, not
+  concurrent transaction commit order, and may contain rollback gaps.
+
+### Status
+
+- Sprint 002 remains In Progress.
+- Slice 2A passed independent review with conclusion APPROVE WITH NON-BLOCKING
+  FOLLOW-UP and pull request #7 is approved for merge.
+- Slice 2A completes only the Investment Policy persistence and immutability
+  foundation; it is not a production-readiness claim.
+- Slice 2B, Slice 2C, and Slice 3 remain unauthorized.
+- Docker runtime/browser validation and full AuditEvent pagination remain Backlog items.
+
+### Non-blocking follow-ups
+
+- Strengthen schema/trigger regression assertions for all allocation unique
+  constraints and index predicates, combined seal-plus-content mutation, repeated
+  Superseded mutation, and multi-row forbidden statements.
+- In a separate maintenance change, add Alembic `path_separator = os` and rerun
+  offline and real PostgreSQL migration validation.
+
 ## [Unreleased] - Sprint 002 Slice 1 Complete
 
 ### Added

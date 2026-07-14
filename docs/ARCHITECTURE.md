@@ -22,6 +22,29 @@ CompoundOS will use a modular monorepo with a Next.js frontend, a FastAPI backen
 - Safety constraints: Pydantic performs request validation and named PostgreSQL
   checks independently enforce the same character limits and currency format
 
+## Sprint 002 Slice 2A Architecture
+
+Slice 2A extends the persistence foundation without adding a Policy use case or
+user-facing workflow:
+
+- Alembic revision `0002_investment_policy_foundation` extends `audit_events` and
+  creates the five approved Policy, Draft, allocation, and immutable Version tables.
+- `audit_events.sequence_number` is a PostgreSQL-generated identity value used for
+  deterministic insertion ordering. It may contain rollback gaps and does not
+  represent concurrent transaction commit order.
+- Named PostgreSQL checks, unique constraints, foreign keys, and indexes enforce
+  Policy/Draft cardinality, allocation bounds, normalized-name uniqueness,
+  version numbering, and at most one current `published` Version.
+- PostgreSQL trigger functions permit only the internal unsealed snapshot-build
+  interval, exact sealing, and exact `published` to `superseded` transition.
+- A deferred constraint trigger prevents committing an unsealed Version.
+- Version allocation rows are insertable only before parent sealing and are never
+  updateable or deletable.
+- SQLAlchemy models mirror the migration. No Policy repository workflow, service,
+  request schema, router, endpoint, or frontend is introduced in Slice 2A.
+- Real PostgreSQL tests cover fresh/incremental migration, downgrade/re-upgrade,
+  named constraints, trigger transitions, rollback, and AuditEvent sequencing.
+
 ## Module Boundaries
 
 - `routers/households.py`: four approved HTTP contracts and status mapping
@@ -96,3 +119,5 @@ and CI toolchain.
 - Decide whether to migrate `frontend/` to `apps/web/` in a later approved sprint.
 - Any later persistence, authentication, policy, journal, Guardian, AI, or broker
   architecture requires separate approval.
+- Policy services, APIs, and frontend workflows remain outside Slice 2A and require
+  separate Slice 2B or Slice 2C authorization.

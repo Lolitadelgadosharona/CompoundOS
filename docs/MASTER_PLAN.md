@@ -18,10 +18,14 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   local development configuration
 - Sprint 002: In Progress
 - Completed work: Implementation Slice 1 — Household and Persistence Foundation
+- Completed work: Implementation Slice 2A — Investment Policy Persistence and
+  Immutability Foundation
+- Slice 2 Technical Design: Approved
 - Current implementation authorization: none
-- Slice 2: Technical Design / Not Started
-- Slice 2 implementation: Not authorized
-- Slice 3: Not authorized
+- Slice 2A: Done
+- Slice 2B: Not authorized / Not Started
+- Slice 2C: Not authorized / Not Started
+- Slice 3: Not authorized / Not Started
 
 ## Planning
 
@@ -31,7 +35,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Sprint 002 Slice 1 planning and implementation are complete; later
   implementation slices remain unauthorized.
 - Sprint 002 Slice 2 technical design is authorized for planning and review only.
-- Slice 2 technical design does not authorize implementation.
+- Slice 2A implementation was separately authorized on 2026-07-14.
+- Slice 2B, Slice 2C, and Slice 3 remain unauthorized.
 
 ## Backlog
 
@@ -39,6 +44,11 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Align `NEXT_PUBLIC_API_URL` with the Docker build-time public environment model
 - Split Python runtime and development dependencies before production hardening
 - Design AuditEvent pagination before introducing higher-volume event sources
+- Strengthen Policy persistence schema and trigger regression coverage for all
+  allocation unique constraints and index predicates, combined seal-plus-content
+  mutation, repeated Superseded mutation, and multi-row forbidden statements
+- In a separate maintenance change, add Alembic `path_separator = os` and rerun
+  offline and real PostgreSQL migration validation
 - Complete browser-path validation with the full Docker runtime stack
 - Decide whether to migrate `frontend/` to `apps/web/`
 - Add backend domain modules
@@ -49,7 +59,9 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 
 ## In Progress
 
-- Sprint 002 remains In Progress; no further implementation slice is authorized.
+- Sprint 002 remains In Progress.
+- Slice 2A is Done after independent review and approval for merge.
+- Slice 2B, Slice 2C, and Slice 3 remain unauthorized and Not Started.
 
 ## Review
 
@@ -76,7 +88,18 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   APPROVE.
 - Pull request #6 approved for merge.
 - Merging the design pull request does not authorize Slice 2 implementation.
-- Sprint 002 remains In Progress; Slice 2 implementation is not authorized.
+- Sprint 002 Slice 2A persistence and immutability foundation completed
+  independent Review.
+- Slice 2A contains migration, ORM mapping, database constraints, immutable
+  snapshot triggers, AuditEvent insertion sequencing, and real PostgreSQL tests.
+- Slice 2A adds no Policy service, repository workflow, API, or frontend.
+- Sprint 002 Slice 2A final independent review conclusion: APPROVE WITH
+  NON-BLOCKING FOLLOW-UP.
+- The review found zero BLOCKER, HIGH, MEDIUM, or LOW findings and recorded two
+  non-blocking maintenance follow-ups in the Backlog.
+- Pull request #7 approved for merge.
+- Sprint 002 remains In Progress; Slice 2B, Slice 2C, and Slice 3 are not
+  authorized and Not Started.
 
 ## Done
 
@@ -107,6 +130,12 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Atomic HouseholdProfile and AuditEvent writes
 - Local-only Household UI with independent audit refresh recovery
 - Real PostgreSQL CI gate with required-mode skip prevention
+- Sprint 002 Slice 2A: Investment Policy Persistence and Immutability Foundation
+- Immutable Policy, Draft, allocation, and Version persistence schema
+- Database-enforced immutable Version sealing and supersession transitions
+- Database-generated AuditEvent insertion sequencing
+- Real PostgreSQL migration, constraint, trigger, rollback, and sequencing tests
+- Slice 2A completed without a Policy service, repository workflow, API, or frontend
 
 ## Decision Log
 
@@ -208,3 +237,16 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   conclusion is APPROVE; pull request #6 is approved for merge.
 - 2026-07-14: Merging pull request #6 does not authorize Slice 2 implementation;
   Slice 2 remains Not Started and Slice 3 remains unauthorized.
+- 2026-07-14: Sprint 002 Slice 2A implementation authorized for Investment Policy
+  persistence and immutable database snapshots only.
+- 2026-07-14: Slice 2A may add migration, ORM mapping, database helpers, and real
+  PostgreSQL tests, but no Policy service, API, or frontend workflow.
+- 2026-07-14: Slice 2B, Slice 2C, and Slice 3 remain unauthorized.
+- 2026-07-14: Sprint 002 Slice 2A final independent review passed with the
+  conclusion APPROVE WITH NON-BLOCKING FOLLOW-UP.
+- 2026-07-14: Record stronger Policy persistence schema/trigger regression
+  assertions and Alembic `path_separator = os` migration validation as
+  non-blocking maintenance Backlog items.
+- 2026-07-14: Pull request #7 is approved for merge; Slice 2A is Done while
+  Sprint 002 remains In Progress.
+- 2026-07-14: Slice 2B, Slice 2C, and Slice 3 remain unauthorized and Not Started.

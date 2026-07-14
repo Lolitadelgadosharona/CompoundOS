@@ -2,8 +2,10 @@
 
 ## Status
 
-Approved for Sprint 002 Implementation Slice 1 only. Sprint 002 remains In
-Progress, and Slice 2 is not authorized.
+Approved user-facing behavior remains limited to Sprint 002 Implementation Slice
+1. Slice 2A is an authorized persistence and immutability foundation in Review;
+it adds no Policy API or user-facing behavior. Slice 2B, Slice 2C, and Slice 3 are
+not authorized.
 
 ## Summary
 

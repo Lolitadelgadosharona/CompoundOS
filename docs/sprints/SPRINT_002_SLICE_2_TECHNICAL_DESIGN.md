@@ -2,7 +2,7 @@
 
 ## Status
 
-**Proposed — Implementation Not Authorized**
+**Approved — Slice 2A Implemented for Review**
 
 - Design date: 2026-07-14
 - Baseline: Sprint 002 Slice 1 at merge commit
@@ -10,9 +10,9 @@
 - Purpose: define a reviewable Policy-only implementation specification
 - Final independent review conclusion: APPROVE
 - Pull request #6 is approved for merge.
-- This document creates no schema, migration, endpoint, UI, dependency, or product
-  behavior. Review approval and merge do not authorize implementation; separate
-  project-owner authorization is required.
+- Project-owner authorization on 2026-07-14 permits Slice 2A persistence,
+  immutability enforcement, ORM mapping, and database tests only. Slice 2B, Slice
+  2C, and Slice 3 remain unauthorized.
 
 ## 1. Scope and boundaries
 
@@ -787,7 +787,6 @@ retention/export/deletion, backup, encryption, and final legal copy.
 
 ## Design gate conclusion
 
-Final independent technical review conclusion: **APPROVE**. Pull request #6 is
-approved for squash merge. Review approval and merging this design do not
-authorize implementation, do not start Slice 2, and grant no authority for Slice
-3.
+Final independent technical design review conclusion: **APPROVE**. Pull request
+#6 was squash-merged. Slice 2A was separately authorized and is implemented for
+review; this does not authorize Slice 2B, Slice 2C, or Slice 3.
