@@ -8,8 +8,11 @@
 - Baseline: Sprint 002 Slice 1 at merge commit
   `a06ebb917570672cb38c01fb7defad4c62ed5605`
 - Purpose: define a reviewable Policy-only implementation specification
+- Final independent review conclusion: APPROVE
+- Pull request #6 is approved for merge.
 - This document creates no schema, migration, endpoint, UI, dependency, or product
-  behavior. Project-owner approval is required before implementation.
+  behavior. Review approval and merge do not authorize implementation; separate
+  project-owner authorization is required.
 
 ## 1. Scope and boundaries
 
@@ -371,17 +374,24 @@ proposed.
 ### Existing `audit_events` extension
 
 The migration adds `sequence_number BIGINT GENERATED ALWAYS AS IDENTITY` to the
-existing Slice 1 table. It is database-generated, `NOT NULL`, and `UNIQUE`;
-clients and application inserts cannot provide it. Existing AuditEvent rows must
-be preserved and receive valid, unique sequence numbers during the incremental
-migration. The field records PostgreSQL insertion order only. It is not a
-business priority, policy score, or event importance value.
+existing Slice 1 table. It is a PostgreSQL-assigned, unique, monotonically
+increasing insertion sequence that is `NOT NULL` and `UNIQUE`; clients and
+application inserts cannot provide it. Existing AuditEvent rows must be preserved
+and receive valid, unique sequence numbers during the incremental migration.
 
-Policy and Household audit queries order by `sequence_number`. Audit API responses
-expose it as additive read-only metadata to make ordering testable and leave a
-stable foundation for future pagination; clients cannot set it. The existing
-HouseholdProfile endpoint, filters, and previously exposed fields otherwise retain
-their Slice 1 contract. Audit pagination remains a Backlog item.
+The sequence provides deterministic event display ordering. It does **not**
+represent the global commit order of concurrent transactions and must not be
+treated as complete cross-transaction causal ordering. Rollbacks can leave gaps,
+so clients must not require consecutive values. The field records database
+insertion sequence only; it is not a business priority, policy score, event
+importance, or transaction commit timestamp.
+
+Audit API responses expose `sequence_number` as additive read-only metadata to
+make ordering testable and leave a stable foundation for future pagination;
+clients cannot set it. The existing HouseholdProfile endpoint switches only to
+`sequence_number ASC` ordering. Its resource boundary, filters, previously
+exposed fields, and pagination behavior otherwise remain unchanged. AuditEvent
+pagination remains a Backlog item.
 
 ## 8. AuditEvent expansion
 
@@ -418,14 +428,19 @@ as the business mutation. No audit event is written for validation failure, stal
 
 The approved design retains the Slice 1 HouseholdProfile audit resource contract
 and adds a Policy-filtered endpoint. The repository query filters by household,
-`entity_type = 'InvestmentPolicy'`, and stable Policy ID, ordered by
-`sequence_number`. The read is exposed as
+`entity_type = 'InvestmentPolicy'`, and stable Policy ID. The read is exposed as
 `GET /api/policies/current/audit-events`, is strictly read-only, and returns no
-policy text, asset-class name, or percentage. This Slice uses a documented safe
-result limit without a cursor; full audit pagination remains in the Backlog. The
-existing Household query also changes to sequence ordering without changing its
-filter or mutation behavior. Any future combined household-wide activity feed
-requires its own pagination and presentation decision.
+policy text, asset-class name, or percentage.
+
+The Policy endpoint accepts an optional `limit` with default 50 and maximum 100.
+PostgreSQL first orders matching rows by `sequence_number DESC` and selects the
+latest N; the API then returns that selected window in `sequence_number ASC`
+order, from older to newer within the window. This Slice provides no cursor, so
+events older than the selected latest-N window are temporarily inaccessible
+through this endpoint. Full AuditEvent pagination remains in the Backlog. The
+existing Household query changes only to `sequence_number ASC` ordering and gains
+no new pagination or resource semantics. Any future combined household-wide
+activity feed requires its own pagination and presentation decision.
 
 ## 9. Proposed API contracts (not implemented)
 
@@ -445,7 +460,7 @@ keys, trigger/sealing mechanics, and recommendation-like fields.
 | `GET /api/policies/current/published` | None | `200` current Published Version and allocation snapshot | `404` no current Published version. Read-only. |
 | `GET /api/policies/current/versions` | Optional `before_version_number`; `limit` defaults 20, maximum 100 | `200` version metadata newest first plus next cursor | `404` no Policy; `422` invalid pagination. Read-only. |
 | `GET /api/policies/current/versions/{version_number}` | Positive integer path value | `200` immutable Version and allocation snapshot | `404` missing; `422` malformed number. Read-only. |
-| `GET /api/policies/current/audit-events` | Optional `limit`, default 50 and maximum 100; no cursor in this Slice | `200` policy events in causal `sequence_number` order | `404` no Policy; `422` invalid limit. Read-only and filtered by household, `InvestmentPolicy`, and current Policy ID. |
+| `GET /api/policies/current/audit-events` | Optional `limit`, default 50 and maximum 100; no cursor in this Slice | `200` latest-N policy events returned `sequence_number ASC` within the selected window | `404` no Policy; `422` invalid limit. PostgreSQL selects by `sequence_number DESC`; events before the window are not accessible in this Slice. Read-only and filtered by household, `InvestmentPolicy`, and current Policy ID. |
 
 Status principles:
 
@@ -525,10 +540,11 @@ The partial unique index permits at most one Version per Policy with stored
 `status = 'published'`. Publish locks the Policy, supersedes the old row first,
 then inserts the replacement, and writes `policy.superseded` before
 `policy.published` in the same transaction. Database-generated AuditEvent
-`sequence_number` values make that causal order observable. A rollback preserves
-the prior Published Version and removes both attempted events. Only the named
-partial-index conflict is translated to the corresponding lifecycle 409; other
-integrity errors propagate.
+`sequence_number` values prove that insertion order within this one transaction.
+They do not establish commit order between concurrent transactions. A rollback
+preserves the prior Published Version, removes both attempted events, and may
+leave unused sequence values. Only the named partial-index conflict is translated
+to the corresponding lifecycle 409; other integrity errors propagate.
 
 | Race | Enforcement | Expected losing response |
 |---|---|---|
@@ -611,13 +627,21 @@ revision/lifecycle checks; unrelated `IntegrityError` instances must propagate.
 - Policy and Household audit reads order by database-generated `sequence_number`;
   existing events survive migration with unique values, and clients cannot supply
   a sequence number.
+- Sequence tests verify unique, monotonically increasing insertion values,
+  deterministic display ordering, and permitted gaps after rollback. Concurrent
+  tests must not assert that sequence order equals transaction commit time or a
+  complete cross-transaction causal order.
 - A replacement publish inserts `policy.superseded` before `policy.published`, and
-  their sequence numbers prove that order within the committed transaction.
+  their sequence numbers prove that insertion order within the same committed
+  transaction.
 - Policy audit filtering uses household, entity type, and current Policy ID; its
-  safe limit works without cursor pagination, and the response exposes read-only
-  sequence metadata but no policy text, class name, or percentage.
-- Existing Slice 1 audit ordering tests are updated to assert sequence ordering
-  without changing the HouseholdProfile audit resource boundary.
+  default-50/maximum-100 limit selects the latest N by descending sequence and
+  returns that window ascending, without cursor pagination. Tests confirm earlier
+  events are inaccessible and the response exposes read-only sequence metadata
+  but no policy text, class name, or percentage.
+- Existing Slice 1 audit ordering tests are updated to assert
+  `sequence_number ASC` without adding Household pagination or changing the
+  HouseholdProfile audit resource boundary.
 - Audit metadata contains only allowed keys and never policy text, class names,
   percentages, or complete allocations.
 - All proposed 200/201/204/400/404/409/422 contracts and sensitive-input redaction.
@@ -655,7 +679,9 @@ revision/lifecycle checks; unrelated `IntegrityError` instances must propagate.
 - The merged 0001 revision is immutable and must not be edited.
 - Add database-generated `audit_events.sequence_number BIGINT GENERATED ALWAYS AS
   IDENTITY`, populate existing rows through the migration, and enforce `NOT NULL`
-  plus uniqueness. Application/client inserts never set this field.
+  plus uniqueness. Application/client inserts never set this field. Values are a
+  monotonically increasing insertion sequence, may contain rollback gaps, and do
+  not represent concurrent transaction commit order.
 - Upgrade order: AuditEvent sequence extension → Policy table → Version table →
   Draft table → Draft allocations → Version allocations → indexes → trigger
   functions → triggers.
@@ -697,8 +723,12 @@ No migration is created by this design gate.
   inserts are accepted only before the parent is sealed.
 - Version history and Policy audit reads are stable and expose no internal sealing
   or normalized-name fields. Policy and Household audit reads use the unique,
-  database-generated `sequence_number`; it is exposed read-only and never carries
-  score or priority meaning.
+  database-generated `sequence_number`; it is exposed read-only for deterministic
+  display and never carries score, priority, global commit-order, or complete
+  cross-transaction causality meaning.
+- The Policy audit endpoint selects the latest 50 events by default (maximum 100)
+  in descending sequence order and returns that window ascending. It has no
+  cursor, so older events outside the window are temporarily inaccessible.
 - New Drafts are blank or sourced only from the current Published Version, retain
   `source_version_id`, and cannot restore or branch from Superseded history.
 - The `/policy` flow covers empty, Draft, publish review, Published, history, and
@@ -711,8 +741,9 @@ No migration is created by this design gate.
 
 ### Proposed Definition of Done
 
-- This technical design receives final review and separate implementation
-  authorization; OD-1 through OD-6 are already resolved.
+- This technical design has received final independent review with conclusion
+  APPROVE; separate implementation authorization remains required. OD-1 through
+  OD-6 are already resolved.
 - A new 0002 migration, models, strict schemas, repositories, service transaction
   boundaries, API contracts, and minimal UI are implemented only after approval.
 - Fresh and incremental migrations, downgrade, constraints, triggers, lifecycle,
@@ -756,6 +787,7 @@ retention/export/deletion, backup, encryption, and final legal copy.
 
 ## Design gate conclusion
 
-This revised document is pending final technical review as a proposal. It does
-not authorize implementation, does not start Slice 2, and grants no authority for
-Slice 3.
+Final independent technical review conclusion: **APPROVE**. Pull request #6 is
+approved for squash merge. Review approval and merging this design do not
+authorize implementation, do not start Slice 2, and grant no authority for Slice
+3.

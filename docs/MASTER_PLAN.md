@@ -69,9 +69,13 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Pull request #5 approved for merge.
 - Sprint 002 Slice 2 technical design reviewed.
 - Owner decisions OD-1 through OD-6 resolved on 2026-07-14.
-- The AuditEvent causal-ordering gap was identified and resolved in the design
-  with a database-generated sequence number.
-- Slice 2 technical design changes are pending final review.
+- The AuditEvent deterministic database insertion-ordering requirement was
+  resolved in the design with a database-generated sequence number; it is not a
+  claim about concurrent transaction commit order.
+- Sprint 002 Slice 2 Technical Design final independent review conclusion:
+  APPROVE.
+- Pull request #6 approved for merge.
+- Merging the design pull request does not authorize Slice 2 implementation.
 - Sprint 002 remains In Progress; Slice 2 implementation is not authorized.
 
 ## Done
@@ -196,6 +200,11 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - 2026-07-14: Approved blank/current-Published-only Draft sourcing and rejected
   arbitrary historical or Superseded sources.
 - 2026-07-14: Required a database-generated AuditEvent `sequence_number` for
-  causal ordering of Policy and Household audit reads.
+  deterministic insertion ordering of Policy and Household audit reads, without
+  treating it as concurrent transaction commit order.
 - 2026-07-14: These design decisions do not authorize Slice 2 implementation;
+  Slice 2 remains Not Started and Slice 3 remains unauthorized.
+- 2026-07-14: Sprint 002 Slice 2 Technical Design final independent review
+  conclusion is APPROVE; pull request #6 is approved for merge.
+- 2026-07-14: Merging pull request #6 does not authorize Slice 2 implementation;
   Slice 2 remains Not Started and Slice 3 remains unauthorized.
