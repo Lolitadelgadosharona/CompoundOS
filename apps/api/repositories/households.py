@@ -47,6 +47,6 @@ def list_audit_events(session: Session, household_id: UUID) -> list[AuditEvent]:
     statement = (
         select(AuditEvent)
         .where(AuditEvent.household_id == household_id)
-        .order_by(AuditEvent.occurred_at, AuditEvent.id)
+        .order_by(AuditEvent.sequence_number.asc())
     )
     return list(session.scalars(statement))
