@@ -18,9 +18,11 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   local development configuration
 - Sprint 002: In Progress
 - Completed work: Implementation Slice 1 — Household and Persistence Foundation
-- Current implementation authorization: none
-- Slice 2: Technical Design / Not Started
-- Slice 2 implementation: Not authorized
+- Slice 2 Technical Design: Approved
+- Current implementation authorization: Slice 2A only
+- Slice 2A: Investment Policy Persistence and Immutability Foundation / Review
+- Slice 2B: Not authorized
+- Slice 2C: Not authorized
 - Slice 3: Not authorized
 
 ## Planning
@@ -31,7 +33,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Sprint 002 Slice 1 planning and implementation are complete; later
   implementation slices remain unauthorized.
 - Sprint 002 Slice 2 technical design is authorized for planning and review only.
-- Slice 2 technical design does not authorize implementation.
+- Slice 2A implementation was separately authorized on 2026-07-14.
+- Slice 2B, Slice 2C, and Slice 3 remain unauthorized.
 
 ## Backlog
 
@@ -49,7 +52,9 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 
 ## In Progress
 
-- Sprint 002 remains In Progress; no further implementation slice is authorized.
+- Sprint 002 remains In Progress.
+- Slice 2A implementation is complete and awaiting independent review.
+- No further implementation slice is authorized.
 
 ## Review
 
@@ -76,7 +81,11 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   APPROVE.
 - Pull request #6 approved for merge.
 - Merging the design pull request does not authorize Slice 2 implementation.
-- Sprint 002 remains In Progress; Slice 2 implementation is not authorized.
+- Sprint 002 Slice 2A persistence and immutability foundation is in Review.
+- Slice 2A contains migration, ORM mapping, database constraints, immutable
+  snapshot triggers, AuditEvent insertion sequencing, and real PostgreSQL tests.
+- Slice 2A adds no Policy service, repository workflow, API, or frontend.
+- Sprint 002 remains In Progress; Slice 2B, Slice 2C, and Slice 3 are not authorized.
 
 ## Done
 
@@ -208,3 +217,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   conclusion is APPROVE; pull request #6 is approved for merge.
 - 2026-07-14: Merging pull request #6 does not authorize Slice 2 implementation;
   Slice 2 remains Not Started and Slice 3 remains unauthorized.
+- 2026-07-14: Sprint 002 Slice 2A implementation authorized for Investment Policy
+  persistence and immutable database snapshots only.
+- 2026-07-14: Slice 2A may add migration, ORM mapping, database helpers, and real
+  PostgreSQL tests, but no Policy service, API, or frontend workflow.
+- 2026-07-14: Slice 2B, Slice 2C, and Slice 3 remain unauthorized.
