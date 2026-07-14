@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] - Sprint 002 Slice 2A Review
+## [Unreleased] - Sprint 002 Slice 2A Complete
 
 ### Added
 
@@ -27,9 +27,20 @@
 ### Status
 
 - Sprint 002 remains In Progress.
-- Slice 2A is in Review and is not a production-readiness claim.
+- Slice 2A passed independent review with conclusion APPROVE WITH NON-BLOCKING
+  FOLLOW-UP and pull request #7 is approved for merge.
+- Slice 2A completes only the Investment Policy persistence and immutability
+  foundation; it is not a production-readiness claim.
 - Slice 2B, Slice 2C, and Slice 3 remain unauthorized.
 - Docker runtime/browser validation and full AuditEvent pagination remain Backlog items.
+
+### Non-blocking follow-ups
+
+- Strengthen schema/trigger regression assertions for all allocation unique
+  constraints and index predicates, combined seal-plus-content mutation, repeated
+  Superseded mutation, and multi-row forbidden statements.
+- In a separate maintenance change, add Alembic `path_separator = os` and rerun
+  offline and real PostgreSQL migration validation.
 
 ## [Unreleased] - Sprint 002 Slice 1 Complete
 
