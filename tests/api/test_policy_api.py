@@ -76,6 +76,17 @@ def publish(client: TestClient, revision: int) -> dict:
     return response.json()
 
 
+def allocation_content(items: list[dict]) -> list[dict]:
+    return [
+        {
+            "asset_class_name": item["asset_class_name"],
+            "target_percentage": item["target_percentage"],
+            "sort_order": item["sort_order"],
+        }
+        for item in items
+    ]
+
+
 def test_policy_create_read_singleton_and_audit_redaction(api_client: TestClient) -> None:
     assert api_client.post("/api/policies").status_code == 404
     create_household(api_client)
@@ -231,7 +242,12 @@ def test_replacement_publish_copy_provenance_history_and_audit_order(
     )
     assert copied.status_code == 201
     assert copied.json()["source_version_id"] == first["id"]
-    assert copied.json()["allocations"] == first["allocations"]
+    assert allocation_content(copied.json()["allocations"]) == allocation_content(
+        first["allocations"]
+    )
+    assert {item["id"] for item in copied.json()["allocations"]}.isdisjoint(
+        {item["id"] for item in first["allocations"]}
+    )
     second = publish(api_client, copied.json()["revision"])
     assert second["version_number"] == 2
     assert api_client.post(
@@ -408,7 +424,9 @@ def test_allocation_replace_racing_publish_cannot_create_mixed_snapshot(
 
     published = api_client.get("/api/policies/current/published")
     if published.status_code == 200:
-        assert published.json()["allocations"] == draft["allocations"]
+        assert allocation_content(published.json()["allocations"]) == allocation_content(
+            draft["allocations"]
+        )
     else:
         current_draft = api_client.get("/api/policies/current/draft").json()
         assert current_draft["allocations"][0]["target_percentage"] == "100.00"
