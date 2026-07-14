@@ -67,7 +67,12 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Sprint 002 Slice 1 final independent review conclusion: APPROVE WITH
   NON-BLOCKING FOLLOW-UP.
 - Pull request #5 approved for merge.
-- Sprint 002 remains In Progress; Slice 2 is not authorized.
+- Sprint 002 Slice 2 technical design reviewed.
+- Owner decisions OD-1 through OD-6 resolved on 2026-07-14.
+- The AuditEvent causal-ordering gap was identified and resolved in the design
+  with a database-generated sequence number.
+- Slice 2 technical design changes are pending final review.
+- Sprint 002 remains In Progress; Slice 2 implementation is not authorized.
 
 ## Done
 
@@ -177,3 +182,20 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - 2026-07-14: Sprint 002 Slice 2 technical design authorized.
 - 2026-07-14: Technical design does not authorize Slice 2 implementation; Slice 2
   remains Not Started and Slice 3 remains unauthorized.
+- 2026-07-14: Approved three required publication fields: `objectives`,
+  `time_horizon`, and `decision_process`; the other seven policy categories may
+  remain empty.
+- 2026-07-14: Approved `NUMERIC(5,2)` storage and the decimal-string API contract
+  for target percentages, with no silent rounding.
+- 2026-07-14: Approved PostgreSQL immutability triggers with strict Version sealing
+  and supersession transitions and deferred commit-time sealing enforcement.
+- 2026-07-14: Approved atomic replacement of the complete Draft allocation
+  collection with optimistic revision control.
+- 2026-07-14: Approved a Policy-filtered audit read while retaining the existing
+  HouseholdProfile audit endpoint.
+- 2026-07-14: Approved blank/current-Published-only Draft sourcing and rejected
+  arbitrary historical or Superseded sources.
+- 2026-07-14: Required a database-generated AuditEvent `sequence_number` for
+  causal ordering of Policy and Household audit reads.
+- 2026-07-14: These design decisions do not authorize Slice 2 implementation;
+  Slice 2 remains Not Started and Slice 3 remains unauthorized.
