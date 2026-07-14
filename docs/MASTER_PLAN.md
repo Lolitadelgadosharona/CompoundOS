@@ -19,15 +19,19 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Sprint 002: In Progress
 - Completed work: Implementation Slice 1 — Household and Persistence Foundation
 - Current implementation authorization: none
-- Slice 2: Not authorized / Not Started
+- Slice 2: Technical Design / Not Started
+- Slice 2 implementation: Not authorized
+- Slice 3: Not authorized
 
 ## Planning
 
 - Sprint 002 selected direction: Household Investment Policy + Decision Journal.
 - Planning pull request #4 completed independent planning review and is approved
   for merge.
-- Planning is complete. Sprint 002 Slice 1 implementation is authorized; later
+- Sprint 002 Slice 1 planning and implementation are complete; later
   implementation slices remain unauthorized.
+- Sprint 002 Slice 2 technical design is authorized for planning and review only.
+- Slice 2 technical design does not authorize implementation.
 
 ## Backlog
 
@@ -63,7 +67,16 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Sprint 002 Slice 1 final independent review conclusion: APPROVE WITH
   NON-BLOCKING FOLLOW-UP.
 - Pull request #5 approved for merge.
-- Sprint 002 remains In Progress; Slice 2 is not authorized.
+- Sprint 002 Slice 2 technical design reviewed.
+- Owner decisions OD-1 through OD-6 resolved on 2026-07-14.
+- The AuditEvent deterministic database insertion-ordering requirement was
+  resolved in the design with a database-generated sequence number; it is not a
+  claim about concurrent transaction commit order.
+- Sprint 002 Slice 2 Technical Design final independent review conclusion:
+  APPROVE.
+- Pull request #6 approved for merge.
+- Merging the design pull request does not authorize Slice 2 implementation.
+- Sprint 002 remains In Progress; Slice 2 implementation is not authorized.
 
 ## Done
 
@@ -170,3 +183,28 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - 2026-07-13: Pull request #5 is approved for merge.
 - 2026-07-13: Sprint 002 remains In Progress; Slice 2 remains unauthorized and
   Not Started.
+- 2026-07-14: Sprint 002 Slice 2 technical design authorized.
+- 2026-07-14: Technical design does not authorize Slice 2 implementation; Slice 2
+  remains Not Started and Slice 3 remains unauthorized.
+- 2026-07-14: Approved three required publication fields: `objectives`,
+  `time_horizon`, and `decision_process`; the other seven policy categories may
+  remain empty.
+- 2026-07-14: Approved `NUMERIC(5,2)` storage and the decimal-string API contract
+  for target percentages, with no silent rounding.
+- 2026-07-14: Approved PostgreSQL immutability triggers with strict Version sealing
+  and supersession transitions and deferred commit-time sealing enforcement.
+- 2026-07-14: Approved atomic replacement of the complete Draft allocation
+  collection with optimistic revision control.
+- 2026-07-14: Approved a Policy-filtered audit read while retaining the existing
+  HouseholdProfile audit endpoint.
+- 2026-07-14: Approved blank/current-Published-only Draft sourcing and rejected
+  arbitrary historical or Superseded sources.
+- 2026-07-14: Required a database-generated AuditEvent `sequence_number` for
+  deterministic insertion ordering of Policy and Household audit reads, without
+  treating it as concurrent transaction commit order.
+- 2026-07-14: These design decisions do not authorize Slice 2 implementation;
+  Slice 2 remains Not Started and Slice 3 remains unauthorized.
+- 2026-07-14: Sprint 002 Slice 2 Technical Design final independent review
+  conclusion is APPROVE; pull request #6 is approved for merge.
+- 2026-07-14: Merging pull request #6 does not authorize Slice 2 implementation;
+  Slice 2 remains Not Started and Slice 3 remains unauthorized.
