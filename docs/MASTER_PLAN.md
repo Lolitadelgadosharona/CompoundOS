@@ -21,9 +21,9 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Completed work: Implementation Slice 2A — Investment Policy Persistence and
   Immutability Foundation
 - Slice 2 Technical Design: Approved
-- Current implementation authorization: none
+- Current implementation authorization: Slice 2B only
 - Slice 2A: Done
-- Slice 2B: Not authorized / Not Started
+- Slice 2B: Investment Policy Backend Workflow and API / Review
 - Slice 2C: Not authorized / Not Started
 - Slice 3: Not authorized / Not Started
 
@@ -36,7 +36,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   implementation slices remain unauthorized.
 - Sprint 002 Slice 2 technical design is authorized for planning and review only.
 - Slice 2A implementation was separately authorized on 2026-07-14.
-- Slice 2B, Slice 2C, and Slice 3 remain unauthorized.
+- Slice 2B implementation was separately authorized on 2026-07-14.
+- Slice 2C and Slice 3 remain unauthorized.
 
 ## Backlog
 
@@ -61,7 +62,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 
 - Sprint 002 remains In Progress.
 - Slice 2A is Done after independent review and approval for merge.
-- Slice 2B, Slice 2C, and Slice 3 remain unauthorized and Not Started.
+- Slice 2B backend implementation is complete and awaiting independent review.
+- Slice 2C and Slice 3 remain unauthorized and Not Started.
 
 ## Review
 
@@ -100,6 +102,12 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Pull request #7 approved for merge.
 - Sprint 002 remains In Progress; Slice 2B, Slice 2C, and Slice 3 are not
   authorized and Not Started.
+- Sprint 002 Slice 2B backend workflow and API is in Review.
+- Slice 2B contains strict Policy contracts, repository queries, atomic service
+  transactions, locking, immutable publication orchestration, version reads, and
+  Policy-filtered AuditEvent reads.
+- Slice 2B adds no frontend, recommendation, Guardian, AI, Broker, trading,
+  authentication, Slice 2C, or Slice 3 behavior.
 
 ## Done
 
@@ -250,3 +258,10 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - 2026-07-14: Pull request #7 is approved for merge; Slice 2A is Done while
   Sprint 002 remains In Progress.
 - 2026-07-14: Slice 2B, Slice 2C, and Slice 3 remain unauthorized and Not Started.
+- 2026-07-14: Sprint 002 Slice 2B implementation authorized for the Investment
+  Policy backend workflow and API only.
+- 2026-07-14: Slice 2B implements approved decimal-string allocation contracts,
+  Policy/Draft lifecycle transactions, immutable publication, version history,
+  and Policy-filtered audit reads.
+- 2026-07-14: Slice 2B enters Review; Slice 2C and Slice 3 remain unauthorized and
+  Not Started.

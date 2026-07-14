@@ -1,5 +1,32 @@
 # Changelog
 
+## [Unreleased] - Sprint 002 Slice 2B Review
+
+### Added
+
+- Strict Pydantic contracts for ten Policy text fields and decimal-string target
+  allocation values
+- Policy, Draft, allocation, publication, immutable Version, history, and audit APIs
+- Unicode NFKC/casefold allocation-name normalization and atomic whole-collection saves
+- Synchronous service transactions with Policy-then-Draft locking, optimistic
+  Draft revisions, named-conflict mapping, and atomic non-sensitive AuditEvents
+- Real PostgreSQL API, rollback, immutable publication, concurrency, and race tests
+- ADR 0004 documenting the Policy backend transaction and API boundary
+
+### Boundaries
+
+- Slice 2B provides a backend API only; no `/policy` frontend or frontend API
+  client is included.
+- The API records user-entered text and target percentages without evaluation,
+  recommendation, scoring, eligibility, Guardian, AI, Broker, or trading behavior.
+- Slice 2C and Slice 3 remain unauthorized and Not Started.
+
+### Status
+
+- Sprint 002 remains In Progress.
+- Slice 2A remains Done.
+- Slice 2B is in Review and is not a production-readiness claim.
+
 ## [Unreleased] - Sprint 002 Slice 2A Complete
 
 ### Added

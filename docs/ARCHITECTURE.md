@@ -45,6 +45,30 @@ user-facing workflow:
 - Real PostgreSQL tests cover fresh/incremental migration, downgrade/re-upgrade,
   named constraints, trigger transitions, rollback, and AuditEvent sequencing.
 
+## Sprint 002 Slice 2B Architecture
+
+Slice 2B adds the approved local-only backend workflow without changing the
+Slice 2A schema:
+
+- `policy_schemas.py` owns strict request/response contracts, decimal-string
+  validation, and Unicode allocation-name normalization.
+- `repositories/policies.py` contains SQLAlchemy reads, row-locking queries,
+  collection replacement, and non-sensitive AuditEvent construction.
+- `services/policies.py` owns transaction boundaries and maps only approved named
+  database conflicts or explicit lifecycle/revision conflicts.
+- `routers/policies.py` exposes the approved `/api/policies` contracts and neutral
+  400/404/409/422 responses without leaking SQL errors or sensitive values.
+- Mutations that touch both rows lock Policy before Draft. Publication supersedes
+  the prior Version, snapshots the Draft, seals the new Version, consumes the
+  Draft, and writes ordered AuditEvents in one transaction.
+- Target percentages remain decimal strings at the API boundary, `Decimal` in
+  Python, and `NUMERIC(5,2)` in PostgreSQL.
+- Policy audit reads select the newest limited window by descending database
+  sequence and return that window ascending.
+
+No frontend, authentication, recommendation, Guardian, AI, Broker, trading, or
+Decision Journal module is introduced in Slice 2B.
+
 ## Module Boundaries
 
 - `routers/households.py`: four approved HTTP contracts and status mapping
@@ -119,5 +143,5 @@ and CI toolchain.
 - Decide whether to migrate `frontend/` to `apps/web/` in a later approved sprint.
 - Any later persistence, authentication, policy, journal, Guardian, AI, or broker
   architecture requires separate approval.
-- Policy services, APIs, and frontend workflows remain outside Slice 2A and require
-  separate Slice 2B or Slice 2C authorization.
+- A Policy frontend remains outside Slice 2B and requires separate Slice 2C
+  authorization. Decision Journal work remains outside Slice 2 and unauthorized.
