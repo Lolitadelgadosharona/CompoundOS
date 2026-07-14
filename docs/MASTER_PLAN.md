@@ -19,15 +19,19 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Sprint 002: In Progress
 - Completed work: Implementation Slice 1 — Household and Persistence Foundation
 - Current implementation authorization: none
-- Slice 2: Not authorized / Not Started
+- Slice 2: Technical Design / Not Started
+- Slice 2 implementation: Not authorized
+- Slice 3: Not authorized
 
 ## Planning
 
 - Sprint 002 selected direction: Household Investment Policy + Decision Journal.
 - Planning pull request #4 completed independent planning review and is approved
   for merge.
-- Planning is complete. Sprint 002 Slice 1 implementation is authorized; later
+- Sprint 002 Slice 1 planning and implementation are complete; later
   implementation slices remain unauthorized.
+- Sprint 002 Slice 2 technical design is authorized for planning and review only.
+- Slice 2 technical design does not authorize implementation.
 
 ## Backlog
 
@@ -170,3 +174,6 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - 2026-07-13: Pull request #5 is approved for merge.
 - 2026-07-13: Sprint 002 remains In Progress; Slice 2 remains unauthorized and
   Not Started.
+- 2026-07-14: Sprint 002 Slice 2 technical design authorized.
+- 2026-07-14: Technical design does not authorize Slice 2 implementation; Slice 2
+  remains Not Started and Slice 3 remains unauthorized.
