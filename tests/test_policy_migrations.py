@@ -45,6 +45,12 @@ def test_fresh_incremental_downgrade_and_reupgrade_preserve_slice_1_data(
         command.downgrade(alembic_config, "base")
         command.upgrade(alembic_config, "head")
         assert current_revision(migration_engine) == HEAD_REVISION
+        version_column = next(
+            column
+            for column in inspect(migration_engine).get_columns("alembic_version")
+            if column["name"] == "version_num"
+        )
+        assert version_column["type"].length >= len(HEAD_REVISION)
         fresh_tables = set(inspect(migration_engine).get_table_names())
         assert {
             "audit_events",

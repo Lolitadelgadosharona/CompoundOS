@@ -186,6 +186,18 @@ $$
 
 
 def upgrade() -> None:
+    # The approved descriptive revision identifier is longer than Alembic's
+    # default VARCHAR(32). Widen the internal version column before Alembic writes
+    # this revision at the end of the transaction. Downgrade intentionally keeps
+    # the compatible width so Alembic can first write the shorter 0001 identifier.
+    op.alter_column(
+        "alembic_version",
+        "version_num",
+        existing_type=sa.String(length=32),
+        type_=sa.String(length=64),
+        existing_nullable=False,
+    )
+
     op.drop_index("ix_audit_events_household_order", table_name="audit_events")
     op.add_column(
         "audit_events",
