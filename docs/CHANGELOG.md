@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] - Sprint 002 Slice 2B Review
+## [Unreleased] - Sprint 002 Slice 2B Complete
 
 ### Added
 
@@ -14,7 +14,8 @@
 - ADR 0004 documenting the Policy backend transaction and API boundary
 - Transaction-scoped PATCH response snapshots that perform no Draft/allocation
   read after commit
-- Strict optional empty-object validation for Policy creation requests
+- Optional empty-object validation for Policy creation requests: omitted bodies and
+  `{}` are accepted, while non-empty objects, scalars, and arrays are rejected
 - Expanded required PostgreSQL coverage for lifecycle races, replacement and
   allocation rollback, unrelated integrity failures, audit windows, text
   boundaries, and exact publication totals
@@ -23,6 +24,9 @@
 
 - Slice 2B provides a backend API only; no `/policy` frontend or frontend API
   client is included.
+- Explicit JSON `null` is still accepted by `POST /api/policies` as the optional
+  empty request; distinguishing it from an omitted body remains a LOW,
+  non-blocking follow-up.
 - The API records user-entered text and target percentages without evaluation,
   recommendation, scoring, eligibility, Guardian, AI, Broker, or trading behavior.
 - Slice 2C and Slice 3 remain unauthorized and Not Started.
@@ -31,10 +35,16 @@
 
 - Sprint 002 remains In Progress.
 - Slice 2A remains Done.
-- Slice 2B is in Review and is not a production-readiness claim.
+- Slice 2B is complete and is not a production-readiness claim.
 - Independent review initially concluded REQUEST CHANGES for M-1, M-2, and L-1.
-  The focused fixes are implemented and await independent incremental review;
-  PR #8 remains Draft and no final approval is claimed.
+  M-1 was resolved with an atomic transaction-scoped PATCH response snapshot,
+  and M-2 was resolved with the required transaction, concurrency, rollback,
+  audit-window, text-boundary, and exact-total coverage.
+- Final independent incremental review conclusion: APPROVE WITH NON-BLOCKING
+  FOLLOW-UP. Pull request #8 is approved for merge.
+- L-1 remains partially resolved only for explicit JSON `null`, as disclosed
+  above; it does not block Slice 2B completion.
+- The Policy frontend and complete Policy user experience remain unimplemented.
 - Full Docker/browser runtime validation and the Alembic `path_separator = os`
   warning remain non-blocking Backlog items.
 

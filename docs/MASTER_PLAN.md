@@ -21,9 +21,9 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Completed work: Implementation Slice 2A — Investment Policy Persistence and
   Immutability Foundation
 - Slice 2 Technical Design: Approved
-- Current implementation authorization: Slice 2B only
+- Current implementation authorization: no further Slice is authorized
 - Slice 2A: Done
-- Slice 2B: Investment Policy Backend Workflow and API / Review
+- Slice 2B: Investment Policy Backend Workflow and API / Done
 - Slice 2C: Not authorized / Not Started
 - Slice 3: Not authorized / Not Started
 
@@ -50,6 +50,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   mutation, repeated Superseded mutation, and multi-row forbidden statements
 - In a separate maintenance change, add Alembic `path_separator = os` and rerun
   offline and real PostgreSQL migration validation
+- Decide and enforce whether `POST /api/policies` must distinguish an omitted body
+  from explicit JSON `null`; currently `null` is accepted as the optional empty request
 - Complete browser-path validation with the full Docker runtime stack
 - Decide whether to migrate `frontend/` to `apps/web/`
 - Add backend domain modules
@@ -62,7 +64,7 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 
 - Sprint 002 remains In Progress.
 - Slice 2A is Done after independent review and approval for merge.
-- Slice 2B backend implementation is complete and awaiting independent review.
+- Slice 2B is Done after independent review and approval for merge.
 - Slice 2C and Slice 3 remain unauthorized and Not Started.
 
 ## Review
@@ -118,10 +120,15 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   transaction-stage rollback tests, audit-window and ownership filtering tests,
   complete Policy text boundaries, exact publish totals, and error/session reuse
   coverage against real PostgreSQL.
-- L-1 is addressed with an optional strict empty-object request contract that
-  rejects extra fields and non-object JSON without creating Policy state.
-- These fixes await independent incremental review. Pull request #8 remains
-  Draft; no final review approval is claimed.
+- L-1 is partially resolved: an omitted body and `{}` follow the contract, while
+  non-empty objects, scalars, and arrays return 422 without creating Policy state.
+  Explicit JSON `null` is still treated as an omitted body and returns 201; this
+  remaining LOW issue is a non-blocking Backlog follow-up.
+- Sprint 002 Slice 2B final incremental review conclusion: APPROVE WITH
+  NON-BLOCKING FOLLOW-UP.
+- Pull request #8 approved for merge.
+- Slice 2B completes the Policy backend workflow and API only; it does not include
+  the Policy frontend or a complete Policy user experience.
 
 ## Done
 
@@ -158,6 +165,12 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Database-generated AuditEvent insertion sequencing
 - Real PostgreSQL migration, constraint, trigger, rollback, and sequencing tests
 - Slice 2A completed without a Policy service, repository workflow, API, or frontend
+- Sprint 002 Slice 2B: Investment Policy Backend Workflow and API
+- Strict Policy request/response contracts and repository-backed reads
+- Atomic Draft lifecycle, publication, rollback, concurrency, and AuditEvent workflows
+- Immutable Policy Version history and Policy-filtered audit API
+- Transaction-scoped PATCH response snapshots without post-commit database reads
+- Slice 2B completed without a Policy frontend or complete Policy user experience
 
 ## Decision Log
 
@@ -287,3 +300,11 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - 2026-07-14: Docker/browser runtime validation and the Alembic
   `path_separator = os` warning remain non-blocking Backlog items; Slice 2C and
   Slice 3 remain unauthorized and Not Started.
+- 2026-07-14: Slice 2B final incremental review concluded APPROVE WITH
+  NON-BLOCKING FOLLOW-UP; M-1 atomic PATCH response snapshots and M-2 blocking
+  test coverage are fully resolved.
+- 2026-07-14: L-1 is partially resolved: omitted and `{}` Policy-create bodies are
+  accepted, non-empty objects/scalars/arrays return 422, and explicit JSON `null`
+  remains accepted as a LOW non-blocking follow-up.
+- 2026-07-14: Pull request #8 is approved for merge. Slice 2B is Done while Sprint
+  002 remains In Progress; Slice 2C and Slice 3 remain unauthorized and Not Started.
