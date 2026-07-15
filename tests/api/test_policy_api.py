@@ -655,7 +655,7 @@ def test_allocation_database_failure_restores_collection_revision_and_audit(
             policy_service.replace_allocations(db_session, replacement)
 
     restored = policy_service.read_current_draft(db_session)
-    assert restored[0].id == draft_id
+    assert str(restored[0].id) == draft_id
     assert restored[0].revision == draft["revision"]
     assert allocation_content(
         [
