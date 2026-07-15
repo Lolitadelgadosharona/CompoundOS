@@ -75,6 +75,36 @@ Slice 2A schema:
 No frontend, authentication, recommendation, Guardian, AI, Broker, trading, or
 Decision Journal module is introduced in Slice 2B.
 
+## Sprint 002 Slice 2C Architecture
+
+Slice 2C adds the approved browser workflow without changing the Slice 2B API or
+Slice 2A persistence design:
+
+- `frontend/app/policy/page.tsx` defines the App Router boundary and delegates all
+  interactive behavior to a client component.
+- `frontend/app/policy/policy-client.tsx` keeps the saved server snapshot separate
+  from local Draft text and allocation edits, with independent loading, mutation,
+  history, and audit states.
+- `frontend/lib/policy-api.ts` is the typed browser boundary for the approved
+  Policy endpoints. Reads may be aborted to prevent stale responses from replacing
+  newer state; mutations are never automatically retried.
+- Initial Household and Policy reads run in parallel. Draft, current Published,
+  history, and audit reads run in parallel after Policy presence is known.
+- Target percentages stay as decimal strings at the browser/API boundary. Display
+  totals use strict parsing into integer hundredths and integer addition, with no
+  `Number`, `parseFloat`, rounding, recommendation, or evaluation step.
+- Explicit saves send only changed Draft text fields or the full ordered allocation
+  collection with the current expected revision. Successful responses become the
+  new saved snapshot; failed mutations retain local edits.
+- Publication is a read-only review of the saved Draft snapshot followed by an
+  explicit confirmation. The server remains authoritative for completeness,
+  revision, and publication success.
+- Version history is read-only and cursor-paginated newest first. Audit events are
+  rendered in server-returned sequence order and use an independent GET-only retry.
+
+Slice 2C adds no backend module, database change, authentication, recommendation,
+Guardian, AI, Broker, trading, actual-holdings, or Decision Journal behavior.
+
 ## Module Boundaries
 
 - `routers/households.py`: four approved HTTP contracts and status mapping
@@ -84,6 +114,10 @@ Decision Journal module is introduced in Slice 2B.
 - `models.py`: only `household_profiles` and `audit_events`
 - `frontend/app/household/`: local-only create/read/update/audit workflow
 - `frontend/lib/household-api.ts`: typed browser-to-API boundary
+- `frontend/app/policy/`: local-only Policy Draft, publication, immutable history,
+  and audit workflow
+- `frontend/lib/policy-api.ts`: typed browser-to-Policy-API boundary and exact
+  integer-hundredths display helpers
 
 No Policy, Allocation, Journal, User, Account, AI, Guardian, Broker, or trading
 module is created in Slice 1.
@@ -149,5 +183,5 @@ and CI toolchain.
 - Decide whether to migrate `frontend/` to `apps/web/` in a later approved sprint.
 - Any later persistence, authentication, policy, journal, Guardian, AI, or broker
   architecture requires separate approval.
-- A Policy frontend remains outside Slice 2B and requires separate Slice 2C
-  authorization. Decision Journal work remains outside Slice 2 and unauthorized.
+- Full Docker runtime and browser-path validation remains pending.
+- Decision Journal work remains outside Slice 2 and unauthorized as Slice 3.

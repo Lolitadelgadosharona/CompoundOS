@@ -2,9 +2,9 @@
 
 ## Status
 
-Approved behavior includes the Slice 1 Household workflow and the Slice 2B
-local-only Investment Policy backend API. Slice 2A is Done. Slice 2B is in Review;
-Slice 2C and Slice 3 are not authorized.
+Approved behavior includes the Slice 1 Household workflow, the Slice 2B local-only
+Investment Policy backend API, and the Slice 2C local-only Policy frontend. Slice
+2A and Slice 2B are Done. Slice 2C is in Review; Slice 3 is not authorized.
 
 ## Summary
 
@@ -15,6 +15,11 @@ context without interpreting it or providing investment advice.
 Slice 2B records user-authored Investment Policy Draft text and target allocation
 percentages, publishes immutable Version snapshots, and exposes version and audit
 reads. It provides no frontend and never evaluates the recorded information.
+
+Slice 2C provides the `/policy` user interface for those approved contracts. It
+supports explicit user-authored Draft saves, mechanical publication review,
+immutable Version reads, and a Policy-filtered audit timeline without interpreting
+the content or providing investment advice.
 
 ## Slice 2B Backend Requirements
 
@@ -38,6 +43,64 @@ reads. It provides no frontend and never evaluates the recorded information.
   compliance conclusions, rebalancing calculations, or trades
 - Decision Journal, Guardian, AI, Broker, market, holdings, accounts, authentication,
   multiple households/users, export, or hard-delete workflows
+
+## Slice 2C Frontend Requirements
+
+- Initial Household and Policy reads are parallel, abortable, and protected from
+  stale-response replacement.
+- A missing Household links to `/household` and cannot create a Policy. An empty
+  Policy state can create the sole blank Draft without sending explicit JSON `null`.
+- The Draft editor exposes the ten approved user-input fields with explicit saves,
+  Unicode character limits, changed-field-only PATCH requests, expected revisions,
+  neutral conflict/validation feedback, and no suggested text or autosave.
+- The allocation editor supports local add, remove, and accessible reordering, then
+  explicitly replaces the complete ordered collection. It supplies no default asset
+  classes or target percentages.
+- Allocation inputs remain decimal strings. The displayed total uses integer
+  hundredths and reports only mechanical equality with `100.00`; it never scores or
+  evaluates the allocation.
+- Publication shows a read-only saved Draft snapshot, required-field presence,
+  exact total, and current revision. It requires explicit confirmation and sends
+  `confirmation: true`; the server remains authoritative.
+- Published and historical Versions are immutable and read-only. New Drafts may be
+  blank or copied only from the current Published Version; historical restore/copy,
+  Published editing, and product deletion are absent.
+- The audit timeline preserves the server-returned sequence order and discloses the
+  latest-window/no-cursor boundary. Audit refresh errors are independent from
+  successful mutations, and retry performs only the audit GET.
+- Draft discard requires explicit confirmation and an expected revision; it never
+  deletes the Policy or immutable Versions.
+- The page visibly states its local-only, non-production, no-authentication, and
+  non-advisory boundary.
+
+## Slice 2C Acceptance Criteria
+
+- Loading, missing Household, empty Policy, Draft, publish review, current
+  Published, history, audit, and discard states are accessible at `/policy`.
+- Duplicate mutation submissions are prevented; mutations are not automatically
+  retried, and 409 conflicts offer an explicit server reload without overwriting
+  local input.
+- Text and allocation no-ops issue no mutation. Successful saves adopt the complete
+  server snapshot and revision; failures retain local edits.
+- Exact decimal-string examples such as `0.10 + 0.20`, `99.99`, `100.00`, and
+  `100.01` display without binary floating-point artifacts or silent rounding.
+- Publication requires the three approved fields, exactly `100.00`, and explicit
+  confirmation while remaining subject to server validation.
+- Version history paginates newest first without duplicate entries, remains
+  immutable, and offers no restore or historical-copy action.
+- Policy audit failures never recast a completed Policy mutation as failed, and
+  the retry cannot replay that mutation.
+- UI and API-client tests cover the approved flows, error classes, request payloads,
+  cleanup, non-advisory copy, and prohibited action boundaries.
+
+## Slice 2C Explicit Non-Goals
+
+- Advice, recommendations, suitability, eligibility, scoring, rankings, asset-class
+  defaults, rebalancing or drift calculations, and automated decisions
+- Decision Journal, Guardian thresholds or alerts, AI, Broker or market integration,
+  actual holdings, accounts, monetary amounts, authentication, or public deployment
+- Backend contract or behavior changes, database changes, new dependencies, product
+  deletion, historical restore/copy, Published editing, or Slice 3
 
 ## User Stories
 

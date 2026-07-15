@@ -1,5 +1,41 @@
 # Changelog
 
+## [Unreleased] - Sprint 002 Slice 2C Review
+
+### Added
+
+- Local-only `/policy` workflow covering initial loading, missing Household,
+  empty Policy, Draft editing, publication review, immutable Published Version,
+  version history, Policy audit, and confirmed Draft discard states
+- Typed browser API client for the approved Policy backend contracts with distinct
+  404, 409, and 422 handling, abortable reads, and no mutation retries
+- Explicit Draft text and whole-allocation saves with optimistic revisions,
+  client-side semantic no-op detection, and local edit preservation on failures
+- Exact target-allocation display totals calculated from decimal strings as integer
+  hundredths without binary floating-point arithmetic or silent rounding
+- Accessible mechanical publication checks and explicit confirmation using the
+  approved non-advisory and local-only boundary
+- Frontend component and API-client coverage for state transitions, conflicts,
+  decimal handling, immutable history, audit recovery, safety copy, and request cleanup
+
+### Boundaries
+
+- Slice 2C records and displays only user-entered Policy information; it does not
+  evaluate suitability or provide advice, recommendations, trade instructions,
+  scores, eligibility, rebalancing, or automated decisions.
+- No backend behavior, migration, Python or frontend dependency, Compose, CI,
+  authentication, Decision Journal, Guardian, AI, Broker, market, holding, or
+  trading behavior is added.
+- Full Docker runtime and end-to-end browser-path validation remain pending.
+- Slice 3 remains unauthorized and Not Started.
+
+### Status
+
+- Slice 2A and Slice 2B remain Done.
+- Slice 2C implementation is complete and is in Review; this is not a
+  production-readiness claim or completion of Sprint 002.
+- Sprint 002 remains In Progress.
+
 ## [Unreleased] - Sprint 002 Slice 2B Complete
 
 ### Added

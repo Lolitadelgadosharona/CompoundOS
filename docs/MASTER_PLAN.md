@@ -21,10 +21,10 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Completed work: Implementation Slice 2A — Investment Policy Persistence and
   Immutability Foundation
 - Slice 2 Technical Design: Approved
-- Current implementation authorization: no further Slice is authorized
+- Current implementation authorization: Slice 2C — Investment Policy Frontend Workflow
 - Slice 2A: Done
 - Slice 2B: Investment Policy Backend Workflow and API / Done
-- Slice 2C: Not authorized / Not Started
+- Slice 2C: Implementation complete / Review
 - Slice 3: Not authorized / Not Started
 
 ## Planning
@@ -37,7 +37,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Sprint 002 Slice 2 technical design is authorized for planning and review only.
 - Slice 2A implementation was separately authorized on 2026-07-14.
 - Slice 2B implementation was separately authorized on 2026-07-14.
-- Slice 2C and Slice 3 remain unauthorized.
+- Slice 2C implementation was separately authorized on 2026-07-14.
+- Slice 3 remains unauthorized.
 
 ## Backlog
 
@@ -65,7 +66,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Sprint 002 remains In Progress.
 - Slice 2A is Done after independent review and approval for merge.
 - Slice 2B is Done after independent review and approval for merge.
-- Slice 2C and Slice 3 remain unauthorized and Not Started.
+- Slice 2C implementation is complete and is in Review.
+- Slice 3 remains unauthorized and Not Started.
 
 ## Review
 
@@ -129,6 +131,20 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Pull request #8 approved for merge.
 - Slice 2B completes the Policy backend workflow and API only; it does not include
   the Policy frontend or a complete Policy user experience.
+- Sprint 002 Slice 2C Investment Policy frontend implementation is in Review.
+- Slice 2C provides the local-only `/policy` workflow for the sole Household and
+  Policy: explicit Draft text and allocation saves, mechanical publication review,
+  immutable Published and history reads, Policy audit reads, Draft creation, and
+  confirmed Draft discard.
+- The frontend preserves decimal percentage strings and computes displayed totals
+  by parsing them into integer hundredths; it provides no recommendation,
+  suitability, score, rebalancing, or automated decision behavior.
+- Policy mutation success and audit refresh failure remain separate outcomes;
+  audit retry performs only the audit GET and never replays a mutation.
+- Slice 2C adds no backend behavior, migration, dependency, authentication,
+  Decision Journal, Guardian, AI, Broker, market, holding, recommendation, or
+  trading behavior.
+- Slice 3 remains unauthorized and Not Started.
 
 ## Done
 
@@ -308,3 +324,11 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   remains accepted as a LOW non-blocking follow-up.
 - 2026-07-14: Pull request #8 is approved for merge. Slice 2B is Done while Sprint
   002 remains In Progress; Slice 2C and Slice 3 remain unauthorized and Not Started.
+- 2026-07-14: Sprint 002 Slice 2C implementation authorized for the local-only
+  Investment Policy frontend workflow only; Slice 3 remains unauthorized.
+- 2026-07-14: Slice 2C implements `/policy`, a typed Policy API client, explicit
+  Draft text and allocation saves, mechanical publication confirmation, immutable
+  Published/history views, Policy audit reads, and confirmed Draft discard without
+  changing the approved backend contract.
+- 2026-07-14: Slice 2C enters Review. Sprint 002 remains In Progress; Slice 3
+  remains unauthorized and Not Started.
