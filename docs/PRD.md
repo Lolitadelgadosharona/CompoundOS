@@ -2,16 +2,42 @@
 
 ## Status
 
-Approved user-facing behavior remains limited to Sprint 002 Implementation Slice
-1. Slice 2A is an authorized persistence and immutability foundation in Review;
-it adds no Policy API or user-facing behavior. Slice 2B, Slice 2C, and Slice 3 are
-not authorized.
+Approved behavior includes the Slice 1 Household workflow and the Slice 2B
+local-only Investment Policy backend API. Slice 2A is Done. Slice 2B is in Review;
+Slice 2C and Slice 3 are not authorized.
 
 ## Summary
 
 Slice 1 provides a local, single-user HouseholdProfile record with PostgreSQL
 persistence and an append-only AuditEvent timeline. It records user-entered
 context without interpreting it or providing investment advice.
+
+Slice 2B records user-authored Investment Policy Draft text and target allocation
+percentages, publishes immutable Version snapshots, and exposes version and audit
+reads. It provides no frontend and never evaluates the recorded information.
+
+## Slice 2B Backend Requirements
+
+- The sole Household owns at most one stable Policy and one editable Draft.
+- Draft text updates and whole-allocation replacement require an expected revision,
+  reject no-ops, and commit one redacted AuditEvent atomically.
+- Allocation percentages are decimal strings with at most two places; Draft totals
+  may be incomplete, while publication mechanically requires exactly `100.00`.
+- Publication requires non-whitespace `objectives`, `time_horizon`, and
+  `decision_process`, without judging their meaning or quality.
+- Publication creates immutable Version snapshots and consumes the Draft in one
+  Policy-then-Draft locked transaction.
+- Reads expose current metadata, Draft, current Published Version, cursor-based
+  newest-first history, immutable Version detail, and a limited Policy audit window.
+- Responses never expose normalized names, sealing internals, or sensitive Audit metadata.
+
+## Slice 2B Explicit Non-Goals
+
+- Policy frontend or frontend API client
+- Advice, recommendations, evaluation, suitability, eligibility, scores, rankings,
+  compliance conclusions, rebalancing calculations, or trades
+- Decision Journal, Guardian, AI, Broker, market, holdings, accounts, authentication,
+  multiple households/users, export, or hard-delete workflows
 
 ## User Stories
 

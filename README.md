@@ -1,8 +1,8 @@
 # CompoundOS
 
 CompoundOS is a long-term AI Family Office and Wealth Operating System. Sprint
-002 Slice 1 adds a local-only household recordkeeping workflow to the validated
-Sprint 001 foundation.
+002 now includes the local-only Household workflow and the Slice 2B Investment
+Policy backend API on top of the validated foundation.
 
 > **Local-only security boundary:** This Sprint 002 build is for local,
 > single-user development only. It has no authentication and must not be exposed
@@ -13,8 +13,10 @@ Sprint 001 foundation.
 - Create, read, and update the sole `HouseholdProfile`.
 - Persist the profile and append-only `AuditEvent` records in PostgreSQL.
 - Show the household summary and read-only audit timeline at `/household`.
-- Keep all policy, allocation, journal, AI, Guardian, broker, trading, and
-  authentication behavior out of Slice 1.
+- Record user-authored Investment Policy Draft text and target percentages through
+  the backend API, then publish immutable Version snapshots.
+- Keep Policy frontend, journal, AI, Guardian, broker, trading, recommendation,
+  and authentication behavior outside the current implementation.
 
 ## Repository Layout
 
@@ -66,6 +68,17 @@ Slice 1 exposes only:
 
 Request bodies reject undeclared fields. Responses use explicit schemas and do
 not expose ORM-only singleton state.
+
+### Investment Policy API
+
+Slice 2B exposes the local-only backend contracts documented by FastAPI at
+`http://127.0.0.1:8000/docs`. The API supports the sole Policy and Draft,
+whole-collection allocation replacement, immutable publication, version reads,
+and a Policy-filtered audit timeline under `/api/policies`.
+
+Percentages are JSON decimal strings such as `"12.50"`. These endpoints record
+only user-entered policy information; they do not evaluate, recommend, score, or
+execute anything. No Policy frontend is included in Slice 2B.
 
 ### Frontend
 
@@ -124,6 +137,7 @@ to a separately approved sprint; Sprint 001.1 does not restructure working code.
 
 ## Notes
 
-This slice intentionally does not implement investment policy, target allocation,
-decision journals, trading, broker integrations, authentication, Guardian logic,
-or autonomous agents. Sprint 002 is not complete, and Slice 2 is not authorized.
+This slice intentionally does not implement a Policy frontend, decision journals,
+trading, broker integrations, authentication, Guardian logic, recommendations,
+or autonomous agents. Sprint 002 is not complete; Slice 2C and Slice 3 are not
+authorized.
