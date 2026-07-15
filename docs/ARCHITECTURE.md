@@ -65,6 +65,12 @@ Slice 2A schema:
   Python, and `NUMERIC(5,2)` in PostgreSQL.
 - Policy audit reads select the newest limited window by descending database
   sequence and return that window ascending.
+- Draft text updates materialize a complete scalar response snapshot while the
+  Policy-then-Draft transaction remains locked. The service commits before
+  returning that snapshot and performs no Draft or allocation query after commit.
+- Policy creation uses a strict empty-object request contract: the body may be
+  omitted or `{}`, while non-empty objects and non-object JSON are rejected before
+  persistence.
 
 No frontend, authentication, recommendation, Guardian, AI, Broker, trading, or
 Decision Journal module is introduced in Slice 2B.

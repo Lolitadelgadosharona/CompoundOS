@@ -28,6 +28,11 @@ contracts without implementing a frontend or investment decision logic.
   constraints to 409. Propagate unrelated database errors.
 - Allow Audit metadata only for changed field names, Draft revision, source or
   published/superseded version number, and allocation item count.
+- Materialize mutation response snapshots from scalar values inside the locked
+  transaction, commit, and then return without post-commit Draft/allocation reads
+  or lazy loading.
+- Model Policy creation as an optional strict empty-object request so omitted and
+  `{}` bodies are accepted while extra fields and non-object JSON are rejected.
 
 ## Consequences
 
@@ -38,3 +43,6 @@ contracts without implementing a frontend or investment decision logic.
   user experience without separately authorized Slice 2C frontend work.
 - Real PostgreSQL tests remain required for locking, triggers, rollback, and
   concurrency behavior; mocks and SQLite cannot replace them.
+- Deterministic barriers and transaction-stage failure injection cover lifecycle
+  races, response snapshots, rollback completeness, and connection reuse without
+  adding test-only production behavior.

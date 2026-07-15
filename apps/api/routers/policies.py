@@ -10,6 +10,7 @@ from apps.api.policy_schemas import (
     AllocationReplaceRequest,
     AllocationResponse,
     CreatePolicyDraftRequest,
+    EmptyPolicyCreateRequest,
     ExpectedRevisionRequest,
     PolicyAuditEventResponse,
     PolicyCreateResponse,
@@ -97,7 +98,10 @@ def _translate(exc: Exception) -> HTTPException:
 
 
 @router.post("", response_model=PolicyCreateResponse, status_code=status.HTTP_201_CREATED)
-def create(session: DatabaseSession) -> PolicyCreateResponse:
+def create(
+    session: DatabaseSession,
+    _payload: EmptyPolicyCreateRequest = Body(default_factory=EmptyPolicyCreateRequest),
+) -> PolicyCreateResponse:
     try:
         policy, draft, allocations = create_policy(session)
         return PolicyCreateResponse(
@@ -128,8 +132,7 @@ def get_draft(session: DatabaseSession) -> PolicyDraftResponse:
 @router.patch("/current/draft", response_model=PolicyDraftResponse)
 def patch_draft(payload: PolicyDraftUpdate, session: DatabaseSession) -> PolicyDraftResponse:
     try:
-        draft, allocations = update_draft_text(session, payload)
-        return _draft_response(draft, allocations)
+        return update_draft_text(session, payload)
     except Exception as exc:
         raise _translate(exc) from exc
 

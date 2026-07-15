@@ -49,6 +49,10 @@ class PolicyTextFields(BaseModel):
     notes: str = Field(default="", max_length=8_000)
 
 
+class EmptyPolicyCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
 class PolicyDraftUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 

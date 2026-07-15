@@ -108,6 +108,20 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   Policy-filtered AuditEvent reads.
 - Slice 2B adds no frontend, recommendation, Guardian, AI, Broker, trading,
   authentication, Slice 2C, or Slice 3 behavior.
+- Sprint 002 Slice 2B independent review conclusion: REQUEST CHANGES, with two
+  MEDIUM findings (post-commit PATCH response snapshot race and blocking test
+  coverage) and one LOW finding (non-empty Policy-create bodies were ignored).
+- M-1 is addressed by constructing the complete Draft response snapshot while
+  the Policy-then-Draft transaction is still locked, then returning only the
+  scalar DTO after a successful commit with no post-commit query.
+- M-2 is addressed with deterministic independent-session concurrency tests,
+  transaction-stage rollback tests, audit-window and ownership filtering tests,
+  complete Policy text boundaries, exact publish totals, and error/session reuse
+  coverage against real PostgreSQL.
+- L-1 is addressed with an optional strict empty-object request contract that
+  rejects extra fields and non-object JSON without creating Policy state.
+- These fixes await independent incremental review. Pull request #8 remains
+  Draft; no final review approval is claimed.
 
 ## Done
 
@@ -265,3 +279,11 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   and Policy-filtered audit reads.
 - 2026-07-14: Slice 2B enters Review; Slice 2C and Slice 3 remain unauthorized and
   Not Started.
+- 2026-07-14: Slice 2B independent review concluded REQUEST CHANGES for M-1
+  response snapshot atomicity, M-2 blocking test coverage, and L-1 strict Policy
+  creation body validation.
+- 2026-07-14: M-1, M-2, and L-1 review fixes were implemented for independent
+  incremental review; pull request #8 remains Draft and is not approved for merge.
+- 2026-07-14: Docker/browser runtime validation and the Alembic
+  `path_separator = os` warning remain non-blocking Backlog items; Slice 2C and
+  Slice 3 remain unauthorized and Not Started.

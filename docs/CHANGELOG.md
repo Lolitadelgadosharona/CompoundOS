@@ -12,6 +12,12 @@
   Draft revisions, named-conflict mapping, and atomic non-sensitive AuditEvents
 - Real PostgreSQL API, rollback, immutable publication, concurrency, and race tests
 - ADR 0004 documenting the Policy backend transaction and API boundary
+- Transaction-scoped PATCH response snapshots that perform no Draft/allocation
+  read after commit
+- Strict optional empty-object validation for Policy creation requests
+- Expanded required PostgreSQL coverage for lifecycle races, replacement and
+  allocation rollback, unrelated integrity failures, audit windows, text
+  boundaries, and exact publication totals
 
 ### Boundaries
 
@@ -26,6 +32,11 @@
 - Sprint 002 remains In Progress.
 - Slice 2A remains Done.
 - Slice 2B is in Review and is not a production-readiness claim.
+- Independent review initially concluded REQUEST CHANGES for M-1, M-2, and L-1.
+  The focused fixes are implemented and await independent incremental review;
+  PR #8 remains Draft and no final approval is claimed.
+- Full Docker/browser runtime validation and the Alembic `path_separator = os`
+  warning remain non-blocking Backlog items.
 
 ## [Unreleased] - Sprint 002 Slice 2A Complete
 

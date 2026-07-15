@@ -19,7 +19,9 @@ from apps.api.models import (
 from apps.api.policy_schemas import (
     POLICY_TEXT_FIELDS,
     AllocationReplaceRequest,
+    AllocationResponse,
     CreatePolicyDraftRequest,
+    PolicyDraftResponse,
     PolicyDraftUpdate,
     PublishPolicyDraftRequest,
     normalize_asset_class_name,
@@ -168,7 +170,7 @@ def read_current_draft(
 
 def update_draft_text(
     session: Session, payload: PolicyDraftUpdate
-) -> tuple[InvestmentPolicyDraft, list[InvestmentPolicyDraftAllocation]]:
+) -> PolicyDraftResponse:
     submitted = payload.model_dump(exclude={"expected_revision"}, exclude_unset=True)
     if not submitted:
         raise NoPolicyChangesError
@@ -198,7 +200,17 @@ def update_draft_text(
             action="policy.draft.updated",
             metadata={"changed_fields": changed, "draft_revision": draft.revision},
         )
-    return draft, list_draft_allocations(session, draft.id)
+        allocations = list_draft_allocations(session, draft.id)
+        snapshot_values = {
+            name: getattr(draft, name)
+            for name in PolicyDraftResponse.model_fields
+            if name != "allocations"
+        }
+        snapshot_values["allocations"] = [
+            AllocationResponse.model_validate(item) for item in allocations
+        ]
+        snapshot = PolicyDraftResponse.model_validate(snapshot_values)
+    return snapshot
 
 
 def _allocation_values(payload: AllocationReplaceRequest) -> list[dict[str, object]]:
