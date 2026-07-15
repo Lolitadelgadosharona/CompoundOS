@@ -2,12 +2,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   allocationTotal,
+  allocationsEqual,
   createDraft,
   createPolicy,
   getPolicyAuditEvents,
   getVersionHistory,
   percentageToHundredths,
   PolicyApiError,
+  PolicyNetworkError,
   publishDraft,
   replaceDraftAllocations,
   updateDraftText,
@@ -90,6 +92,33 @@ describe("Policy API client", () => {
     expect((error as Error).message).not.toContain("secret-marker");
   });
 
+  it.each([
+    [500, null],
+    [500, "not-json"],
+    [503, { detail: "secret-marker owner payload" }],
+  ])("uses a neutral message for HTTP %s without reading the response body", async (status, body) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(body === null ? null : typeof body === "string" ? body : JSON.stringify(body), { status })),
+    );
+
+    const error = await getPolicyAuditEvents().catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(PolicyApiError);
+    expect((error as Error).message).toBe("The Policy service returned an unexpected server error.");
+    expect((error as Error).message).not.toContain("secret-marker");
+  });
+
+  it("distinguishes a network failure and preserves AbortError", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("private network detail"); }));
+    await expect(getPolicyAuditEvents()).rejects.toBeInstanceOf(PolicyNetworkError);
+    await expect(getPolicyAuditEvents()).rejects.toThrow("connection is unavailable");
+
+    const abort = new DOMException("Aborted", "AbortError");
+    vi.stubGlobal("fetch", vi.fn(async () => { throw abort; }));
+    await expect(getPolicyAuditEvents()).rejects.toBe(abort);
+  });
+
   it("does not retry a failed mutation", async () => {
     const fetchMock = vi.fn(async () => jsonResponse({ detail: "Conflict" }, 409));
     vi.stubGlobal("fetch", fetchMock);
@@ -121,5 +150,11 @@ describe("Policy API client", () => {
       hundredths: null,
       display: "Invalid input",
     });
+  });
+
+  it("treats display case as meaningful while normalizing Unicode whitespace and percentages", () => {
+    const saved = [{ id: "1", asset_class_name: "Cash Reserve", target_percentage: "40.00", sort_order: 0 }];
+    expect(allocationsEqual(saved, [{ asset_class_name: "  Cash\u00a0 Reserve  ", target_percentage: "40" }])).toBe(true);
+    expect(allocationsEqual(saved, [{ asset_class_name: "CASH RESERVE", target_percentage: "40.00" }])).toBe(false);
   });
 });

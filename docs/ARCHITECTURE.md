@@ -83,24 +83,31 @@ Slice 2A persistence design:
 - `frontend/app/policy/page.tsx` defines the App Router boundary and delegates all
   interactive behavior to a client component.
 - `frontend/app/policy/policy-client.tsx` keeps the saved server snapshot separate
-  from local Draft text and allocation edits, with independent loading, mutation,
-  history, and audit states.
+  from local Draft text and allocation edits. The core workspace, Version history,
+  selected detail, and audit timeline have independent loading and error states.
 - `frontend/lib/policy-api.ts` is the typed browser boundary for the approved
   Policy endpoints. Reads may be aborted to prevent stale responses from replacing
   newer state; mutations are never automatically retried.
-- Initial Household and Policy reads run in parallel. Draft, current Published,
-  history, and audit reads run in parallel after Policy presence is known.
+- Initial Household and Policy reads run in parallel. After Policy presence is
+  known, core Draft/Published reads are isolated from auxiliary history/audit
+  failures. History and audit each use abort plus monotonic generation guards;
+  paginated history additionally validates its requested cursor before merging.
 - Target percentages stay as decimal strings at the browser/API boundary. Display
   totals use strict parsing into integer hundredths and integer addition, with no
   `Number`, `parseFloat`, rounding, recommendation, or evaluation step.
 - Explicit saves send only changed Draft text fields or the full ordered allocation
   collection with the current expected revision. Successful responses become the
   new saved snapshot; failed mutations retain local edits.
+- The workspace owns semantic text/allocation dirty flags. Publication is disabled
+  while either editor differs from its latest server snapshot, and any reload that
+  would replace dirty editor state requires explicit page-level confirmation.
 - Publication is a read-only review of the saved Draft snapshot followed by an
   explicit confirmation. The server remains authoritative for completeness,
   revision, and publication success.
-- Version history is read-only and cursor-paginated newest first. Audit events are
-  rendered in server-returned sequence order and use an independent GET-only retry.
+- Version history is read-only and cursor-paginated newest first using stable
+  Version identity deduplication. Audit events retain server-returned sequence
+  order. Both auxiliary resources have GET-only recovery that never replays a
+  mutation. Network and HTTP server failures use distinct neutral error classes.
 
 Slice 2C adds no backend module, database change, authentication, recommendation,
 Guardian, AI, Broker, trading, actual-holdings, or Decision Journal behavior.

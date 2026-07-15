@@ -17,6 +17,17 @@
   approved non-advisory and local-only boundary
 - Frontend component and API-client coverage for state transitions, conflicts,
   decimal handling, immutable history, audit recovery, safety copy, and request cleanup
+- Independent core, Version-history, and Policy-audit resource states so auxiliary
+  read failures cannot hide a successfully loaded Draft or Published Version
+- Workspace-level semantic dirty tracking that blocks publication of a stale saved
+  snapshot and requires explicit confirmation before reload discards local edits
+- Generation- and AbortController-guarded audit/history reads, including guarded
+  cursor merges, stable Version identity deduplication, and stale-result rejection
+- Case-preserving allocation display-name comparison, Unicode code-point length
+  validation, and row-specific accessible allocation action names
+- Safe distinction between connection failures and unexpected HTTP server errors,
+  without displaying response bodies or request payloads
+- A compact immutable current Published Version summary when a Draft is also open
 
 ### Boundaries
 
@@ -34,6 +45,8 @@
 - Slice 2A and Slice 2B remain Done.
 - Slice 2C implementation is complete and is in Review; this is not a
   production-readiness claim or completion of Sprint 002.
+- PR #9 remains Draft after its initial REQUEST CHANGES review. M-1 through M-4
+  and L-1 through L-6 have been addressed and await independent incremental review.
 - Sprint 002 remains In Progress.
 
 ## [Unreleased] - Sprint 002 Slice 2B Complete

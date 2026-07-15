@@ -141,6 +141,16 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   suitability, score, rebalancing, or automated decision behavior.
 - Policy mutation success and audit refresh failure remain separate outcomes;
   audit retry performs only the audit GET and never replays a mutation.
+- PR #9 independent review conclusion was REQUEST CHANGES. M-1 through M-4 are
+  addressed by independent core/history/audit resource states, workspace-level
+  text and allocation dirty tracking with a publication gate, explicit protected
+  reload confirmation, and generation-guarded AuditEvent refreshes.
+- L-1 through L-6 are addressed by generation- and cursor-guarded history reads,
+  case-preserving allocation display normalization, Unicode code-point limits,
+  distinct safe network/server errors, an explicit current Published summary
+  beside a Draft, and row-specific accessible allocation controls.
+- Slice 2C remains in Review and PR #9 remains Draft pending independent
+  incremental review. These fixes do not constitute approval or completion.
 - Slice 2C adds no backend behavior, migration, dependency, authentication,
   Decision Journal, Guardian, AI, Broker, market, holding, recommendation, or
   trading behavior.

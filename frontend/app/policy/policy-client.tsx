@@ -17,10 +17,12 @@ import {
   getVersion,
   getVersionHistory,
   hasCurrentHousehold,
+  normalizeAllocationDisplayName,
   POLICY_TEXT_FIELDS,
   POLICY_TEXT_LIMITS,
   Policy,
   PolicyApiError,
+  PolicyNetworkError,
   PolicyAuditEvent,
   PolicyDraft,
   PolicyText,
@@ -61,6 +63,7 @@ function conflictMessage(error: unknown): string | null {
 }
 
 function neutralMessage(error: unknown): string {
+  if (error instanceof PolicyNetworkError) return error.message;
   return error instanceof PolicyApiError
     ? error.message
     : "The Policy request could not be completed.";
@@ -94,10 +97,12 @@ function ConflictPanel({ message, onReload }: { message: string; onReload: () =>
 
 function DraftTextEditor({
   draft,
+  onDirtyChange,
   onReload,
   onSaved,
 }: {
   draft: PolicyDraft;
+  onDirtyChange: (dirty: boolean) => void;
   onReload: () => void;
   onSaved: DraftMutationResult;
 }) {
@@ -105,6 +110,12 @@ function DraftTextEditor({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<string | null>(null);
+  const dirty = useMemo(
+    () => POLICY_TEXT_FIELDS.some((field) => form[field].trim() !== draft[field]),
+    [draft, form],
+  );
+
+  useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -134,6 +145,7 @@ function DraftTextEditor({
     try {
       const saved = await updateDraftText(draft.revision, changed);
       setForm(textFromDraft(saved));
+      onDirtyChange(false);
       onSaved(saved, "Policy text saved.");
     } catch (caught) {
       const message = conflictMessage(caught);
@@ -204,10 +216,12 @@ function editableAllocations(draft: PolicyDraft): EditableAllocation[] {
 
 function AllocationEditor({
   draft,
+  onDirtyChange,
   onReload,
   onSaved,
 }: {
   draft: PolicyDraft;
+  onDirtyChange: (dirty: boolean) => void;
   onReload: () => void;
   onSaved: DraftMutationResult;
 }) {
@@ -222,6 +236,9 @@ function AllocationEditor({
     [rows],
   );
   const total = allocationTotal(inputs);
+  const dirty = !allocationsEqual(draft.allocations, inputs);
+
+  useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
 
   function updateRow(index: number, field: keyof AllocationInput, value: string) {
     setRows((current) =>
@@ -241,8 +258,16 @@ function AllocationEditor({
 
   async function save() {
     if (submitting) return;
-    if (inputs.some((item) => !item.asset_class_name.trim())) {
+    if (inputs.some((item) => !normalizeAllocationDisplayName(item.asset_class_name))) {
       setError("Each allocation row needs an asset-class name before saving.");
+      return;
+    }
+    if (
+      inputs.some(
+        (item) => unicodeLength(normalizeAllocationDisplayName(item.asset_class_name)) > 200,
+      )
+    ) {
+      setError("Asset-class names must be 200 characters or fewer.");
       return;
     }
     if (total.hundredths === null && inputs.length > 0) {
@@ -260,6 +285,7 @@ function AllocationEditor({
     try {
       const saved = await replaceDraftAllocations(draft.revision, inputs);
       setRows(editableAllocations(saved));
+      onDirtyChange(false);
       onSaved(saved, "Draft allocations saved.");
     } catch (caught) {
       const message = conflictMessage(caught);
@@ -299,7 +325,6 @@ function AllocationEditor({
             <label>
               Asset-class name
               <input
-                maxLength={200}
                 onChange={(event) => updateRow(index, "asset_class_name", event.target.value)}
                 value={row.asset_class_name}
               />
@@ -312,10 +337,11 @@ function AllocationEditor({
                 value={row.target_percentage}
               />
             </label>
-            <div className="row-actions" aria-label={`Reorder allocation row ${index + 1}`}>
-              <button disabled={index === 0} onClick={() => move(index, -1)} type="button">Move up</button>
-              <button disabled={index === rows.length - 1} onClick={() => move(index, 1)} type="button">Move down</button>
+            <div className="row-actions" role="group" aria-label={`Allocation row ${index + 1} actions`}>
+              <button aria-label={`Move ${row.asset_class_name.trim() || `allocation row ${index + 1}`} up`} disabled={index === 0} onClick={() => move(index, -1)} type="button">Move up</button>
+              <button aria-label={`Move ${row.asset_class_name.trim() || `allocation row ${index + 1}`} down`} disabled={index === rows.length - 1} onClick={() => move(index, 1)} type="button">Move down</button>
               <button
+                aria-label={`Remove ${row.asset_class_name.trim() || `allocation row ${index + 1}`}`}
                 onClick={() => setRows((current) => current.filter((_, rowIndex) => rowIndex !== index))}
                 type="button"
               >
@@ -377,10 +403,12 @@ function AllocationReadOnly({ items }: { items: AllocationInput[] }) {
 
 function PublishReview({
   draft,
+  dirty,
   onPublished,
   onReload,
 }: {
   draft: PolicyDraft;
+  dirty: boolean;
   onPublished: (version: PolicyVersion) => void;
   onReload: () => void;
 }) {
@@ -392,7 +420,7 @@ function PublishReview({
   const total = allocationTotal(allocationInputs(draft));
 
   async function publish() {
-    if (!confirmed || submitting) return;
+    if (dirty || !confirmed || submitting) return;
     setSubmitting(true);
     setError(null);
     setConflict(null);
@@ -414,8 +442,9 @@ function PublishReview({
           <p className="eyebrow">Explicit confirmation</p>
           <h2 id="publish-heading">Publish review</h2>
         </div>
-        {!reviewing ? <button onClick={() => setReviewing(true)} type="button">Review for publication</button> : null}
+        {!reviewing ? <button disabled={dirty} onClick={() => setReviewing(true)} type="button">Review for publication</button> : null}
       </div>
+      {dirty ? <p className="notice" role="status">Save or discard local text and allocation changes before publication. Publication uses only the saved server Draft.</p> : null}
       {!reviewing ? <p>Review the saved server snapshot before creating an immutable Version.</p> : null}
       {reviewing ? (
         <div className="publish-review">
@@ -445,7 +474,7 @@ function PublishReview({
           <div className="actions">
             <button
               className="primary-button"
-              disabled={!confirmed || submitting}
+              disabled={dirty || !confirmed || submitting}
               onClick={() => void publish()}
               type="button"
             >
@@ -480,12 +509,14 @@ function VersionHistory({
   error,
   nextCursor,
   onLoadMore,
+  onRetry,
 }: {
   items: PolicyVersionSummary[];
   loading: boolean;
   error: string | null;
   nextCursor: number | null;
   onLoadMore: () => void;
+  onRetry: () => void;
 }) {
   const detailController = useRef<AbortController | null>(null);
   const [detail, setDetail] = useState<PolicyVersion | null>(null);
@@ -515,7 +546,12 @@ function VersionHistory({
         <p className="eyebrow">Newest first · Read-only</p>
         <h2 id="history-heading">Version history</h2>
       </div>
-      {error ? <p className="error" role="alert">{error}</p> : null}
+      {error ? (
+        <div className="error-panel" role="alert">
+          <p>{error}</p>
+          <button disabled={loading} onClick={onRetry} type="button">Retry Version history</button>
+        </div>
+      ) : null}
       {items.length === 0 && !loading ? <p>No published Versions yet.</p> : null}
       <ol className="version-list">
         {items.map((item) => (
@@ -590,11 +626,28 @@ function AuditTimeline({
   );
 }
 
+function CurrentPublishedSummary({ draft, published }: { draft: PolicyDraft; published: PolicyVersion }) {
+  return (
+    <section className="panel" aria-labelledby="current-published-summary-heading">
+      <p className="eyebrow">Current immutable record</p>
+      <h2 id="current-published-summary-heading">Current Published Version · Version {published.version_number}</h2>
+      <p>Published {new Date(published.published_at).toLocaleString()} · Published versions cannot be edited.</p>
+      <p>{draft.source_version_id === published.id ? "This Draft started from current Published." : "This Draft started blank."}</p>
+    </section>
+  );
+}
+
 export function PolicyClient() {
   const loadController = useRef<AbortController | null>(null);
   const auditController = useRef<AbortController | null>(null);
+  const historyController = useRef<AbortController | null>(null);
   const loadSequence = useRef(0);
+  const auditGeneration = useRef(0);
+  const historyGeneration = useRef(0);
+  const historyLoadingRef = useRef(false);
+  const historyCursorRef = useRef<number | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
+  const [workspaceReady, setWorkspaceReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [hasHousehold, setHasHousehold] = useState<boolean | null>(null);
   const [policy, setPolicy] = useState<Policy | null>(null);
@@ -611,14 +664,66 @@ export function PolicyClient() {
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
   const [discardConfirmation, setDiscardConfirmation] = useState(false);
+  const [reloadConfirmation, setReloadConfirmation] = useState(false);
+  const [textDirty, setTextDirty] = useState(false);
+  const [allocationsDirty, setAllocationsDirty] = useState(false);
   const [workspaceEpoch, setWorkspaceEpoch] = useState(0);
+  const dirty = textDirty || allocationsDirty;
+
+  const refreshAudit = useCallback(async (afterMutation = false) => {
+    auditController.current?.abort();
+    const controller = new AbortController();
+    auditController.current = controller;
+    const generation = ++auditGeneration.current;
+    setAuditLoading(true);
+    setAuditError(null);
+    try {
+      const events = await getPolicyAuditEvents(controller.signal);
+      if (generation === auditGeneration.current && !controller.signal.aborted) {
+        setAuditEvents(events);
+      }
+    } catch (caught) {
+      if (!isAbort(caught) && generation === auditGeneration.current) {
+        setAuditError(afterMutation
+          ? "The Policy mutation succeeded, but the audit timeline could not be refreshed."
+          : "The Policy audit timeline could not be loaded.");
+      }
+    } finally {
+      if (generation === auditGeneration.current && !controller.signal.aborted) setAuditLoading(false);
+    }
+  }, []);
+
+  const refreshHistory = useCallback(async () => {
+    historyController.current?.abort();
+    const controller = new AbortController();
+    historyController.current = controller;
+    const generation = ++historyGeneration.current;
+    historyLoadingRef.current = true;
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const page = await getVersionHistory(undefined, controller.signal);
+      if (generation === historyGeneration.current && !controller.signal.aborted) {
+        const unique = new Map(page.items.map((item) => [item.id, item]));
+        setHistory([...unique.values()].sort((left, right) => right.version_number - left.version_number));
+        historyCursorRef.current = page.next_before_version_number;
+        setNextHistoryCursor(page.next_before_version_number);
+      }
+    } catch (caught) {
+      if (!isAbort(caught) && generation === historyGeneration.current) setHistoryError(neutralMessage(caught));
+    } finally {
+      if (generation === historyGeneration.current && !controller.signal.aborted) {
+        historyLoadingRef.current = false;
+        setHistoryLoading(false);
+      }
+    }
+  }, []);
 
   const loadWorkspace = useCallback(async () => {
     loadController.current?.abort();
     const controller = new AbortController();
     loadController.current = controller;
-    loadSequence.current += 1;
-    const sequence = loadSequence.current;
+    const sequence = ++loadSequence.current;
     setInitialLoading(true);
     setLoadError(null);
     setMutationError(null);
@@ -628,70 +733,52 @@ export function PolicyClient() {
         getCurrentPolicy(controller.signal),
       ]);
       if (controller.signal.aborted || sequence !== loadSequence.current) return;
-      setHasHousehold(householdExists);
-      setPolicy(currentPolicy);
 
       if (!householdExists || !currentPolicy) {
+        historyController.current?.abort();
+        auditController.current?.abort();
+        ++historyGeneration.current;
+        ++auditGeneration.current;
+        historyLoadingRef.current = false;
+        historyCursorRef.current = null;
+        setHasHousehold(householdExists);
+        setPolicy(currentPolicy);
         setDraft(null);
         setPublished(null);
         setHistory([]);
         setNextHistoryCursor(null);
         setAuditEvents([]);
+        setHistoryError(null);
         setAuditError(null);
-        return;
+      } else {
+        const core = Promise.all([
+          getCurrentDraft(controller.signal),
+          getCurrentPublished(controller.signal),
+        ]);
+        void refreshHistory();
+        void refreshAudit();
+        const [draftResult, publishedResult] = await core;
+        if (controller.signal.aborted || sequence !== loadSequence.current) return;
+        setHasHousehold(true);
+        setPolicy(currentPolicy);
+        setDraft(draftResult);
+        setPublished(publishedResult);
       }
-
-      const [draftResult, publishedResult, historyResult, auditResult] = await Promise.all([
-        getCurrentDraft(controller.signal),
-        getCurrentPublished(controller.signal),
-        getVersionHistory(undefined, controller.signal),
-        getPolicyAuditEvents(controller.signal).then(
-          (events) => ({ ok: true as const, events }),
-          (error: unknown) => ({ ok: false as const, error }),
-        ),
-      ]);
-      if (controller.signal.aborted || sequence !== loadSequence.current) return;
-      setDraft(draftResult);
-      setPublished(publishedResult);
-      setHistory(historyResult.items);
-      setNextHistoryCursor(historyResult.next_before_version_number);
+      setTextDirty(false);
+      setAllocationsDirty(false);
       setWorkspaceEpoch((current) => current + 1);
-      if (auditResult.ok) {
-        setAuditEvents(auditResult.events);
-        setAuditError(null);
-      } else if (!isAbort(auditResult.error)) {
-        setAuditError("Policy data is available, but the audit timeline could not be loaded.");
-      }
+      setWorkspaceReady(true);
     } catch (caught) {
       if (!isAbort(caught)) setLoadError(neutralMessage(caught));
     } finally {
-      if (!controller.signal.aborted && sequence === loadSequence.current) {
-        setInitialLoading(false);
-        setAuditLoading(false);
-      }
+      if (!controller.signal.aborted && sequence === loadSequence.current) setInitialLoading(false);
     }
-  }, []);
+  }, [refreshAudit, refreshHistory]);
 
-  const refreshAudit = useCallback(async (afterMutation = false) => {
-    auditController.current?.abort();
-    const controller = new AbortController();
-    auditController.current = controller;
-    setAuditLoading(true);
-    setAuditError(null);
-    try {
-      setAuditEvents(await getPolicyAuditEvents(controller.signal));
-    } catch (caught) {
-      if (!isAbort(caught)) {
-        setAuditError(
-          afterMutation
-            ? "The Policy mutation succeeded, but the audit timeline could not be refreshed."
-            : "The Policy audit timeline could not be loaded.",
-        );
-      }
-    } finally {
-      if (!controller.signal.aborted) setAuditLoading(false);
-    }
-  }, []);
+  const requestWorkspaceReload = useCallback(() => {
+    if (dirty) setReloadConfirmation(true);
+    else void loadWorkspace();
+  }, [dirty, loadWorkspace]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void loadWorkspace(), 0);
@@ -699,6 +786,7 @@ export function PolicyClient() {
       window.clearTimeout(timer);
       loadController.current?.abort();
       auditController.current?.abort();
+      historyController.current?.abort();
     };
   }, [loadWorkspace]);
 
@@ -721,10 +809,11 @@ export function PolicyClient() {
       setPublished(null);
       setHistory([]);
       setNextHistoryCursor(null);
+      historyCursorRef.current = null;
       setSavedMessage("Investment Policy and initial Draft created.");
       void refreshAudit(true);
     } catch (caught) {
-      if (caught instanceof PolicyApiError && caught.status === 409) await loadWorkspace();
+      if (caught instanceof PolicyApiError && caught.status === 409) requestWorkspaceReload();
       else setMutationError(neutralMessage(caught));
     } finally {
       setMutation(null);
@@ -741,7 +830,7 @@ export function PolicyClient() {
       setSavedMessage(sourceVersionId ? "Draft copied from the current Published Version." : "Blank Draft created.");
       void refreshAudit(true);
     } catch (caught) {
-      if (caught instanceof PolicyApiError && caught.status === 409) await loadWorkspace();
+      if (caught instanceof PolicyApiError && caught.status === 409) requestWorkspaceReload();
       else setMutationError(neutralMessage(caught));
     } finally {
       setMutation(null);
@@ -765,39 +854,43 @@ export function PolicyClient() {
   }
 
   async function loadMoreHistory() {
-    if (nextHistoryCursor === null || historyLoading) return;
+    const requestedCursor = historyCursorRef.current;
+    if (requestedCursor === null || historyLoadingRef.current) return;
+    historyController.current?.abort();
+    const controller = new AbortController();
+    historyController.current = controller;
+    const generation = ++historyGeneration.current;
+    historyLoadingRef.current = true;
     setHistoryLoading(true);
     setHistoryError(null);
     try {
-      const page = await getVersionHistory(nextHistoryCursor);
-      setHistory((current) => {
-        const byNumber = new Map(current.map((item) => [item.version_number, item]));
-        page.items.forEach((item) => byNumber.set(item.version_number, item));
-        return [...byNumber.values()].sort((left, right) => right.version_number - left.version_number);
-      });
-      setNextHistoryCursor(page.next_before_version_number);
+      const page = await getVersionHistory(requestedCursor, controller.signal);
+      if (generation === historyGeneration.current && historyCursorRef.current === requestedCursor && !controller.signal.aborted) {
+        setHistory((current) => {
+          const byId = new Map(current.map((item) => [item.id, item]));
+          page.items.forEach((item) => byId.set(item.id, item));
+          return [...byId.values()].sort((left, right) => right.version_number - left.version_number);
+        });
+        historyCursorRef.current = page.next_before_version_number;
+        setNextHistoryCursor(page.next_before_version_number);
+      }
     } catch (caught) {
-      setHistoryError(neutralMessage(caught));
+      if (!isAbort(caught) && generation === historyGeneration.current) setHistoryError(neutralMessage(caught));
     } finally {
-      setHistoryLoading(false);
+      if (generation === historyGeneration.current && !controller.signal.aborted) {
+        historyLoadingRef.current = false;
+        setHistoryLoading(false);
+      }
     }
   }
 
   async function handlePublished(version: PolicyVersion) {
     setPublished(version);
     setDraft(null);
+    setTextDirty(false);
+    setAllocationsDirty(false);
     setSavedMessage(`Version ${version.version_number} published.`);
-    setHistoryLoading(true);
-    try {
-      const refreshed = await getVersionHistory();
-      setHistory(refreshed.items);
-      setNextHistoryCursor(refreshed.next_before_version_number);
-      setHistoryError(null);
-    } catch (caught) {
-      setHistoryError(neutralMessage(caught));
-    } finally {
-      setHistoryLoading(false);
-    }
+    void refreshHistory();
     void refreshAudit(true);
   }
 
@@ -823,13 +916,23 @@ export function PolicyClient() {
       {loadError ? (
         <div className="error-panel" role="alert">
           <p>{loadError}</p>
-          <button onClick={() => void loadWorkspace()} type="button">Try again</button>
+          <button onClick={requestWorkspaceReload} type="button">Try again</button>
         </div>
       ) : null}
       {savedMessage ? <p className="success-message" role="status">{savedMessage}</p> : null}
-      {mutationError ? <ConflictPanel message={mutationError} onReload={() => void loadWorkspace()} /> : null}
+      {mutationError ? <ConflictPanel message={mutationError} onReload={requestWorkspaceReload} /> : null}
+      {reloadConfirmation ? (
+        <section className="confirmation-panel" role="alertdialog" aria-label="Discard local changes and reload">
+          <p><strong>Reloading replaces unsaved text and allocation edits.</strong></p>
+          <p>Both Policy text and Draft allocation local changes will be lost.</p>
+          <div className="actions">
+            <button onClick={() => { setReloadConfirmation(false); void loadWorkspace(); }} type="button">Discard local changes and reload</button>
+            <button onClick={() => setReloadConfirmation(false)} type="button">Keep editing</button>
+          </div>
+        </section>
+      ) : null}
 
-      {!initialLoading && !loadError && hasHousehold === false ? (
+      {workspaceReady && hasHousehold === false ? (
         <section className="panel" aria-labelledby="missing-household-heading">
           <p className="eyebrow">Household prerequisite</p>
           <h2 id="missing-household-heading">Create the Household profile first</h2>
@@ -838,7 +941,7 @@ export function PolicyClient() {
         </section>
       ) : null}
 
-      {!initialLoading && !loadError && hasHousehold && !policy ? (
+      {workspaceReady && hasHousehold && !policy ? (
         <section className="panel" aria-labelledby="empty-policy-heading">
           <p className="eyebrow">Empty Policy workspace</p>
           <h2 id="empty-policy-heading">No Investment Policy record yet</h2>
@@ -854,15 +957,17 @@ export function PolicyClient() {
         </section>
       ) : null}
 
-      {!initialLoading && !loadError && policy && draft ? (
+      {workspaceReady && policy && draft ? (
         <>
           <section className="workspace-status" aria-label="Draft status">
             <span>Editable Draft</span>
             <strong>Server revision {draft.revision}</strong>
+            <button onClick={requestWorkspaceReload} type="button">Reload workspace</button>
           </section>
-          <DraftTextEditor key={`text-${draft.id}-${workspaceEpoch}`} draft={draft} onReload={() => void loadWorkspace()} onSaved={acceptDraft} />
-          <AllocationEditor key={`allocations-${draft.id}-${workspaceEpoch}`} draft={draft} onReload={() => void loadWorkspace()} onSaved={acceptDraft} />
-          <PublishReview draft={draft} onPublished={(version) => void handlePublished(version)} onReload={() => void loadWorkspace()} />
+          {published ? <CurrentPublishedSummary draft={draft} published={published} /> : null}
+          <DraftTextEditor key={`text-${draft.id}-${workspaceEpoch}`} draft={draft} onDirtyChange={setTextDirty} onReload={requestWorkspaceReload} onSaved={acceptDraft} />
+          <AllocationEditor key={`allocations-${draft.id}-${workspaceEpoch}`} draft={draft} onDirtyChange={setAllocationsDirty} onReload={requestWorkspaceReload} onSaved={acceptDraft} />
+          <PublishReview dirty={dirty} draft={draft} onPublished={(version) => void handlePublished(version)} onReload={requestWorkspaceReload} />
           <section className="panel" aria-labelledby="discard-heading">
             <p className="eyebrow">Draft lifecycle</p>
             <h2 id="discard-heading">Discard Draft</h2>
@@ -884,7 +989,7 @@ export function PolicyClient() {
         </>
       ) : null}
 
-      {!initialLoading && !loadError && policy && !draft ? (
+      {workspaceReady && policy && !draft ? (
         <>
           {published ? <VersionView version={published} /> : (
             <section className="panel">
@@ -909,14 +1014,16 @@ export function PolicyClient() {
         </>
       ) : null}
 
-      {!initialLoading && !loadError && policy ? (
+      {workspaceReady && policy ? (
         <>
           <VersionHistory
             error={historyError}
             items={history}
+            key={`history-${workspaceEpoch}`}
             loading={historyLoading}
             nextCursor={nextHistoryCursor}
             onLoadMore={() => void loadMoreHistory()}
+            onRetry={() => void refreshHistory()}
           />
           <AuditTimeline
             error={auditError}

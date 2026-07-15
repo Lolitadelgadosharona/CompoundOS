@@ -80,7 +80,7 @@ const auditEvents = [
 type ServerState = {
   household: boolean;
   policy: typeof policy | null;
-  draft: typeof draft | null;
+  draft: (Omit<typeof draft, "source_version_id"> & { source_version_id: string | null }) | null;
   published: typeof version | null;
   history: Array<{
     id: string;
@@ -98,6 +98,16 @@ function jsonResponse(body: unknown, status = 200) {
     status,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
 }
 
 function defaultState(overrides: Partial<ServerState> = {}): ServerState {
@@ -153,13 +163,19 @@ function serverFetch(
     }
     if (url.endsWith("/api/policies/current/draft") && method === "PATCH") {
       const payload = JSON.parse(String(init?.body));
-      state.draft = { ...draft, ...payload, revision: payload.expected_revision + 1 };
+      const { expected_revision, ...changed } = payload;
+      state.draft = {
+        ...(state.draft ?? draft),
+        ...changed,
+        revision: expected_revision + 1,
+        updated_at: "2026-07-14T04:00:00Z",
+      };
       return jsonResponse(state.draft);
     }
     if (url.endsWith("/api/policies/current/draft/allocations") && method === "PUT") {
       const payload = JSON.parse(String(init?.body));
       state.draft = {
-        ...draft,
+        ...(state.draft ?? draft),
         revision: payload.expected_revision + 1,
         allocations: payload.items.map((item: { asset_class_name: string; target_percentage: string }, index: number) => ({
           ...item,
@@ -320,8 +336,8 @@ describe("PolicyClient", () => {
     await userEvent.type(names[2], "Third user class");
     await userEvent.type(percentages[2], "0.25");
     expect(screen.getByText("Draft allocation total: 100.25%")).toBeTruthy();
-    await userEvent.click(screen.getAllByRole("button", { name: "Move up" })[2]);
-    await userEvent.click(screen.getAllByRole("button", { name: "Remove" })[0]);
+    await userEvent.click(screen.getByRole("button", { name: "Move Third user class up" }));
+    await userEvent.click(screen.getByRole("button", { name: "Remove First user class" }));
     await userEvent.click(screen.getByRole("button", { name: "Save allocations" }));
 
     await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(1));
@@ -352,6 +368,351 @@ describe("PolicyClient", () => {
     expect(await screen.findByText(/duplicate asset-class names/)).toBeTruthy();
     expect((firstName as HTMLInputElement).value).toBe("SECOND USER CLASS");
     expect(screen.getByRole("alert").textContent).not.toContain("secret-marker");
+  });
+
+  it("keeps the core Draft usable when initial history loading fails", async () => {
+    const fetchMock = serverFetch(defaultState(), (url, method) =>
+      url.includes("/api/policies/current/versions") && method === "GET"
+        ? jsonResponse({}, 503)
+        : undefined,
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PolicyClient />);
+
+    expect(await screen.findByRole("heading", { name: "Policy text" })).toBeTruthy();
+    expect(await screen.findByText("The Policy service returned an unexpected server error.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Save policy text" })).toBeTruthy();
+  });
+
+  it("keeps Published visible and retries only history after history failure", async () => {
+    const state = defaultState({ draft: null, published: version });
+    let failHistory = true;
+    const fetchMock = serverFetch(state, (url, method) => {
+      if (url.includes("/versions") && !url.includes("/versions/") && method === "GET" && failHistory) {
+        failHistory = false;
+        return jsonResponse({}, 503);
+      }
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PolicyClient />);
+    expect(await screen.findByRole("heading", { name: /Current Published Version · Version 2/ })).toBeTruthy();
+    const callsBeforeRetry = fetchMock.mock.calls.length;
+    await userEvent.click(await screen.findByRole("button", { name: "Retry Version history" }));
+    await waitFor(() => expect(fetchMock.mock.calls.length).toBe(callsBeforeRetry + 1));
+    expect(String(fetchMock.mock.calls.at(-1)?.[0])).toContain("/versions");
+    expect(screen.queryByRole("button", { name: "Retry Version history" })).toBeNull();
+  });
+
+  it("keeps the Draft usable when audit fails and retries only audit", async () => {
+    let failAudit = true;
+    const fetchMock = serverFetch(defaultState(), (url) => {
+      if (url.endsWith("/audit-events") && failAudit) {
+        failAudit = false;
+        return jsonResponse({}, 503);
+      }
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PolicyClient />);
+    expect(await screen.findByRole("heading", { name: "Policy text" })).toBeTruthy();
+    const callsBeforeRetry = fetchMock.mock.calls.length;
+    await userEvent.click(await screen.findByRole("button", { name: "Retry audit timeline" }));
+    await waitFor(() => expect(fetchMock.mock.calls.length).toBe(callsBeforeRetry + 1));
+    expect(String(fetchMock.mock.calls.at(-1)?.[0])).toContain("/audit-events");
+  });
+
+  it("shows a core error when the Draft request fails", async () => {
+    vi.stubGlobal("fetch", serverFetch(defaultState(), (url, method) =>
+      url.endsWith("/api/policies/current/draft") && method === "GET" ? jsonResponse({}, 500) : undefined,
+    ));
+    render(<PolicyClient />);
+    expect(await screen.findByText("The Policy service returned an unexpected server error.")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Policy text" })).toBeNull();
+  });
+
+  it("blocks publication until both text and allocation edits are saved", async () => {
+    const state = defaultState({ draft: { ...draft, objectives: "Goal", time_horizon: "Long", decision_process: "Review" } });
+    vi.stubGlobal("fetch", serverFetch(state));
+    render(<PolicyClient />);
+    await screen.findByRole("heading", { name: "Policy text" });
+
+    await userEvent.type(screen.getByLabelText("Notes"), "Local note");
+    const allocationName = screen.getAllByLabelText("Asset-class name")[0];
+    await userEvent.clear(allocationName);
+    await userEvent.type(allocationName, "First User Class");
+    expect((screen.getByRole("button", { name: "Review for publication" }) as HTMLButtonElement).disabled).toBe(true);
+
+    await userEvent.click(screen.getByRole("button", { name: "Save policy text" }));
+    await screen.findByText("Policy text saved.");
+    expect((screen.getByRole("button", { name: "Review for publication" }) as HTMLButtonElement).disabled).toBe(true);
+
+    await userEvent.click(screen.getByRole("button", { name: "Save allocations" }));
+    await screen.findByText("Draft allocations saved.");
+    await waitFor(() => expect((screen.getByRole("button", { name: "Review for publication" }) as HTMLButtonElement).disabled).toBe(false));
+  });
+
+  it("returns to clean when text and allocation order are restored", async () => {
+    const state = defaultState({ draft: { ...draft, objectives: "Goal", time_horizon: "Long", decision_process: "Review" } });
+    vi.stubGlobal("fetch", serverFetch(state));
+    render(<PolicyClient />);
+    await screen.findByRole("heading", { name: "Policy text" });
+    const review = screen.getByRole("button", { name: "Review for publication" }) as HTMLButtonElement;
+    expect(review.disabled).toBe(false);
+
+    await userEvent.type(screen.getByLabelText("Notes"), "temporary");
+    expect(review.disabled).toBe(true);
+    await userEvent.clear(screen.getByLabelText("Notes"));
+    await waitFor(() => expect(review.disabled).toBe(false));
+
+    await userEvent.click(screen.getByRole("button", { name: "Move Second user class up" }));
+    expect(review.disabled).toBe(true);
+    await userEvent.click(screen.getByRole("button", { name: "Move Second user class down" }));
+    await waitFor(() => expect(review.disabled).toBe(false));
+  });
+
+  it("protects both editors from a reload and preserves them when the reload fails", async () => {
+    let failReload = false;
+    const fetchMock = serverFetch(defaultState(), (url, method) =>
+      failReload && url.endsWith("/api/policies/current/draft") && method === "GET"
+        ? jsonResponse({}, 503)
+        : undefined,
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PolicyClient />);
+    await screen.findByRole("heading", { name: "Policy text" });
+    await userEvent.type(screen.getByLabelText("Notes"), "Unsaved text");
+    const allocationName = screen.getAllByLabelText("Asset-class name")[0];
+    await userEvent.clear(allocationName);
+    await userEvent.type(allocationName, "Unsaved allocation");
+    const before = fetchMock.mock.calls.length;
+
+    await userEvent.click(screen.getByRole("button", { name: "Reload workspace" }));
+    expect(screen.getByText(/Both Policy text and Draft allocation/)).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    expect(fetchMock.mock.calls).toHaveLength(before);
+
+    failReload = true;
+    await userEvent.click(screen.getByRole("button", { name: "Reload workspace" }));
+    await userEvent.click(screen.getByRole("button", { name: "Discard local changes and reload" }));
+    expect(await screen.findByText("The Policy service returned an unexpected server error.")).toBeTruthy();
+    expect((screen.getByLabelText("Notes") as HTMLTextAreaElement).value).toBe("Unsaved text");
+    expect((screen.getAllByLabelText("Asset-class name")[0] as HTMLInputElement).value).toBe("Unsaved allocation");
+  });
+
+  it("lets only the newest audit refresh update the timeline", async () => {
+    const first = deferred<Response>();
+    const second = deferred<Response>();
+    let requests = 0;
+    const fetchMock = serverFetch(defaultState(), (url) => {
+      if (url.endsWith("/audit-events")) {
+        requests += 1;
+        return requests === 1 ? first.promise : second.promise;
+      }
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PolicyClient />);
+    await screen.findByRole("heading", { name: "Policy text" });
+    await userEvent.click(screen.getByRole("button", { name: "Reload workspace" }));
+    await waitFor(() => expect(requests).toBe(2));
+    second.resolve(jsonResponse([{ ...auditEvents[1], id: "new-audit", action: "policy.newest", sequence_number: 20 }]));
+    expect(await screen.findByText("policy.newest")).toBeTruthy();
+    first.resolve(jsonResponse([{ ...auditEvents[0], id: "old-audit", action: "policy.stale", sequence_number: 1 }]));
+    await waitFor(() => expect(screen.queryByText("policy.stale")).toBeNull());
+  });
+
+  it("aborts an old audit request and ignores its later rejection", async () => {
+    const first = deferred<Response>();
+    const captured: { firstSignal?: AbortSignal } = {};
+    let requests = 0;
+    const fetchMock = serverFetch(defaultState(), (url, _method, init) => {
+      if (url.endsWith("/audit-events")) {
+        requests += 1;
+        if (requests === 1) {
+          captured.firstSignal = init?.signal as AbortSignal;
+          return first.promise;
+        }
+        return jsonResponse([{ ...auditEvents[1], id: "latest", action: "policy.latest" }]);
+      }
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PolicyClient />);
+    await screen.findByRole("heading", { name: "Policy text" });
+    await userEvent.click(screen.getByRole("button", { name: "Reload workspace" }));
+    expect(await screen.findByText("policy.latest")).toBeTruthy();
+    expect(captured.firstSignal?.aborted).toBe(true);
+    first.reject(new TypeError("stale failure"));
+    await waitFor(() => expect(screen.queryByText(/audit timeline could not/)).toBeNull());
+  });
+
+  it("lets only the newest history refresh update the collection", async () => {
+    const first = deferred<Response>();
+    const second = deferred<Response>();
+    let requests = 0;
+    const newest = { ...version, id: "newest", version_number: 9 };
+    const stale = { ...version, id: "stale", version_number: 1 };
+    const fetchMock = serverFetch(defaultState({ published: version }), (url, method) => {
+      if (url.includes("/versions") && !url.includes("/versions/") && method === "GET") {
+        requests += 1;
+        return requests === 1 ? first.promise : second.promise;
+      }
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PolicyClient />);
+    await screen.findByRole("heading", { name: "Policy text" });
+    await userEvent.click(screen.getByRole("button", { name: "Reload workspace" }));
+    await waitFor(() => expect(requests).toBe(2));
+    second.resolve(jsonResponse({ items: [newest, newest], next_before_version_number: null }));
+    expect(await screen.findByText("Version 9")).toBeTruthy();
+    first.resolve(jsonResponse({ items: [stale], next_before_version_number: null }));
+    await waitFor(() => expect(screen.queryByText("Version 1")).toBeNull());
+    expect(screen.getAllByText("Version 9")).toHaveLength(1);
+  });
+
+  it("invalidates a pending Load more when workspace history refreshes", async () => {
+    const oldPage = deferred<Response>();
+    const version3 = { ...version, id: "version-3", version_number: 3 };
+    const version4 = { ...version, id: "version-4", version_number: 4 };
+    const version1 = { ...version, id: "version-1", version_number: 1 };
+    const state = defaultState({ history: [version3], nextCursor: 3 });
+    let pageRequests = 0;
+    const fetchMock = serverFetch(state, (url, method) => {
+      if (url.includes("before_version_number=3") && method === "GET") {
+        pageRequests += 1;
+        return oldPage.promise;
+      }
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PolicyClient />);
+    await screen.findByText("Version 3");
+    await userEvent.dblClick(screen.getByRole("button", { name: "Load more Versions" }));
+    expect(pageRequests).toBe(1);
+    state.history = [version4];
+    state.nextCursor = null;
+    await userEvent.click(screen.getByRole("button", { name: "Reload workspace" }));
+    expect(await screen.findByText("Version 4")).toBeTruthy();
+    oldPage.resolve(jsonResponse({ items: [version1], next_before_version_number: null }));
+    await waitFor(() => expect(screen.queryByText("Version 1")).toBeNull());
+    expect(screen.queryByText("Version 3")).toBeNull();
+  });
+
+  it("validates allocation names by normalized Unicode code points without native truncation", async () => {
+    const fetchMock = serverFetch(defaultState());
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PolicyClient />);
+    await screen.findByRole("heading", { name: "Draft allocation" });
+    const name = screen.getAllByLabelText("Asset-class name")[0] as HTMLInputElement;
+    expect(name.maxLength).toBe(-1);
+    await userEvent.clear(name);
+    await userEvent.type(name, "😀".repeat(201));
+    await userEvent.click(screen.getByRole("button", { name: "Save allocations" }));
+    expect(screen.getByText(/200 characters or fewer/)).toBeTruthy();
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(0);
+  });
+
+  it("enforces the 200-code-point boundary for ASCII and mixed astral text", async () => {
+    const fetchMock = serverFetch(defaultState());
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PolicyClient />);
+    await screen.findByRole("heading", { name: "Draft allocation" });
+    const name = screen.getAllByLabelText("Asset-class name")[0];
+    await userEvent.clear(name);
+    await userEvent.type(name, "a".repeat(199) + "😀");
+    await userEvent.click(screen.getByRole("button", { name: "Save allocations" }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(1));
+
+    const adopted = screen.getAllByLabelText("Asset-class name")[0];
+    await userEvent.clear(adopted);
+    await userEvent.type(adopted, "a".repeat(201));
+    await userEvent.click(screen.getByRole("button", { name: "Save allocations" }));
+    expect(screen.getByText(/200 characters or fewer/)).toBeTruthy();
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(1);
+  });
+
+  it("allows exactly 200 emoji and treats a case-only display edit as a save", async () => {
+    const state = defaultState();
+    const fetchMock = serverFetch(state);
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PolicyClient />);
+    await screen.findByRole("heading", { name: "Draft allocation" });
+    const name = screen.getAllByLabelText("Asset-class name")[0];
+    await userEvent.clear(name);
+    await userEvent.type(name, "😀".repeat(200));
+    await userEvent.click(screen.getByRole("button", { name: "Save allocations" }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(1));
+
+    const savedName = screen.getAllByLabelText("Asset-class name")[0];
+    await userEvent.clear(savedName);
+    await userEvent.type(savedName, "CASH");
+    await userEvent.click(screen.getByRole("button", { name: "Save allocations" }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(2));
+  });
+
+  it("treats trim and collapsed Unicode whitespace as allocation no-ops", async () => {
+    const state = defaultState({ draft: {
+      ...draft,
+      allocations: [{ ...draft.allocations[0], asset_class_name: "Cash Reserve" }],
+    } });
+    const fetchMock = serverFetch(state);
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PolicyClient />);
+    await screen.findByRole("heading", { name: "Draft allocation" });
+    const name = screen.getByLabelText("Asset-class name");
+    await userEvent.clear(name);
+    await userEvent.type(name, "  Cash\u00a0  Reserve  ");
+    await userEvent.click(screen.getByRole("button", { name: "Save allocations" }));
+    expect(screen.getByText(/no allocation changes/)).toBeTruthy();
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(0);
+  });
+
+  it("shows current Published provenance beside an editable Draft", async () => {
+    vi.stubGlobal("fetch", serverFetch(defaultState({ draft: { ...draft, source_version_id: version.id }, published: version })));
+    render(<PolicyClient />);
+    expect(await screen.findByRole("heading", { name: "Current Published Version · Version 2" })).toBeTruthy();
+    expect(screen.getByText("This Draft started from current Published.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /edit|delete|restore/i })).toBeNull();
+  });
+
+  it("labels blank Draft provenance without mixing it into Published content", async () => {
+    vi.stubGlobal("fetch", serverFetch(defaultState({ published: version })));
+    render(<PolicyClient />);
+    await screen.findByRole("heading", { name: "Current Published Version · Version 2" });
+    expect(screen.getByText("This Draft started blank.")).toBeTruthy();
+  });
+
+  it("gives row controls unique names that update with the row name", async () => {
+    vi.stubGlobal("fetch", serverFetch(defaultState()));
+    render(<PolicyClient />);
+    await screen.findByRole("heading", { name: "Draft allocation" });
+    expect(screen.getByRole("button", { name: "Move First user class down" })).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Move First user class up" }) as HTMLButtonElement).disabled).toBe(true);
+    await userEvent.click(screen.getByRole("button", { name: "Add allocation row" }));
+    expect(screen.getByRole("button", { name: "Remove allocation row 3" })).toBeTruthy();
+    await userEvent.type(screen.getAllByLabelText("Asset-class name")[2], "Owner category");
+    expect(screen.getByRole("button", { name: "Remove Owner category" })).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Move Owner category down" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it.each(["network", "server"])("recovers the text mutation button after a %s failure", async (kind) => {
+    const state = defaultState();
+    let failed = false;
+    const fetchMock = serverFetch(state, (url, method) => {
+      if (!failed && url.endsWith("/api/policies/current/draft") && method === "PATCH") {
+        failed = true;
+        if (kind === "network") return Promise.reject(new TypeError("private connection detail"));
+        return jsonResponse({ detail: "secret-marker" }, 500);
+      }
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PolicyClient />);
+    await screen.findByRole("heading", { name: "Policy text" });
+    await userEvent.type(screen.getByLabelText("Notes"), "Owner note");
+    await userEvent.click(screen.getByRole("button", { name: "Save policy text" }));
+    expect(await screen.findByText(kind === "network"
+      ? "The Policy service connection is unavailable."
+      : "The Policy service returned an unexpected server error.")).toBeTruthy();
+    const save = screen.getByRole("button", { name: "Save policy text" }) as HTMLButtonElement;
+    expect(save.disabled).toBe(false);
+    await userEvent.click(save);
+    expect(await screen.findByText("Policy text saved.")).toBeTruthy();
   });
 
   it("requires explicit publication confirmation and sends the exact saved revision once", async () => {

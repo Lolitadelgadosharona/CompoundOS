@@ -56,12 +56,18 @@ the content or providing investment advice.
 - The allocation editor supports local add, remove, and accessible reordering, then
   explicitly replaces the complete ordered collection. It supplies no default asset
   classes or target percentages.
+- Allocation display-name no-op comparison preserves case after NFKC, trim, and
+  whitespace normalization. Names use a 200 Unicode code-point technical limit,
+  and every row action has a row-specific accessible name.
 - Allocation inputs remain decimal strings. The displayed total uses integer
   hundredths and reports only mechanical equality with `100.00`; it never scores or
   evaluates the allocation.
 - Publication shows a read-only saved Draft snapshot, required-field presence,
   exact total, and current revision. It requires explicit confirmation and sends
   `confirmation: true`; the server remains authoritative.
+- Publication review is unavailable while either editor contains semantic local
+  changes. Reloading a dirty workspace requires an explicit choice to discard both
+  editors' local changes or keep editing; a failed reload retains local state.
 - Published and historical Versions are immutable and read-only. New Drafts may be
   blank or copied only from the current Published Version; historical restore/copy,
   Published editing, and product deletion are absent.
@@ -88,6 +94,9 @@ the content or providing investment advice.
   confirmation while remaining subject to server validation.
 - Version history paginates newest first without duplicate entries, remains
   immutable, and offers no restore or historical-copy action.
+- Core Draft/Published state remains usable when history or audit fails. History
+  and audit retries are isolated GETs, and stale auxiliary responses cannot replace
+  the result of a newer reload, refresh, publication, or cursor request.
 - Policy audit failures never recast a completed Policy mutation as failed, and
   the retry cannot replay that mutation.
 - UI and API-client tests cover the approved flows, error classes, request payloads,

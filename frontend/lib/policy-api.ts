@@ -105,6 +105,13 @@ export class PolicyApiError extends Error {
   }
 }
 
+export class PolicyNetworkError extends Error {
+  constructor() {
+    super("The Policy service connection is unavailable.");
+    this.name = "PolicyNetworkError";
+  }
+}
+
 function neutralErrorMessage(status: number): string {
   if (status === 400) {
     return "The request could not be completed because the record is mechanically incomplete or unchanged.";
@@ -116,11 +123,25 @@ function neutralErrorMessage(status: number): string {
   if (status === 422) {
     return "The request was not accepted. Check field formats, limits, and duplicate asset-class names.";
   }
+  if (status >= 500) return "The Policy service returned an unexpected server error.";
   return "The Policy request could not be completed.";
 }
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+async function fetchResponse(path: string, init: RequestInit = {}): Promise<Response> {
+  try {
+    return await fetch(`${API_BASE_URL}${path}`, init);
+  } catch (error) {
+    if (isAbortError(error)) throw error;
+    throw new PolicyNetworkError();
+  }
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, init);
+  const response = await fetchResponse(path, init);
   if (!response.ok) throw new PolicyApiError(neutralErrorMessage(response.status), response.status);
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
@@ -136,7 +157,7 @@ function jsonRequest(method: string, payload: unknown, signal?: AbortSignal): Re
 }
 
 export async function hasCurrentHousehold(signal?: AbortSignal): Promise<boolean> {
-  const response = await fetch(`${API_BASE_URL}/api/households/current`, {
+  const response = await fetchResponse("/api/households/current", {
     cache: "no-store",
     signal,
   });
@@ -146,7 +167,7 @@ export async function hasCurrentHousehold(signal?: AbortSignal): Promise<boolean
 }
 
 export async function getCurrentPolicy(signal?: AbortSignal): Promise<Policy | null> {
-  const response = await fetch(`${API_BASE_URL}/api/policies/current`, {
+  const response = await fetchResponse("/api/policies/current", {
     cache: "no-store",
     signal,
   });
@@ -280,8 +301,8 @@ export function allocationTotal(items: AllocationInput[]): {
   return { hundredths: total, display: formatHundredths(total) };
 }
 
-function normalizedName(value: string): string {
-  return value.normalize("NFKC").trim().replace(/\s+/gu, " ").toLocaleLowerCase();
+export function normalizeAllocationDisplayName(value: string): string {
+  return value.normalize("NFKC").trim().replace(/\s+/gu, " ");
 }
 
 function normalizedPercentage(value: string): string | null {
@@ -294,7 +315,8 @@ export function allocationsEqual(saved: Allocation[], edited: AllocationInput[])
   return saved.every((item, index) => {
     const candidate = edited[index];
     return (
-      normalizedName(item.asset_class_name) === normalizedName(candidate.asset_class_name) &&
+      normalizeAllocationDisplayName(item.asset_class_name) ===
+        normalizeAllocationDisplayName(candidate.asset_class_name) &&
       item.target_percentage === normalizedPercentage(candidate.target_percentage)
     );
   });
