@@ -99,6 +99,9 @@ def _ensure_policy_and_version(session: Session) -> tuple:
     household = get_current_household(session)
     policy = get_policy(session, household.id)
     if policy is None:
+        # End the autobegin transaction so Policy service functions
+        # can start their own clean transactions via session.begin().
+        session.commit()
         policy, draft, _ = create_policy(session)
         # rev 1 → update → rev 2
         update_draft_text(
