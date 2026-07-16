@@ -852,7 +852,8 @@ def test_archive_requires_archived_at(db_session: Session, postgres_engine: Engi
             "decision_archive_requires_archived_at",
             lambda: conn.execute(
                 text(
-                    "UPDATE decisions SET status = 'archived' "
+                    "UPDATE decisions SET status = 'archived',"
+                    " archive_reason = 'test' "
                     "WHERE id = :id"
                 ),
                 {"id": did},
@@ -1152,9 +1153,21 @@ def test_snapshot_policy_version_update_fails(db_session: Session, postgres_engi
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
         sid = confirm_decision(conn, did, drid, vid)
-        conn.commit()
 
-        vid2 = create_policy_version(conn, hid)
+        # Create a second household and policy version to use as the update target.
+        # The unique constraint on investment_policies.household_id prevents
+        # creating two policies for the same household.
+        hid2 = uuid4()
+        conn.execute(
+            text(
+                "INSERT INTO household_profiles "
+                "(id, singleton_key, household_name, base_currency,"
+                " investment_horizon, liquidity_needs, risk_statement, notes) "
+                "VALUES (:id, true, 'DJ Test 2', 'USD', '', '', '', '')"
+            ),
+            {"id": hid2},
+        )
+        vid2 = create_policy_version(conn, str(hid2))
 
         assert_db_error(
             conn,
@@ -1223,7 +1236,7 @@ def test_snapshot_fk_restrict(db_session: Session, postgres_engine: Engine) -> N
 
         assert_db_error(
             conn,
-            "violates foreign key",
+            "policy_version_delete_forbidden",
             lambda: conn.execute(
                 text(
                     "DELETE FROM investment_policy_versions "
@@ -1550,7 +1563,7 @@ def test_correction_fk_restrict(db_session: Session, postgres_engine: Engine) ->
 
         assert_db_error(
             conn,
-            "violates foreign key",
+            "decision_snapshot_delete_forbidden",
             lambda: conn.execute(
                 text(
                     "DELETE FROM decision_confirmed_snapshots "
