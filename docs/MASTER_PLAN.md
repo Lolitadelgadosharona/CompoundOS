@@ -397,3 +397,21 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - 2026-07-15: Merging the Slice 3 Technical Design does not authorize Slice 3
   implementation. Each implementation slice (3A, 3B, 3C) requires separate
   explicit authorization.
+- 2026-07-16: Initial independent Technical Design Review of PR #10 concluded
+  REQUEST CHANGES: 0 BLOCKER, 2 HIGH (M-1: Draft discard identity semantics
+  undefined; M-2: correction_number IDENTITY ALWAYS technically incorrect),
+  3 MEDIUM (M-3: Confirm lock order inconsistency; M-4: Archived+Correction
+  treated as approved; M-5: Household audit timeline resource boundary),
+  3 LOW (L-1: Decision Detail original/effective response ambiguity; L-2:
+  Confirm/Discard loser response undefined; L-3: correction_count concurrent
+  inaccuracy in audit metadata).
+- 2026-07-16: All eight review findings (M-1 through M-5, L-1 through L-3)
+  revised in the technical design document. Three new Open Decisions added:
+  OD-S3-13 (Draft discard identity semantics), OD-S3-14 (Correction numbering
+  and ordering), OD-S3-15 (Correction eligibility for Archived Decisions).
+  OD-S3-10 expanded to cover Household audit timeline scope. OD-S3-7 updated
+  to remove premature "archived Decisions still correctable" claim.
+- 2026-07-16: OD-S3-1 through OD-S3-15 remain Open — Owner Decision Required.
+  PR #10 remains Draft and is not approved for merge. Design remains pending
+  independent re-review. Slice 3 Implementation remains Not Authorized.
+  Slice 3A, 3B, 3C remain Not Started.
