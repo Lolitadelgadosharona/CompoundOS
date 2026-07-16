@@ -1,5 +1,50 @@
 # Changelog
 
+## [Unreleased] - Sprint 002 Slice 3A Complete
+
+### Added
+
+- Alembic revision `0003_decision_journal_foundation` creating four Decision
+  Journal tables: `decisions` (stable identity), `decision_drafts`,
+  `decision_confirmed_snapshots`, and `decision_corrections`
+- Five PL/pgSQL trigger functions: identity lifecycle transitions, identity
+  delete guard (draft-only DELETE), confirmed snapshot immutability,
+  correction immutability with status/ownership validation, and deferred
+  commit-time lifecycle consistency enforcement
+- Named CHECK constraints for status values, text lengths, date boundaries,
+  correction numbering, actor, and archive reason on all four tables
+- UNIQUE constraints: at most one Draft per Decision, at most one Confirmed
+  snapshot per Decision, per-Decision sequential correction numbering
+- FK constraints with ON DELETE RESTRICT/NO ACTION for snapshot and correction
+  references; ON DELETE CASCADE for Draft-to-Decision enabling atomic discard
+- Deferred CONSTRAINT TRIGGER on decisions for cross-table draft/snapshot
+  consistency verification at commit time
+- SQLAlchemy ORM models aligned with the migration: Decision, DecisionDraft,
+  DecisionConfirmedSnapshot, DecisionCorrection
+- Comprehensive real-PostgreSQL test suite (60 tests) covering migration
+  lifecycle, schema inspection, data model constraints, lifecycle transitions,
+  discard foundation, snapshot immutability, correction behavior, and trigger
+  inspection
+- ADR 0005 documenting the Decision Journal persistence and immutability
+  foundation
+
+### Boundaries
+
+- Slice 3A adds no Decision service, repository workflow, API endpoint,
+  Pydantic contract, router, or frontend `/decisions` page.
+- No AuditEvent business write workflow, Redis logic, authentication,
+  multi-user, multi-household, recommendation, Guardian, AI, Broker, trading,
+  actual holdings, accounts, or monetary data is included.
+- Slice 3B (Decision Backend Workflow and API): Not Authorized, Not Started.
+- Slice 3C (Decision Frontend Workflow): Not Authorized, Not Started.
+
+### Status
+
+- Sprint 002 remains In Progress. Slice 2A, 2B, 2C remain Done.
+- Slice 3 Technical Design Gate: Done.
+- Slice 3A Decision Journal Persistence and Immutability Foundation: In Review.
+- Slice 3B and Slice 3C: Not Authorized, Not Started.
+
 ## [Unreleased] - Sprint 002 Slice 3 Technical Design Gate Complete
 
 ### Added

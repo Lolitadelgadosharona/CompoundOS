@@ -26,8 +26,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Slice 2B: Investment Policy Backend Workflow and API / Done
 - Slice 2C: Investment Policy Frontend Workflow / Done
 - Slice 3 Technical Design Gate: Done
-- Slice 3: Implementation Not Authorized / Not Started
-- Slice 3A, 3B, 3C: Not Started
+- Slice 3A: Decision Journal Persistence and Immutability Foundation / In Review
+- Slice 3B, 3C: Not Authorized / Not Started
 
 ## Planning
 
@@ -75,7 +75,10 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Slice 2B is Done after independent review and approval for merge.
 - Slice 2C is Done after independent review and approval for merge.
 - Slice 3 Technical Design Gate is Done. PR #10 approved for merge.
-- Slice 3 implementation remains unauthorized and Not Started.
+- Slice 3A Decision Journal Persistence and Immutability Foundation is in Review.
+  Migration 0003 creates four Decision Journal tables with five PL/pgSQL trigger
+  functions, lifecycle/consistency/immutability enforcement, and ORM models.
+  Slice 3B and Slice 3C remain Not Authorized and Not Started.
 - OD-S3-1 through OD-S3-15 all Resolved by Project Owner on 2026-07-16.
   Four independent review stages completed: initial REQUEST CHANGES,
   incremental APPROVE WITH NON-BLOCKING FOLLOW-UP, consistency review
@@ -484,3 +487,12 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   the Technical Design PR does not authorize Slice 3A. Slice 3 Implementation
   remains Not Authorized. Slice 3A, 3B, 3C remain Not Started. The next step
   can only be decided by the Project Owner.
+- 2026-07-16: Sprint 002 Slice 3A implementation authorized for Decision Journal
+  Persistence and Immutability Foundation only.
+- 2026-07-16: Slice 3A creates Alembic revision 0003 with four Decision Journal
+  tables (decisions, decision_drafts, decision_confirmed_snapshots,
+  decision_corrections), five PL/pgSQL trigger functions, deferred consistency
+  enforcement, and aligned ORM models.
+- 2026-07-16: Slice 3A adds no Decision service, repository workflow, API
+  endpoint, Pydantic contract, router, frontend client, or /decisions page.
+- 2026-07-16: Slice 3B and Slice 3C remain Not Authorized and Not Started.
