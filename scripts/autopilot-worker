@@ -4,11 +4,27 @@ CompoundOS Safe Autopilot — Worker
 Executes approved tasks using Hermes (preferred) or Qoder (when available).
 Each task gets an isolated git worktree and branch.
 """
-import json, os, sys, time, subprocess, shutil
+import json, os, sys, time, subprocess, shutil, re, hashlib
 from datetime import datetime, timezone
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 AUTOPILOT_ROOT = os.path.join(REPO_ROOT, '.autopilot')
+
+# Error patterns that indicate failure even with exit code 0
+_ERROR_PATTERNS = [
+    r'(?i)\b(error|traceback|exception|failed|refused|denied|blocked)\b',
+    r'(?i)\bcannot\s+(complete|proceed|continue|access|modify)\b',
+    r'(?i)\bunable\s+to\b',
+    r'(?i)\bno\s+such\s+(file|directory)\b',
+    r'(?i)\bpermission\s+denied\b',
+]
+
+def _has_error_markers(output):
+    """Check output for patterns that indicate failure despite exit code 0."""
+    for pattern in _ERROR_PATTERNS:
+        if re.search(pattern, output):
+            return True
+    return False
 
 def log(msg, level="INFO"):
     timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
@@ -156,11 +172,19 @@ def execute_hermes(task, worktree_path):
             cwd=worktree_path,
             capture_output=True, text=True, timeout=timeout
         )
+        # Do NOT treat exit code 0 alone as success.
+        # Check for explicit completion markers and structured output.
+        stdout = result.stdout or ''
+        stderr = result.stderr or ''
+        completed = (
+            result.returncode == 0
+            and not _has_error_markers(stdout + stderr)
+        )
         return {
-            'success': result.returncode == 0,
+            'success': completed,
             'exit_code': result.returncode,
-            'stdout': result.stdout[-5000:] if result.stdout else '',
-            'stderr': result.stderr[-2000:] if result.stderr else '',
+            'stdout': stdout[-5000:],
+            'stderr': stderr[-2000:],
             'worker': 'hermes'
         }
     except subprocess.TimeoutExpired:
@@ -218,7 +242,111 @@ def select_worker():
     log("Using Hermes worker (default)")
     return 'hermes'
 
+def run_validation(task, worktree_path):
+    """Run validation commands using argv lists (no shell=True).
+    Only allows commands from the task's validation_commands list.
+    Each command is split on whitespace into an argv list for safe execution."""
+    results = []
+    for cmd in task.get('validation_commands', []):
+        log(f"Running validation: {cmd}")
+        # Split into argv list — avoids shell injection
+        argv = cmd.split()
+        try:
+            result = subprocess.run(
+                argv,
+                cwd=worktree_path,
+                capture_output=True, text=True, timeout=300
+            )
+            results.append({
+                'command': cmd,
+                'exit_code': result.returncode,
+                'stdout': result.stdout[-2000:],
+                'stderr': result.stderr[-2000:]
+            })
+        except subprocess.TimeoutExpired:
+            results.append({
+                'command': cmd,
+                'exit_code': -1,
+                'stdout': '',
+                'stderr': 'Validation timeout'
+            })
+        except FileNotFoundError:
+            results.append({
+                'command': cmd,
+                'exit_code': -2,
+                'stdout': '',
+                'stderr': f'Command not found: {argv[0]}'
+            })
+        except Exception as e:
+            results.append({
+                'command': cmd,
+                'exit_code': -3,
+                'stdout': '',
+                'stderr': str(e)
+            })
+    return results
+
+def verify_untracked_integrity():
+    """Recompute SHA-256 for every protected untracked file.
+    Returns (ok, mismatches) tuple."""
+    manifest_path = os.path.join(AUTOPILOT_ROOT, 'state', 'untracked_manifest.json')
+    if not os.path.isfile(manifest_path):
+        return True, []
+
+    with open(manifest_path, 'r') as f:
+        manifest = json.load(f)
+
+    mismatches = []
+    for entry in manifest.get('files', []):
+        fpath = os.path.join(REPO_ROOT, entry['path'])
+
+        # Must exist as a regular file
+        if not os.path.isfile(fpath):
+            mismatches.append({'path': entry['path'], 'issue': 'missing'})
+            continue
+
+        # Size check
+        actual_size = os.path.getsize(fpath)
+        if actual_size != entry['size_bytes']:
+            mismatches.append({
+                'path': entry['path'],
+                'issue': 'size_mismatch',
+                'expected': entry['size_bytes'],
+                'actual': actual_size
+            })
+            continue
+
+        # SHA-256 check
+        sha = hashlib.sha256()
+        with open(fpath, 'rb') as f:
+            for chunk in iter(lambda: f.read(65536), b''):
+                sha.update(chunk)
+        actual_sha = sha.hexdigest()
+        if actual_sha != entry['sha256']:
+            mismatches.append({
+                'path': entry['path'],
+                'issue': 'sha256_mismatch',
+                'expected': entry['sha256'],
+                'actual': actual_sha
+            })
+
+    ok = len(mismatches) == 0
+    if not ok:
+        log(f"Untracked integrity FAILED: {len(mismatches)} mismatches", "ERROR")
+        for m in mismatches:
+            log(f"  {m['path']}: {m['issue']}", "ERROR")
+    else:
+        log(f"Untracked integrity: {len(manifest.get('files',[]))} files OK")
+
+    return ok, mismatches
+
 def process_task():
+    # Verify untracked file integrity before any Git operations
+    ok, mismatches = verify_untracked_integrity()
+    if not ok:
+        log("Untracked file integrity check FAILED — aborting", "CRITICAL")
+        return False
+
     if not acquire_lock('autopilot-worker'):
         log("Another worker is running. Exiting.")
         return False
@@ -250,6 +378,18 @@ def process_task():
         task['finished_at'] = datetime.now(timezone.utc).isoformat()
         if not result['success']:
             log(f"Worker returned failure: exit_code={result['exit_code']}", "ERROR")
+            cleanup_worktree(task)
+            running_path = os.path.join(AUTOPILOT_ROOT, 'queue', 'running', f"{task_id}.json")
+            move_task(running_path, task, 'failed')
+            return False
+        # Run validation commands and check results
+        validation_results = run_validation(task, wt_path)
+        task['validation_results'] = validation_results
+        failed_validations = [v for v in validation_results if v['exit_code'] != 0]
+        if failed_validations:
+            log(f"Validation failed: {len(failed_validations)} commands", "ERROR")
+            for v in failed_validations:
+                log(f"  [{v['exit_code']}] {v['command']}", "ERROR")
             cleanup_worktree(task)
             running_path = os.path.join(AUTOPILOT_ROOT, 'queue', 'running', f"{task_id}.json")
             move_task(running_path, task, 'failed')

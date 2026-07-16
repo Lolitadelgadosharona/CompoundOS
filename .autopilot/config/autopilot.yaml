@@ -38,10 +38,11 @@ workers:
     headless_flags:
       non_interactive: "-p"
       output_format: "--output-format"
-      cwd: "--cwd"
+      cwd: "-w (long form: --cwd)"
       allowed_tools: "--allowed-tools"
       disallowed_tools: "--disallowed-tools"
       worktree: "--worktree"
+    verified_against: "qodercli v1.0.47 --help on 2026-07-16"
     missing_flags:
       - "--max-turns (managed via subprocess timeout instead)"
     handoff_dir: ".autopilot/handoff"
