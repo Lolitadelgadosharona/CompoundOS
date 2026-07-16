@@ -106,9 +106,7 @@ def _ensure_policy_and_version(session: Session) -> tuple:
         published = InvestmentPolicyVersion(
             policy_id=policy.id,
             version_number=1,
-            status="published",
-            published_at=now,
-            sealed_at=now,
+            status="unsealed",
             objectives=draft.objectives,
             time_horizon=draft.time_horizon,
             liquidity="",
@@ -121,6 +119,10 @@ def _ensure_policy_and_version(session: Session) -> tuple:
             notes="",
         )
         session.add(published)
+        session.flush()
+        published.status = "published"
+        published.published_at = now
+        published.sealed_at = now
         session.flush()
         session.delete(draft)
         session.flush()
