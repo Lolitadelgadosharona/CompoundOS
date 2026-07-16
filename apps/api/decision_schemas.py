@@ -24,19 +24,6 @@ DECISION_TEXT_FIELDS = tuple(DECISION_TEXT_LIMITS)
 
 CONFIRM_REQUIRED_FIELDS = ("title", "decision_summary", "rationale", "decision_date")
 
-CORRECTABLE_FIELDS = (
-    "title",
-    "decision_summary",
-    "rationale",
-    "alternatives_considered",
-    "risks_and_uncertainties",
-    "evidence_or_sources",
-    "expected_outcome",
-    "review_trigger",
-    "decision_date",
-    "review_date",
-    "notes",
-)
 
 
 def _validate_decision_date(value: date | None) -> date | None:

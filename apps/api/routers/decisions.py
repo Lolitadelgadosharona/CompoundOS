@@ -19,6 +19,7 @@ from apps.api.decision_schemas import (
     CorrectionMetadataResponse,
     CorrectionResponse,
     CreateDecisionRequest,
+    DecisionAuditEventResponse,
     DecisionAuditListResponse,
     DecisionCreateResponse,
     DecisionDetailResponse,
@@ -26,6 +27,7 @@ from apps.api.decision_schemas import (
     DiscardDecisionRequest,
     DraftDetailResponse,
     SnapshotResponse,
+    UnarchiveDecisionRequest,
     UpdateDecisionDraftRequest,
 )
 from apps.api.services.decisions import (
@@ -279,8 +281,8 @@ def archive(
 @router.post("/{decision_id}/unarchive", response_model=ArchiveResponse)
 def unarchive(
     decision_id: UUID,
+    payload: UnarchiveDecisionRequest,
     session: DatabaseSession,
-    _payload: dict = Body(default_factory=dict),
 ) -> ArchiveResponse:
     try:
         decision = unarchive_decision(session, decision_id)
@@ -332,8 +334,6 @@ def get_audit_events(
     limit: int = Query(default=50, ge=1, le=100),
 ) -> DecisionAuditListResponse:
     try:
-        from apps.api.decision_schemas import DecisionAuditEventResponse
-
         events, next_cursor = read_decision_audit_events(
             session,
             decision_id,

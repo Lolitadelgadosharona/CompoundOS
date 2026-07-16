@@ -28,13 +28,6 @@ def get_household_id(session: Session) -> Optional[UUID]:
     return session.scalar(select(HouseholdProfile.id))
 
 
-def get_decision(
-    session: Session, decision_id: UUID, *, for_update: bool = False
-) -> Optional[Decision]:
-    statement = select(Decision).where(Decision.id == decision_id)
-    if for_update:
-        statement = statement.with_for_update()
-    return session.scalar(statement)
 
 
 def get_decision_for_household(

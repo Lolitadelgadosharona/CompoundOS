@@ -59,22 +59,22 @@ from apps.api.services.decisions import (
 # ---------------------------------------------------------------------------
 
 
-def _ensure_household(conn) -> None:
-    conn.execute(text("TRUNCATE TABLE audit_events RESTART IDENTITY CASCADE"))
-    existing = conn.execute(
-        select(HouseholdProfile.id)
-    ).scalar()
-    if existing is None:
-        conn.execute(
-            text(
-                "INSERT INTO household_profiles"
-                " (id, singleton_key, household_name, base_currency,"
-                " investment_horizon, liquidity_needs, risk_statement, notes)"
-                " VALUES (:id, true, 'Test', 'USD', '', '', '', '')"
-            ),
-            {"id": str(uuid4())},
-        )
-        conn.commit()
+def _ensure_household(engine: Engine) -> None:
+    with engine.begin() as conn:
+        conn.execute(text("TRUNCATE TABLE audit_events RESTART IDENTITY CASCADE"))
+        existing = conn.execute(
+            select(HouseholdProfile.id)
+        ).scalar()
+        if existing is None:
+            conn.execute(
+                text(
+                    "INSERT INTO household_profiles"
+                    " (id, singleton_key, household_name, base_currency,"
+                    " investment_horizon, liquidity_needs, risk_statement, notes)"
+                    " VALUES (:id, true, 'Test', 'USD', '', '', '', '')"
+                ),
+                {"id": str(uuid4())},
+            )
 
 
 def _ensure_policy_and_version(session: Session) -> tuple:
@@ -127,6 +127,11 @@ def _ensure_policy_and_version(session: Session) -> tuple:
     return policy, published
 
 
+def _make_session(engine: Engine) -> Session:
+    """Create a fresh session bound to the engine (not a pre-transacted connection)."""
+    return Session(engine, expire_on_commit=False)
+
+
 # ---------------------------------------------------------------------------
 # Creation / Draft tests
 # ---------------------------------------------------------------------------
@@ -136,13 +141,11 @@ class TestDecisionCreation:
     def test_create_decision_and_draft(
         self, postgres_engine: Engine, db_session: Session
     ) -> None:
-        with postgres_engine.connect() as conn:
-            _ensure_household(conn)
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        _ensure_household(postgres_engine)
+        with _make_session(postgres_engine) as session:
             payload = CreateDecisionRequest(title="Buy ETF")
             decision, draft = create_decision(session, payload)
-            conn.commit()
+            session.commit()
 
         assert decision.status == "draft"
         assert draft.title == "Buy ETF"
@@ -151,22 +154,22 @@ class TestDecisionCreation:
     def test_create_writes_audit_event(
         self, postgres_engine: Engine, db_session: Session
     ) -> None:
-        with postgres_engine.connect() as conn:
-            _ensure_household(conn)
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        _ensure_household(postgres_engine)
+        with _make_session(postgres_engine) as session:
             decision, draft = create_decision(
                 session, CreateDecisionRequest(title="Test")
             )
+            session.commit()
+            decision_id = decision.id
+
+        with _make_session(postgres_engine) as session:
             events = list(
                 session.scalars(
                     select(AuditEvent).where(
-                        AuditEvent.entity_id == decision.id
+                        AuditEvent.entity_id == decision_id
                     )
                 )
             )
-            conn.commit()
-
         assert len(events) == 1
         assert events[0].action == "decision.draft.created"
         assert events[0].entity_type == "Decision"
@@ -175,13 +178,11 @@ class TestDecisionCreation:
     def test_multiple_independent_drafts(
         self, postgres_engine: Engine, db_session: Session
     ) -> None:
-        with postgres_engine.connect() as conn:
-            _ensure_household(conn)
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        _ensure_household(postgres_engine)
+        with _make_session(postgres_engine) as session:
             d1, _ = create_decision(session, CreateDecisionRequest(title="D1"))
             d2, _ = create_decision(session, CreateDecisionRequest(title="D2"))
-            conn.commit()
+            session.commit()
 
         assert d1.id != d2.id
 
@@ -189,11 +190,8 @@ class TestDecisionCreation:
         self, postgres_engine: Engine, db_session: Session
     ) -> None:
         """Verify that if audit event insert fails, the decision is rolled back."""
-        # This is tested implicitly by the atomic transaction pattern
-        with postgres_engine.connect() as conn:
-            _ensure_household(conn)
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        _ensure_household(postgres_engine)
+        with _make_session(postgres_engine) as session:
             before_count = session.scalar(
                 select(text("count(*)")).select_from(Decision)
             )
@@ -203,7 +201,7 @@ class TestDecisionCreation:
             after_count = session.scalar(
                 select(text("count(*)")).select_from(Decision)
             )
-            conn.commit()
+            session.commit()
 
         assert after_count == before_count + 1
 
@@ -217,31 +215,27 @@ class TestDraftReadList:
     def test_read_draft(
         self, postgres_engine: Engine, db_session: Session
     ) -> None:
-        with postgres_engine.connect() as conn:
-            _ensure_household(conn)
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        _ensure_household(postgres_engine)
+        with _make_session(postgres_engine) as session:
             decision, draft = create_decision(
                 session, CreateDecisionRequest(title="Read me")
             )
-            conn.commit()
+            session.commit()
             decision_id = decision.id
 
-        with Session(bind=postgres_engine) as session:
+        with _make_session(postgres_engine) as session:
             result = read_draft(session, decision_id)
             assert result.title == "Read me"
 
     def test_list_decisions_default_hides_archived(
         self, postgres_engine: Engine, db_session: Session
     ) -> None:
-        with postgres_engine.connect() as conn:
-            _ensure_household(conn)
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        _ensure_household(postgres_engine)
+        with _make_session(postgres_engine) as session:
             d1, _ = create_decision(session, CreateDecisionRequest(title="D1"))
-            conn.commit()
+            session.commit()
 
-        with Session(bind=postgres_engine) as session:
+        with _make_session(postgres_engine) as session:
             rows = read_decision_list(session)
             assert len(rows) >= 1
 
@@ -249,16 +243,13 @@ class TestDraftReadList:
         self, postgres_engine: Engine, db_session: Session
     ) -> None:
         """Confirmed decisions should not return draft detail."""
-        with postgres_engine.connect() as conn:
-            _ensure_household(conn)
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        _ensure_household(postgres_engine)
+        with _make_session(postgres_engine) as session:
             _ensure_policy_and_version(session)
             decision, draft = create_decision(
                 session,
                 CreateDecisionRequest(title="Confirm me"),
             )
-            # Fill required fields
             draft.decision_summary = "Summary"
             draft.rationale = "Rationale"
             draft.decision_date = date.today()
@@ -270,10 +261,10 @@ class TestDraftReadList:
                     expected_revision=draft.revision, confirmation=True
                 ),
             )
-            conn.commit()
+            session.commit()
             decision_id = decision.id
 
-        with Session(bind=postgres_engine) as session:
+        with _make_session(postgres_engine) as session:
             with pytest.raises(DraftNotFoundError):
                 read_draft(session, decision_id)
 
@@ -287,18 +278,15 @@ class TestDraftUpdate:
     def test_update_fields(
         self, postgres_engine: Engine, db_session: Session
     ) -> None:
-        with postgres_engine.connect() as conn:
-            _ensure_household(conn)
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        _ensure_household(postgres_engine)
+        with _make_session(postgres_engine) as session:
             decision, draft = create_decision(
                 session, CreateDecisionRequest(title="Update me")
             )
-            conn.commit()
+            session.commit()
             decision_id = decision.id
 
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        with _make_session(postgres_engine) as session:
             result = update_draft(
                 session,
                 decision_id,
@@ -308,7 +296,7 @@ class TestDraftUpdate:
                     rationale="New rationale",
                 ),
             )
-            conn.commit()
+            session.commit()
 
         assert result.decision_summary == "New summary"
         assert result.rationale == "New rationale"
@@ -317,18 +305,15 @@ class TestDraftUpdate:
     def test_stale_revision_returns_409(
         self, postgres_engine: Engine, db_session: Session
     ) -> None:
-        with postgres_engine.connect() as conn:
-            _ensure_household(conn)
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        _ensure_household(postgres_engine)
+        with _make_session(postgres_engine) as session:
             decision, draft = create_decision(
                 session, CreateDecisionRequest(title="Stale")
             )
-            conn.commit()
+            session.commit()
             decision_id = decision.id
 
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        with _make_session(postgres_engine) as session:
             with pytest.raises(DecisionConflictError):
                 update_draft(
                     session,
@@ -337,30 +322,25 @@ class TestDraftUpdate:
                         expected_revision=999, title="Bad"
                     ),
                 )
-            conn.rollback()
 
     def test_no_op_returns_400(
         self, postgres_engine: Engine, db_session: Session
     ) -> None:
-        with postgres_engine.connect() as conn:
-            _ensure_household(conn)
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        _ensure_household(postgres_engine)
+        with _make_session(postgres_engine) as session:
             decision, draft = create_decision(
                 session, CreateDecisionRequest(title="NoOp")
             )
-            conn.commit()
+            session.commit()
             decision_id = decision.id
 
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        with _make_session(postgres_engine) as session:
             with pytest.raises(NoDecisionChangesError):
                 update_draft(
                     session,
                     decision_id,
                     UpdateDecisionDraftRequest(expected_revision=1),
                 )
-            conn.rollback()
 
 
 # ---------------------------------------------------------------------------
@@ -372,10 +352,8 @@ class TestConfirm:
     def test_confirm_first(
         self, postgres_engine: Engine, db_session: Session
     ) -> None:
-        with postgres_engine.connect() as conn:
-            _ensure_household(conn)
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        _ensure_household(postgres_engine)
+        with _make_session(postgres_engine) as session:
             _ensure_policy_and_version(session)
             decision, draft = create_decision(
                 session, CreateDecisionRequest(title="Confirm first")
@@ -391,7 +369,7 @@ class TestConfirm:
                     expected_revision=draft.revision, confirmation=True
                 ),
             )
-            conn.commit()
+            session.commit()
 
         assert snapshot.title == "Confirm first"
         assert snapshot.decision_summary == "Summary"
@@ -400,10 +378,8 @@ class TestConfirm:
     def test_confirm_requires_fields(
         self, postgres_engine: Engine, db_session: Session
     ) -> None:
-        with postgres_engine.connect() as conn:
-            _ensure_household(conn)
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        _ensure_household(postgres_engine)
+        with _make_session(postgres_engine) as session:
             _ensure_policy_and_version(session)
             decision, draft = create_decision(
                 session, CreateDecisionRequest(title="Missing fields")
@@ -417,15 +393,12 @@ class TestConfirm:
                         expected_revision=draft.revision, confirmation=True
                     ),
                 )
-            conn.rollback()
 
     def test_confirm_draft_consumed(
         self, postgres_engine: Engine, db_session: Session
     ) -> None:
-        with postgres_engine.connect() as conn:
-            _ensure_household(conn)
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        _ensure_household(postgres_engine)
+        with _make_session(postgres_engine) as session:
             _ensure_policy_and_version(session)
             decision, draft = create_decision(
                 session, CreateDecisionRequest(title="Consume")
@@ -443,17 +416,15 @@ class TestConfirm:
             )
             session.flush()
             remaining_draft = get_draft(session, decision.id)
-            conn.commit()
+            session.commit()
 
         assert remaining_draft is None
 
     def test_confirm_writes_audit_event(
         self, postgres_engine: Engine, db_session: Session
     ) -> None:
-        with postgres_engine.connect() as conn:
-            _ensure_household(conn)
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        _ensure_household(postgres_engine)
+        with _make_session(postgres_engine) as session:
             policy, published = _ensure_policy_and_version(session)
             decision, draft = create_decision(
                 session, CreateDecisionRequest(title="Audit")
@@ -469,18 +440,21 @@ class TestConfirm:
                     expected_revision=draft.revision, confirmation=True
                 ),
             )
+            session.commit()
+            decision_id = decision.id
+            published_version_number = published.version_number
+
+        with _make_session(postgres_engine) as session:
             events = list(
                 session.scalars(
                     select(AuditEvent).where(
-                        AuditEvent.entity_id == decision.id,
+                        AuditEvent.entity_id == decision_id,
                         AuditEvent.action == "decision.confirmed",
                     )
                 )
             )
-            conn.commit()
-
         assert len(events) == 1
-        assert events[0].event_metadata["policy_version_number"] == published.version_number
+        assert events[0].event_metadata["policy_version_number"] == published_version_number
 
 
 # ---------------------------------------------------------------------------
@@ -492,26 +466,23 @@ class TestDiscard:
     def test_discard_atomic_deletion(
         self, postgres_engine: Engine, db_session: Session
     ) -> None:
-        with postgres_engine.connect() as conn:
-            _ensure_household(conn)
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        _ensure_household(postgres_engine)
+        with _make_session(postgres_engine) as session:
             decision, draft = create_decision(
                 session, CreateDecisionRequest(title="Discard me")
             )
-            conn.commit()
+            session.commit()
             decision_id = decision.id
 
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        with _make_session(postgres_engine) as session:
             discard_draft(
                 session,
                 decision_id,
                 DiscardDecisionRequest(expected_revision=1),
             )
-            conn.commit()
+            session.commit()
 
-        with Session(bind=postgres_engine) as session:
+        with _make_session(postgres_engine) as session:
             remaining = session.scalar(
                 select(Decision).where(Decision.id == decision_id)
             )
@@ -520,23 +491,23 @@ class TestDiscard:
     def test_discard_audit_uuid_preserved(
         self, postgres_engine: Engine, db_session: Session
     ) -> None:
-        with postgres_engine.connect() as conn:
-            _ensure_household(conn)
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        _ensure_household(postgres_engine)
+        with _make_session(postgres_engine) as session:
             decision, draft = create_decision(
                 session, CreateDecisionRequest(title="Preserve UUID")
             )
-            conn.commit()
+            session.commit()
             decision_id = decision.id
 
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        with _make_session(postgres_engine) as session:
             discard_draft(
                 session,
                 decision_id,
                 DiscardDecisionRequest(expected_revision=1),
             )
+            session.commit()
+
+        with _make_session(postgres_engine) as session:
             events = list(
                 session.scalars(
                     select(AuditEvent).where(
@@ -545,18 +516,14 @@ class TestDiscard:
                     )
                 )
             )
-            conn.commit()
-
         assert len(events) == 1
         assert events[0].entity_id == decision_id
 
     def test_discard_confirmed_rejected(
         self, postgres_engine: Engine, db_session: Session
     ) -> None:
-        with postgres_engine.connect() as conn:
-            _ensure_household(conn)
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        _ensure_household(postgres_engine)
+        with _make_session(postgres_engine) as session:
             _ensure_policy_and_version(session)
             decision, draft = create_decision(
                 session, CreateDecisionRequest(title="No discard")
@@ -572,18 +539,16 @@ class TestDiscard:
                     expected_revision=draft.revision, confirmation=True
                 ),
             )
-            conn.commit()
+            session.commit()
             decision_id = decision.id
 
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        with _make_session(postgres_engine) as session:
             with pytest.raises(DecisionLifecycleError):
                 discard_draft(
                     session,
                     decision_id,
                     DiscardDecisionRequest(expected_revision=99),
                 )
-            conn.rollback()
 
 
 # ---------------------------------------------------------------------------
@@ -592,7 +557,7 @@ class TestDiscard:
 
 
 class TestArchiveUnarchive:
-    def _confirmed_decision(self, session):
+    def _confirmed_decision(self, engine: Engine, session: Session):
         _ensure_policy_and_version(session)
         decision, draft = create_decision(
             session, CreateDecisionRequest(title="Archive me")
@@ -614,22 +579,19 @@ class TestArchiveUnarchive:
     def test_archive_confirmed(
         self, postgres_engine: Engine, db_session: Session
     ) -> None:
-        with postgres_engine.connect() as conn:
-            _ensure_household(conn)
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
-            decision = self._confirmed_decision(session)
-            conn.commit()
+        _ensure_household(postgres_engine)
+        with _make_session(postgres_engine) as session:
+            decision = self._confirmed_decision(postgres_engine, session)
+            session.commit()
             decision_id = decision.id
 
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        with _make_session(postgres_engine) as session:
             result = archive_decision(
                 session,
                 decision_id,
                 ArchiveDecisionRequest(archive_reason="Outdated"),
             )
-            conn.commit()
+            session.commit()
 
         assert result.status == "archived"
         assert result.archive_reason == "Outdated"
@@ -638,21 +600,18 @@ class TestArchiveUnarchive:
     def test_unarchive(
         self, postgres_engine: Engine, db_session: Session
     ) -> None:
-        with postgres_engine.connect() as conn:
-            _ensure_household(conn)
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
-            decision = self._confirmed_decision(session)
+        _ensure_household(postgres_engine)
+        with _make_session(postgres_engine) as session:
+            decision = self._confirmed_decision(postgres_engine, session)
             archive_decision(
                 session, decision.id, ArchiveDecisionRequest()
             )
-            conn.commit()
+            session.commit()
             decision_id = decision.id
 
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        with _make_session(postgres_engine) as session:
             result = unarchive_decision(session, decision_id)
-            conn.commit()
+            session.commit()
 
         assert result.status == "confirmed"
         assert result.archived_at is None
@@ -661,45 +620,41 @@ class TestArchiveUnarchive:
     def test_archive_draft_rejected(
         self, postgres_engine: Engine, db_session: Session
     ) -> None:
-        with postgres_engine.connect() as conn:
-            _ensure_household(conn)
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        _ensure_household(postgres_engine)
+        with _make_session(postgres_engine) as session:
             decision, _ = create_decision(
                 session, CreateDecisionRequest(title="No archive")
             )
-            conn.commit()
+            session.commit()
             decision_id = decision.id
 
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        with _make_session(postgres_engine) as session:
             with pytest.raises(DecisionLifecycleError):
                 archive_decision(
                     session, decision_id, ArchiveDecisionRequest()
                 )
-            conn.rollback()
 
     def test_archive_writes_audit_event(
         self, postgres_engine: Engine, db_session: Session
     ) -> None:
-        with postgres_engine.connect() as conn:
-            _ensure_household(conn)
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
-            decision = self._confirmed_decision(session)
+        _ensure_household(postgres_engine)
+        with _make_session(postgres_engine) as session:
+            decision = self._confirmed_decision(postgres_engine, session)
             archive_decision(
                 session, decision.id, ArchiveDecisionRequest()
             )
+            session.commit()
+            decision_id = decision.id
+
+        with _make_session(postgres_engine) as session:
             events = list(
                 session.scalars(
                     select(AuditEvent).where(
-                        AuditEvent.entity_id == decision.id,
+                        AuditEvent.entity_id == decision_id,
                         AuditEvent.action == "decision.archived",
                     )
                 )
             )
-            conn.commit()
-
         assert len(events) == 1
 
 
@@ -709,7 +664,7 @@ class TestArchiveUnarchive:
 
 
 class TestCorrections:
-    def _confirmed_decision(self, session):
+    def _confirmed_decision(self, engine: Engine, session: Session):
         _ensure_policy_and_version(session)
         decision, draft = create_decision(
             session, CreateDecisionRequest(title="Correct me")
@@ -731,16 +686,13 @@ class TestCorrections:
     def test_first_correction_number_1(
         self, postgres_engine: Engine, db_session: Session
     ) -> None:
-        with postgres_engine.connect() as conn:
-            _ensure_household(conn)
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
-            decision = self._confirmed_decision(session)
-            conn.commit()
+        _ensure_household(postgres_engine)
+        with _make_session(postgres_engine) as session:
+            decision = self._confirmed_decision(postgres_engine, session)
+            session.commit()
             decision_id = decision.id
 
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        with _make_session(postgres_engine) as session:
             correction = append_correction(
                 session,
                 decision_id,
@@ -752,23 +704,20 @@ class TestCorrections:
                     decision_date=date.today(),
                 ),
             )
-            conn.commit()
+            session.commit()
 
         assert correction.correction_number == 1
 
     def test_sequential_numbers(
         self, postgres_engine: Engine, db_session: Session
     ) -> None:
-        with postgres_engine.connect() as conn:
-            _ensure_household(conn)
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
-            decision = self._confirmed_decision(session)
-            conn.commit()
+        _ensure_household(postgres_engine)
+        with _make_session(postgres_engine) as session:
+            decision = self._confirmed_decision(postgres_engine, session)
+            session.commit()
             decision_id = decision.id
 
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        with _make_session(postgres_engine) as session:
             c1 = append_correction(
                 session,
                 decision_id,
@@ -791,7 +740,7 @@ class TestCorrections:
                     decision_date=date.today(),
                 ),
             )
-            conn.commit()
+            session.commit()
 
         assert c1.correction_number == 1
         assert c2.correction_number == 2
@@ -799,19 +748,16 @@ class TestCorrections:
     def test_correction_on_archived_allowed(
         self, postgres_engine: Engine, db_session: Session
     ) -> None:
-        with postgres_engine.connect() as conn:
-            _ensure_household(conn)
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
-            decision = self._confirmed_decision(session)
+        _ensure_household(postgres_engine)
+        with _make_session(postgres_engine) as session:
+            decision = self._confirmed_decision(postgres_engine, session)
             archive_decision(
                 session, decision.id, ArchiveDecisionRequest()
             )
-            conn.commit()
+            session.commit()
             decision_id = decision.id
 
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        with _make_session(postgres_engine) as session:
             correction = append_correction(
                 session,
                 decision_id,
@@ -823,25 +769,22 @@ class TestCorrections:
                     decision_date=date.today(),
                 ),
             )
-            conn.commit()
+            session.commit()
 
         assert correction.correction_number == 1
 
     def test_correction_on_draft_rejected(
         self, postgres_engine: Engine, db_session: Session
     ) -> None:
-        with postgres_engine.connect() as conn:
-            _ensure_household(conn)
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        _ensure_household(postgres_engine)
+        with _make_session(postgres_engine) as session:
             decision, _ = create_decision(
                 session, CreateDecisionRequest(title="No correct")
             )
-            conn.commit()
+            session.commit()
             decision_id = decision.id
 
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        with _make_session(postgres_engine) as session:
             with pytest.raises(DecisionLifecycleError):
                 append_correction(
                     session,
@@ -854,21 +797,17 @@ class TestCorrections:
                         decision_date=date.today(),
                     ),
                 )
-            conn.rollback()
 
     def test_original_snapshot_unchanged(
         self, postgres_engine: Engine, db_session: Session
     ) -> None:
-        with postgres_engine.connect() as conn:
-            _ensure_household(conn)
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
-            decision = self._confirmed_decision(session)
-            conn.commit()
+        _ensure_household(postgres_engine)
+        with _make_session(postgres_engine) as session:
+            decision = self._confirmed_decision(postgres_engine, session)
+            session.commit()
             decision_id = decision.id
 
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        with _make_session(postgres_engine) as session:
             append_correction(
                 session,
                 decision_id,
@@ -880,24 +819,22 @@ class TestCorrections:
                     decision_date=date.today(),
                 ),
             )
-            original = get_snapshot(session, decision_id)
-            conn.commit()
+            session.commit()
 
+        with _make_session(postgres_engine) as session:
+            original = get_snapshot(session, decision_id)
         assert original.title == "Correct me"
 
     def test_correction_list_ordered(
         self, postgres_engine: Engine, db_session: Session
     ) -> None:
-        with postgres_engine.connect() as conn:
-            _ensure_household(conn)
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
-            decision = self._confirmed_decision(session)
-            conn.commit()
+        _ensure_household(postgres_engine)
+        with _make_session(postgres_engine) as session:
+            decision = self._confirmed_decision(postgres_engine, session)
+            session.commit()
             decision_id = decision.id
 
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        with _make_session(postgres_engine) as session:
             for i in range(3):
                 append_correction(
                     session,
@@ -910,9 +847,9 @@ class TestCorrections:
                         decision_date=date.today(),
                     ),
                 )
-            conn.commit()
+            session.commit()
 
-        with Session(bind=postgres_engine) as session:
+        with _make_session(postgres_engine) as session:
             corrections = read_corrections(session, decision_id)
             assert len(corrections) == 3
             assert [c.correction_number for c in corrections] == [1, 2, 3]
@@ -927,10 +864,8 @@ class TestAuditEvents:
     def test_audit_redaction(
         self, postgres_engine: Engine, db_session: Session
     ) -> None:
-        with postgres_engine.connect() as conn:
-            _ensure_household(conn)
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        _ensure_household(postgres_engine)
+        with _make_session(postgres_engine) as session:
             _ensure_policy_and_version(session)
             decision, draft = create_decision(
                 session, CreateDecisionRequest(title="Redact")
@@ -946,15 +881,17 @@ class TestAuditEvents:
                     expected_revision=draft.revision, confirmation=True
                 ),
             )
+            session.commit()
+            decision_id = decision.id
+
+        with _make_session(postgres_engine) as session:
             events = list(
                 session.scalars(
                     select(AuditEvent).where(
-                        AuditEvent.entity_id == decision.id
+                        AuditEvent.entity_id == decision_id
                     )
                 )
             )
-            conn.commit()
-
         for event in events:
             meta = event.event_metadata
             assert "title" not in meta
@@ -965,10 +902,8 @@ class TestAuditEvents:
     def test_audit_cursor_pagination(
         self, postgres_engine: Engine, db_session: Session
     ) -> None:
-        with postgres_engine.connect() as conn:
-            _ensure_household(conn)
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        _ensure_household(postgres_engine)
+        with _make_session(postgres_engine) as session:
             decision, draft = create_decision(
                 session, CreateDecisionRequest(title="Paginate")
             )
@@ -981,10 +916,10 @@ class TestAuditEvents:
                         notes=f"Update {i}",
                     ),
                 )
-            conn.commit()
+            session.commit()
             decision_id = decision.id
 
-        with Session(bind=postgres_engine) as session:
+        with _make_session(postgres_engine) as session:
             events, cursor = read_decision_audit_events(
                 session, decision_id, limit=2
             )
@@ -1006,10 +941,8 @@ class TestDecisionDetail:
     def test_confirmed_detail_shape(
         self, postgres_engine: Engine, db_session: Session
     ) -> None:
-        with postgres_engine.connect() as conn:
-            _ensure_household(conn)
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        _ensure_household(postgres_engine)
+        with _make_session(postgres_engine) as session:
             _ensure_policy_and_version(session)
             decision, draft = create_decision(
                 session, CreateDecisionRequest(title="Detail")
@@ -1025,10 +958,10 @@ class TestDecisionDetail:
                     expected_revision=draft.revision, confirmation=True
                 ),
             )
-            conn.commit()
+            session.commit()
             decision_id = decision.id
 
-        with Session(bind=postgres_engine) as session:
+        with _make_session(postgres_engine) as session:
             detail = read_decision_detail(session, decision_id)
             assert detail["status"] == "confirmed"
             assert detail["original_snapshot"] is not None
@@ -1038,10 +971,8 @@ class TestDecisionDetail:
     def test_detail_with_correction(
         self, postgres_engine: Engine, db_session: Session
     ) -> None:
-        with postgres_engine.connect() as conn:
-            _ensure_household(conn)
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        _ensure_household(postgres_engine)
+        with _make_session(postgres_engine) as session:
             _ensure_policy_and_version(session)
             decision, draft = create_decision(
                 session, CreateDecisionRequest(title="With correction")
@@ -1068,10 +999,10 @@ class TestDecisionDetail:
                     decision_date=date.today(),
                 ),
             )
-            conn.commit()
+            session.commit()
             decision_id = decision.id
 
-        with Session(bind=postgres_engine) as session:
+        with _make_session(postgres_engine) as session:
             detail = read_decision_detail(session, decision_id)
             assert detail["corrections_count"] == 1
             assert detail["latest_correction_metadata"] is not None
@@ -1088,18 +1019,16 @@ class TestHouseholdTimeline:
     def test_decision_events_in_household_timeline(
         self, postgres_engine: Engine, db_session: Session
     ) -> None:
-        with postgres_engine.connect() as conn:
-            _ensure_household(conn)
-        with postgres_engine.begin() as conn:
-            session = Session(bind=conn)
+        _ensure_household(postgres_engine)
+        with _make_session(postgres_engine) as session:
             decision, _ = create_decision(
                 session, CreateDecisionRequest(title="Timeline")
             )
             household_id = get_household_id(session)
-            conn.commit()
+            session.commit()
             decision_id = decision.id
 
-        with Session(bind=postgres_engine) as session:
+        with _make_session(postgres_engine) as session:
             from apps.api.repositories.households import list_audit_events
 
             events = list_audit_events(session, household_id)

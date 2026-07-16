@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
@@ -46,6 +47,16 @@ from apps.api.repositories.decisions import (
 )
 
 
+@contextmanager
+def _ensure_transaction(session: Session):
+    """Begin a transaction if one is not already active."""
+    if session.in_transaction():
+        yield nullcontext().__enter__()
+    else:
+        with session.begin():
+            yield
+
+
 class HouseholdRequiredError(Exception):
     pass
 
@@ -69,9 +80,6 @@ class NoDecisionChangesError(Exception):
 class DecisionIncompleteError(Exception):
     pass
 
-
-class PolicyVersionMismatchError(Exception):
-    pass
 
 
 class DecisionLifecycleError(Exception):
@@ -132,7 +140,7 @@ def create_decision(
 ) -> tuple[Decision, DecisionDraft]:
     household_id = _require_household(session)
     try:
-        with session.begin():
+        with _ensure_transaction(session):
             decision = add_decision(session, household_id)
             draft = add_draft(session, decision.id, values={"title": payload.title})
             add_decision_audit_event(
@@ -196,7 +204,7 @@ def update_draft(
     if not submitted:
         raise NoDecisionChangesError
 
-    with session.begin():
+    with _ensure_transaction(session):
         decision = _require_decision(
             session, decision_id, household_id, for_update=True
         )
@@ -239,7 +247,7 @@ def discard_draft(
     session: Session, decision_id: UUID, payload: DiscardDecisionRequest
 ) -> None:
     household_id = _require_household(session)
-    with session.begin():
+    with _ensure_transaction(session):
         decision = _require_decision(
             session, decision_id, household_id, for_update=True
         )
@@ -276,7 +284,7 @@ def confirm_draft(
 ) -> DecisionConfirmedSnapshot:
     household_id = _require_household(session)
     try:
-        with session.begin():
+        with _ensure_transaction(session):
             # Lock Policy first (OD-S3-5)
             policy = get_policy_for_household(
                 session, household_id, for_update=True
@@ -421,7 +429,7 @@ def archive_decision(
     session: Session, decision_id: UUID, payload: ArchiveDecisionRequest
 ) -> Decision:
     household_id = _require_household(session)
-    with session.begin():
+    with _ensure_transaction(session):
         decision = _require_decision(
             session, decision_id, household_id, for_update=True
         )
@@ -443,7 +451,7 @@ def archive_decision(
 
 def unarchive_decision(session: Session, decision_id: UUID) -> Decision:
     household_id = _require_household(session)
-    with session.begin():
+    with _ensure_transaction(session):
         decision = _require_decision(
             session, decision_id, household_id, for_update=True
         )
@@ -473,7 +481,7 @@ def append_correction(
 ) -> DecisionCorrection:
     household_id = _require_household(session)
     try:
-        with session.begin():
+        with _ensure_transaction(session):
             decision = _require_decision(
                 session, decision_id, household_id, for_update=True
             )
