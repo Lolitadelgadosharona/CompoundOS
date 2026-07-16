@@ -1153,32 +1153,20 @@ def test_snapshot_policy_version_update_fails(db_session: Session, postgres_engi
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
         sid = confirm_decision(conn, did, drid, vid)
+        conn.commit()
 
-        # Create a second household and policy version to use as the update target.
-        # The unique constraint on investment_policies.household_id prevents
-        # creating two policies for the same household.
-        hid2 = uuid4()
-        conn.execute(
-            text(
-                "INSERT INTO household_profiles "
-                "(id, singleton_key, household_name, base_currency,"
-                " investment_horizon, liquidity_needs, risk_statement, notes) "
-                "VALUES (:id, true, 'DJ Test 2', 'USD', '', '', '', '')"
-            ),
-            {"id": hid2},
-        )
-        vid2 = create_policy_version(conn, str(hid2))
-
+        # The immutability trigger blocks ALL updates to snapshots,
+        # so updating to the same policy_version_id is sufficient to test.
         assert_db_error(
             conn,
             "decision_snapshot_update_forbidden",
             lambda: conn.execute(
                 text(
                     "UPDATE decision_confirmed_snapshots "
-                    "SET selected_policy_version_id = :vid2 "
+                    "SET selected_policy_version_id = :vid "
                     "WHERE id = :id"
                 ),
-                {"id": sid, "vid2": vid2},
+                {"id": sid, "vid": vid},
             ),
         )
 
