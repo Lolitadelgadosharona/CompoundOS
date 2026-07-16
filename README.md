@@ -1,8 +1,8 @@
 # CompoundOS
 
 CompoundOS is a long-term AI Family Office and Wealth Operating System. Sprint
-002 now includes the local-only Household workflow and the Slice 2B Investment
-Policy backend API on top of the validated foundation.
+002 now includes the local-only Household workflow and the Slice 2C Investment
+Policy frontend workflow on top of the validated backend foundation.
 
 > **Local-only security boundary:** This Sprint 002 build is for local,
 > single-user development only. It has no authentication and must not be exposed
@@ -15,8 +15,11 @@ Policy backend API on top of the validated foundation.
 - Show the household summary and read-only audit timeline at `/household`.
 - Record user-authored Investment Policy Draft text and target percentages through
   the backend API, then publish immutable Version snapshots.
-- Keep Policy frontend, journal, AI, Guardian, broker, trading, recommendation,
-  and authentication behavior outside the current implementation.
+- Use `/policy` to create and edit the sole Policy Draft, explicitly save text and
+  allocations, review and publish immutable Versions, inspect history and audit
+  events, and start a blank or current-Published-derived Draft.
+- Keep Decision Journal, AI, Guardian, broker, trading, recommendation, and
+  authentication behavior outside the current implementation.
 
 ## Repository Layout
 
@@ -78,7 +81,7 @@ and a Policy-filtered audit timeline under `/api/policies`.
 
 Percentages are JSON decimal strings such as `"12.50"`. These endpoints record
 only user-entered policy information; they do not evaluate, recommend, score, or
-execute anything. No Policy frontend is included in Slice 2B.
+execute anything.
 
 ### Frontend
 
@@ -87,7 +90,8 @@ execute anything. No Policy frontend is included in Slice 2B.
 3. Start the development server: `npm run dev`
 
 The frontend is available at `http://127.0.0.1:3000`; its health endpoint is
-`GET /api/health`, and the approved Slice 1 flow is at `/household`.
+`GET /api/health`, the Household flow is at `/household`, and the local-only
+Investment Policy workflow is at `/policy`.
 
 ### Validation
 
@@ -137,7 +141,8 @@ to a separately approved sprint; Sprint 001.1 does not restructure working code.
 
 ## Notes
 
-This slice intentionally does not implement a Policy frontend, decision journals,
-trading, broker integrations, authentication, Guardian logic, recommendations,
-or autonomous agents. Sprint 002 is not complete; Slice 2C and Slice 3 are not
-authorized.
+Slice 2C implements only the local, user-authored Investment Policy frontend. It
+does not implement decision journals, trading, broker integrations,
+authentication, Guardian logic, recommendations, or autonomous agents. Sprint
+002 is not complete; Slice 2C is in Review and Slice 3 is not authorized or
+started.
