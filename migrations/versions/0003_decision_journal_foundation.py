@@ -249,9 +249,22 @@ RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 DECLARE
+    v_current_status text;
     v_has_snapshot boolean;
     v_has_draft boolean;
 BEGIN
+    -- For deferred triggers, NEW holds the original INSERT values,
+    -- which may be stale if the row was updated in the same transaction.
+    -- Query the table to get the current committed-pending state.
+    SELECT status INTO v_current_status
+    FROM public.decisions
+    WHERE id = NEW.id;
+
+    -- If the row was deleted after INSERT, there is nothing to check.
+    IF v_current_status IS NULL THEN
+        RETURN NEW;
+    END IF;
+
     SELECT EXISTS(
         SELECT 1 FROM public.decision_confirmed_snapshots
         WHERE decision_id = NEW.id
@@ -262,14 +275,14 @@ BEGIN
         WHERE decision_id = NEW.id
     ) INTO v_has_draft;
 
-    IF NEW.status IN ('confirmed', 'archived') THEN
+    IF v_current_status IN ('confirmed', 'archived') THEN
         IF NOT v_has_snapshot THEN
             RAISE EXCEPTION USING
                 ERRCODE = '23514',
                 MESSAGE = 'decision_confirmed_requires_snapshot',
                 DETAIL = format(
                     'Decision %s has status %L but no confirmed snapshot.',
-                    NEW.id, NEW.status
+                    NEW.id, v_current_status
                 );
         END IF;
         IF v_has_draft THEN
@@ -278,10 +291,10 @@ BEGIN
                 MESSAGE = 'decision_confirmed_has_draft',
                 DETAIL = format(
                     'Decision %s has status %L but still has a draft.',
-                    NEW.id, NEW.status
+                    NEW.id, v_current_status
                 );
         END IF;
-    ELSIF NEW.status = 'draft' THEN
+    ELSIF v_current_status = 'draft' THEN
         IF v_has_snapshot THEN
             RAISE EXCEPTION USING
                 ERRCODE = '23514',
