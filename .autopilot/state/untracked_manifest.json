@@ -1,0 +1,203 @@
+{
+  "version": "1.0.0",
+  "created_at": "2026-07-16",
+  "description": "Baseline manifest of pre-existing untracked review files. These files are protected — the Autopilot must never delete, move, modify, or stage them. SHA-256 hashes serve as integrity checkpoints.",
+  "total_files": 39,
+  "files": [
+    {
+      "path": "chatgpt-briefing-slice3-decisions.md",
+      "size_bytes": 3699,
+      "sha256": "86df06e01bbe68801688b521aab169a3b284dd0ab37e9bbde9a535b2cc30fef5"
+    },
+    {
+      "path": "sprint-001-critical-files.txt",
+      "size_bytes": 18847,
+      "sha256": "88e84a1a0d3c258f730b60f2187d33972a72e2daa4ac98daeab75e1b7801e00c"
+    },
+    {
+      "path": "sprint-001-review-report.md",
+      "size_bytes": 6583,
+      "sha256": "1b8cf4eb02a57ec76b14db3f5c24b7ba10378007e055a78be7dc73fdef79332c"
+    },
+    {
+      "path": "sprint-001-review.diff",
+      "size_bytes": 12550,
+      "sha256": "7ed80f777ae1ae555d936832e02f5841c4ebf80704d5a8092acd7d4fb5d0da89"
+    },
+    {
+      "path": "sprint-002-planning-fix-review.diff",
+      "size_bytes": 35664,
+      "sha256": "0da043de25b888b17f98943a55aacbfe7532046cef65a1d94d3ab6e58827d1c8"
+    },
+    {
+      "path": "sprint-002-planning-review.md",
+      "size_bytes": 102912,
+      "sha256": "0e972f5ebcce84a912f9b7d7609734b00330cc88a3d0df410636ff0b7b1a2b80"
+    },
+    {
+      "path": "sprint-002-slice1-critical-files.txt",
+      "size_bytes": 92502,
+      "sha256": "2910a461f6bffe30aa7f7b5e5e104b017cdf70af1cd72e275caeffdcfa6b8614"
+    },
+    {
+      "path": "sprint-002-slice1-fix-review.diff",
+      "size_bytes": 38083,
+      "sha256": "d8f59ad29999d4029efa4a13e1ce9f6b400a6ef93b46ccdf5570c31bcbd4430c"
+    },
+    {
+      "path": "sprint-002-slice1-review-report.md",
+      "size_bytes": 24183,
+      "sha256": "5ab69d57e458d2aaf3392886ffd4e884b59c51ac20046d940696f43405f3e9fd"
+    },
+    {
+      "path": "sprint-002-slice1-review.diff",
+      "size_bytes": 167515,
+      "sha256": "bf1a0a8ebfea70cf0a3f6ba67b9b520b285b325aa9c69a251529e3f18f71b488"
+    },
+    {
+      "path": "sprint-002-slice2-design-fix-review.diff",
+      "size_bytes": 41745,
+      "sha256": "4ca9b43ac23cf2c4c5df44f47a6add1eb186bb623d971c916ee18a6d0039423d"
+    },
+    {
+      "path": "sprint-002-slice2a-critical-files.txt",
+      "size_bytes": 165601,
+      "sha256": "a2a4613d359c7786122029c49e6f6922fbf2c4f72a69570681c9e9c69ef45491"
+    },
+    {
+      "path": "sprint-002-slice2a-review-report.md",
+      "size_bytes": 13857,
+      "sha256": "31f4ff0f51cfed30ffa8ca088c37e5b9d121be27b1095556a570f6e6381327bf"
+    },
+    {
+      "path": "sprint-002-slice2a-review.diff",
+      "size_bytes": 71512,
+      "sha256": "068bf8ed53639bef3196e72d16a00e24c03cdf4d692bef98805d56c04294527e"
+    },
+    {
+      "path": "sprint-002-slice2b-critical-files.txt",
+      "size_bytes": 180775,
+      "sha256": "3e7a1a5bd1be579ec19e9ab54bc69239b37211df4b8fa760bf8ee97a6fdb7139"
+    },
+    {
+      "path": "sprint-002-slice2b-fix-review-report.md",
+      "size_bytes": 14890,
+      "sha256": "11b8be5422710594781141300356c481010cb58b0de26a99e05be5157a669b2e"
+    },
+    {
+      "path": "sprint-002-slice2b-fix-review.diff",
+      "size_bytes": 38596,
+      "sha256": "4b7ef6f5945b825ef81286206125c9fdf450041d4cff42eb6e3c9cc790eec8b1"
+    },
+    {
+      "path": "sprint-002-slice2b-review-report.md",
+      "size_bytes": 20234,
+      "sha256": "69358ab26e1aec6d60fc65147b7ec18142316b604d5e754f7655cb431fc399dc"
+    },
+    {
+      "path": "sprint-002-slice2b-review.diff",
+      "size_bytes": 75038,
+      "sha256": "555b6e541d0aea03acfcf339c6cdf10007379f42f6244a9d9c0832a99943dd5d"
+    },
+    {
+      "path": "sprint-002-slice2c-critical-files.txt",
+      "size_bytes": 189361,
+      "sha256": "17e592d301e81c44f0a7590cfc12084c01395a96ae853dc751b8a7c7aef8aa6a"
+    },
+    {
+      "path": "sprint-002-slice2c-fix-review-report.md",
+      "size_bytes": 26644,
+      "sha256": "730fa0aeea0b90f40bb623fdd172732028ca7c21f2c019ba2485c6617750e1d2"
+    },
+    {
+      "path": "sprint-002-slice2c-fix-review.diff",
+      "size_bytes": 61726,
+      "sha256": "1623b82801b3b36547cfb195ee0b33bea5a54cd14227e64b11bffc328d52e4ac"
+    },
+    {
+      "path": "sprint-002-slice2c-review-report.md",
+      "size_bytes": 21498,
+      "sha256": "ece024f43da22c0d786fa7b07bcbd6281385ce94d6d03b4565d28aa643da5c07"
+    },
+    {
+      "path": "sprint-002-slice2c-review.diff",
+      "size_bytes": 98447,
+      "sha256": "91c1d83a4ad545f13ea56a5e266c6f4cb80fb5859fe5ca3223282a7a4b093fcf"
+    },
+    {
+      "path": "sprint-002-slice3-consistency-fix-review-report.md",
+      "size_bytes": 11927,
+      "sha256": "be4bd7180eceb41ffee5df5d951fc8c14f443833c50b321fa375769971da959d"
+    },
+    {
+      "path": "sprint-002-slice3-consistency-fix-review.diff",
+      "size_bytes": 6912,
+      "sha256": "0c5be6ed313cf8ea58f083f829f164d3e26a8d229971578cd75985c10741af5f"
+    },
+    {
+      "path": "sprint-002-slice3-consistency-review-report.md",
+      "size_bytes": 17462,
+      "sha256": "9097b29a193347fcfe337edac0f915ee84028c48d9700a4c7aa0f3fdbfe198a4"
+    },
+    {
+      "path": "sprint-002-slice3-decisions-review-report.md",
+      "size_bytes": 10407,
+      "sha256": "dca5413a61ca051fb2a31b87cda02747d6aee18893d8f05a11d41ff8c1d6b28d"
+    },
+    {
+      "path": "sprint-002-slice3-decisions-review.diff",
+      "size_bytes": 80742,
+      "sha256": "bdf4fe5d451e9213939865ace0ac1466b04795cc4ddf147846f7ffdf6e5a23d3"
+    },
+    {
+      "path": "sprint-002-slice3-design-critical-files.txt",
+      "size_bytes": 571,
+      "sha256": "22c1e9bb4d61c2a3c6abb0d6c23b0e4436cbadd864ca9766059b1111dceb9a9d"
+    },
+    {
+      "path": "sprint-002-slice3-design-final-report.md",
+      "size_bytes": 13833,
+      "sha256": "ef20cb3b0ed88d881fb3348b7f6e2268769076d46763bfb0ad45a9518d7ac60f"
+    },
+    {
+      "path": "sprint-002-slice3-design-fix-review-report.md",
+      "size_bytes": 17923,
+      "sha256": "1e20935464671f6e43fec9cb3f736dd91ae5599e8c4313939d411dd8b5d1bcf0"
+    },
+    {
+      "path": "sprint-002-slice3-design-fix-review.diff",
+      "size_bytes": 48145,
+      "sha256": "0f3fc42345068c08b4515877b2eec223b433f6999f6645101b6abe02c685cc98"
+    },
+    {
+      "path": "sprint-002-slice3-design-review-report.md",
+      "size_bytes": 36596,
+      "sha256": "40d8d52ddd48a141cbf22a157d682f4a873d3b76f2f973ebc4faf2663499ce1f"
+    },
+    {
+      "path": "sprint-002-slice3-design-review.diff",
+      "size_bytes": 81416,
+      "sha256": "2b4d7be55313d23342868b0f125b14f7700b4edf448371256bc4ab25a0c8142b"
+    },
+    {
+      "path": "sprint-002-slice3a-final-report.md",
+      "size_bytes": 12703,
+      "sha256": "9416749365b47cadc8797d3db162cedce1cc6d663c57fa503501a31125441834"
+    },
+    {
+      "path": "sprint-002-slice3a-implementation-report.md",
+      "size_bytes": 5385,
+      "sha256": "8d161ca63c129234a41b5a4b5b1551f2bcf1a47587613df70058acd079fd5027"
+    },
+    {
+      "path": "sprint-002-slice3a-review-report.md",
+      "size_bytes": 4671,
+      "sha256": "55de8e774b0c8a92889dea306abd0707c27ce71ab00c883df9752c5271fa896c"
+    },
+    {
+      "path": "sprint-002-slice3b-final-report.md",
+      "size_bytes": 5547,
+      "sha256": "92b02a0a0b913243ae228034055d5ffda1373af2a140b32b6a15948c52dfb6cc"
+    }
+  ]
+}

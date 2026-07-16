@@ -1,0 +1,169 @@
+# CompoundOS Safe Autopilot Configuration
+# This file defines the operational parameters for the autopilot system.
+
+autopilot:
+  version: "1.0.0"
+  name: "CompoundOS Safe Autopilot"
+  repository_root: "/Users/richardwang/Documents/Customized GPT project/CompoundOS"
+
+supervisor:
+  # launchd label
+  label: "com.compoundos.autopilot"
+  # Polling interval in seconds
+  poll_interval: 30
+  # Lock file for supervisor singleton
+  lock_file: ".autopilot/locks/supervisor.lock"
+  # PID file
+  pid_file: ".autopilot/state/supervisor.pid"
+  # Log file
+  log_file: ".autopilot/logs/supervisor.log"
+
+workers:
+  hermes:
+    enabled: true
+    command: "hermes"
+    min_version: "0.17.0"
+    # Arguments for non-interactive task execution
+    chat_args: ["chat", "-q"]
+    # Max turns per task
+    max_turns: 90
+    timeout_seconds: 3600
+
+  qoder:
+    enabled: true
+    cli_available: true
+    cli_version: "1.0.47"
+    cli_path: "/Users/richardwang/.local/bin/qodercli"
+    mode: "headless"
+    headless_flags:
+      non_interactive: "-p"
+      output_format: "--output-format"
+      cwd: "--cwd"
+      allowed_tools: "--allowed-tools"
+      disallowed_tools: "--disallowed-tools"
+      worktree: "--worktree"
+    missing_flags:
+      - "--max-turns (managed via subprocess timeout instead)"
+    handoff_dir: ".autopilot/handoff"
+    handoff_file: "QODER_CURRENT_TASK.md"
+    handoff_note: "Qoder is headless-capable; handoff files are generated only when in manual-quest mode."
+
+reviewer:
+  codex:
+    enabled: false
+    cli_available: false
+    circuit_breaker:
+      max_consecutive_failures: 3
+      cooldown_hours: 6
+      open: true
+      opened_at: "2026-07-16T00:00:00Z"
+      failure_count: 0
+      reason: "Codex CLI not installed"
+
+  blind_review:
+    enabled: true
+    # Use a different hermes session for blind review
+    command: "hermes"
+    chat_args: ["chat", "-q"]
+
+task_gates:
+  # Only approval_status: approved may enter running
+  allowed_approval_status: ["approved"]
+  
+  risk_levels:
+    R0:
+      description: "Documentation, test supplementation, formatting, low-risk maintenance"
+      auto_merge: true
+      requires_independent_review: true
+      requires_owner_approval: false
+    
+    R1:
+      description: "Normal frontend, API, service, repository within approved design"
+      auto_merge: true
+      requires_independent_review: true
+      requires_owner_approval: false
+      auto_merge_conditions:
+        - all_acceptance_criteria_met
+        - all_local_validation_passed
+        - github_ci_all_success
+        - independent_review_no_blocker_high_medium
+        - no_product_decision_change
+        - no_allowed_paths_violation
+        - no_secret_finding
+    
+    R2:
+      description: "Migration, triggers, immutability, concurrency, transactions, audit, data retention, sensitive info"
+      auto_merge: false
+      requires_owner_approval: true
+      auto_dev_allowed: true
+      auto_test_allowed: true
+      auto_draft_pr_allowed: true
+    
+    R3:
+      description: "Investment rules, Guardian thresholds, AI recommendations, suitability, ranking, scoring, broker, trading, auth, production deployment, public network, secrets, encryption keys"
+      auto_implement: false
+      allowed_outputs: ["technical_design", "owner_decision_document"]
+
+stop_conditions:
+  - unapproved_sprint_or_slice
+  - new_product_decision
+  - investment_rule_change
+  - guardian_threshold_change
+  - recommendation_implication
+  - scoring_implication
+  - suitability_implication
+  - trading_implication
+  - authentication_required
+  - production_deployment_required
+  - public_network_required
+  - secret_or_credential_detected
+  - base_main_unsafe_drift
+  - ci_unavailable_exceeding_limit
+  - flaky_test_detected
+  - review_blocker
+  - review_high
+  - review_unresolved_medium
+  - migration_upgrade_failure
+  - migration_downgrade_failure
+  - transaction_rollback_failure
+  - token_budget_exhausted
+  - time_budget_exhausted
+  - retry_budget_exhausted
+  - worker_unconfirmed_result
+  - scope_expansion_attempted
+
+notifications:
+  enabled: false
+  gateway_configured: false
+  notify_on:
+    - task_blocked
+    - owner_approval_needed
+    - ci_continuous_failure
+    - token_budget_80_percent
+    - task_completed_merged
+  daily_summary: true
+  daily_summary_time: "09:00"
+
+ci:
+  github_actions:
+    required_checks: 6
+    unavailable_timeout_minutes: 30
+
+retry:
+  max_attempts: 3
+  backoff_base_seconds: 60
+  backoff_multiplier: 2
+  max_backoff_seconds: 900
+
+paths:
+  autopilot_root: ".autopilot"
+  queue_root: ".autopilot/queue"
+  state_root: ".autopilot/state"
+  lock_root: ".autopilot/locks"
+  log_root: ".autopilot/logs"
+  handoff_root: ".autopilot/handoff"
+  worktree_root: ".autopilot/worktrees"
+
+untracked_files:
+  protected: true
+  manifest: ".autopilot/state/untracked_manifest.json"

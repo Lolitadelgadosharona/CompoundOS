@@ -1,0 +1,266 @@
+#!/usr/bin/env python3
+"""
+CompoundOS Safe Autopilot — Worker
+Executes approved tasks using Hermes (preferred) or Qoder (when available).
+Each task gets an isolated git worktree and branch.
+"""
+import json, os, sys, time, subprocess, shutil
+from datetime import datetime, timezone
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+AUTOPILOT_ROOT = os.path.join(REPO_ROOT, '.autopilot')
+
+def log(msg, level="INFO"):
+    timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    print(f"[{timestamp}] [{level}] {msg}", flush=True)
+
+def find_next_task():
+    queued_dir = os.path.join(AUTOPILOT_ROOT, 'queue', 'queued')
+    if not os.path.isdir(queued_dir):
+        return None
+    tasks = sorted([f for f in os.listdir(queued_dir) if f.endswith('.json')])
+    if not tasks:
+        return None
+    task_path = os.path.join(queued_dir, tasks[0])
+    with open(task_path, 'r') as f:
+        task = json.load(f)
+    if task.get('approval_status') != 'approved':
+        log(f"Task {task['task_id']} status={task.get('approval_status')}, skipping")
+        return None
+    return task_path, task
+
+def move_task(task_path, task, dest_state):
+    dest_dir = os.path.join(AUTOPILOT_ROOT, 'queue', dest_state)
+    os.makedirs(dest_dir, exist_ok=True)
+    dest_path = os.path.join(dest_dir, f"{task['task_id']}.json")
+    tmp_path = dest_path + '.tmp'
+    with open(tmp_path, 'w') as f:
+        json.dump(task, f, indent=2)
+    os.rename(tmp_path, dest_path)
+    os.remove(task_path)
+    log(f"Task {task['task_id']} moved to {dest_state}")
+
+def acquire_lock(lock_name):
+    lock_dir = os.path.join(AUTOPILOT_ROOT, 'locks')
+    os.makedirs(lock_dir, exist_ok=True)
+    lock_file = os.path.join(lock_dir, f"{lock_name}.lock")
+    try:
+        fd = os.open(lock_file, os.O_CREAT | os.O_EXCL | os.O_RDWR)
+        os.write(fd, str(os.getpid()).encode())
+        os.close(fd)
+        return True
+    except FileExistsError:
+        try:
+            with open(lock_file, 'r') as f:
+                old_pid = int(f.read().strip())
+            try:
+                os.kill(old_pid, 0)
+                return False
+            except OSError:
+                os.remove(lock_file)
+                return acquire_lock(lock_name)
+        except (ValueError, FileNotFoundError):
+            os.remove(lock_file)
+            return acquire_lock(lock_name)
+
+def release_lock(lock_name):
+    lock_file = os.path.join(AUTOPILOT_ROOT, 'locks', f"{lock_name}.lock")
+    try:
+        os.remove(lock_file)
+    except FileNotFoundError:
+        pass
+
+def create_worktree(task):
+    task_id = task['task_id']
+    safe_id = task_id.lower().replace('-', '_')
+    branch = f"autopilot/{safe_id}"
+    wt_path = os.path.join(AUTOPILOT_ROOT, 'worktrees', safe_id)
+    if os.path.exists(wt_path):
+        log(f"Removing existing worktree at {wt_path}")
+        try:
+            subprocess.run(['git', '-C', REPO_ROOT, 'worktree', 'remove', '--force', wt_path],
+                          capture_output=True, timeout=30)
+        except Exception:
+            pass
+        shutil.rmtree(wt_path, ignore_errors=True)
+    subprocess.run(['git', '-C', REPO_ROOT, 'branch', '-D', branch], capture_output=True)
+    base_sha = task.get('base_sha', 'HEAD')
+    subprocess.run(['git', '-C', REPO_ROOT, 'branch', branch, base_sha], check=True, capture_output=True)
+    subprocess.run(['git', '-C', REPO_ROOT, 'worktree', 'add', wt_path, branch], check=True, capture_output=True)
+    log(f"Worktree created: {wt_path} (branch: {branch})")
+    return wt_path, branch
+
+def cleanup_worktree(task):
+    safe_id = task['task_id'].lower().replace('-', '_')
+    branch = f"autopilot/{safe_id}"
+    wt_path = os.path.join(AUTOPILOT_ROOT, 'worktrees', safe_id)
+    try:
+        subprocess.run(['git', '-C', REPO_ROOT, 'worktree', 'remove', '--force', wt_path],
+                      capture_output=True, timeout=30)
+    except Exception as e:
+        log(f"Worktree cleanup warning: {e}", "WARN")
+    shutil.rmtree(wt_path, ignore_errors=True)
+    subprocess.run(['git', '-C', REPO_ROOT, 'branch', '-D', branch], capture_output=True)
+    log(f"Worktree cleaned up: {wt_path}")
+
+def build_prompt(task):
+    lines = [
+        f"You are the CompoundOS Safe Autopilot Worker executing task {task['task_id']}.",
+        f"Task: {task['title']}",
+        f"Sprint: {task['sprint']}",
+        f"Slice: {task['slice']}",
+        f"Risk Level: {task['risk_level']}",
+        "",
+        "REQUIREMENTS:"
+    ]
+    for req in task.get('requirements', []):
+        lines.append(f"  - {req}")
+    lines.append("")
+    lines.append("ALLOWED PATHS (only modify these):")
+    for p in task.get('allowed_paths', []):
+        lines.append(f"  - {p}")
+    lines.append("")
+    lines.append("FORBIDDEN SCOPE (do NOT do any of these):")
+    for f in task.get('forbidden_scope', []):
+        lines.append(f"  - {f}")
+    lines.append("")
+    lines.append("ACCEPTANCE CRITERIA:")
+    for ac in task.get('acceptance_criteria', []):
+        lines.append(f"  - {ac}")
+    lines.append("")
+    lines.append("VALIDATION COMMANDS (must all pass):")
+    for vc in task.get('validation_commands', []):
+        lines.append(f"  - {vc}")
+    lines.append("")
+    lines.append("RULES:")
+    lines.append("  1. Read AGENTS.md before making changes.")
+    lines.append("  2. Only modify files in the allowed_paths list.")
+    lines.append("  3. Do NOT touch files outside allowed_paths.")
+    lines.append("  4. Do NOT do anything in the forbidden_scope list.")
+    lines.append("  5. Run validation commands after making changes.")
+    lines.append("  6. Report completion status explicitly.")
+    lines.append("  7. If you cannot complete the task, say so clearly.")
+    return '\n'.join(lines)
+
+def execute_hermes(task, worktree_path):
+    prompt = build_prompt(task)
+    prompt_file = os.path.join(worktree_path, '.autopilot_prompt.txt')
+    with open(prompt_file, 'w') as f:
+        f.write(prompt)
+    max_minutes = task.get('max_minutes', 60)
+    timeout = max_minutes * 60
+    log(f"Executing via Hermes (timeout={max_minutes}m)")
+    try:
+        result = subprocess.run(
+            ['hermes', 'chat', '-q', prompt],
+            cwd=worktree_path,
+            capture_output=True, text=True, timeout=timeout
+        )
+        return {
+            'success': result.returncode == 0,
+            'exit_code': result.returncode,
+            'stdout': result.stdout[-5000:] if result.stdout else '',
+            'stderr': result.stderr[-2000:] if result.stderr else '',
+            'worker': 'hermes'
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            'success': False, 'exit_code': 124,
+            'stdout': '', 'stderr': f'Timeout after {max_minutes}m',
+            'worker': 'hermes'
+        }
+    finally:
+        try:
+            os.remove(prompt_file)
+        except Exception:
+            pass
+
+def execute_qoder(task, worktree_path):
+    prompt = build_prompt(task)
+    max_minutes = task.get('max_minutes', 60)
+    timeout = max_minutes * 60
+    log(f"Executing via Qoder CLI (timeout={max_minutes}m)")
+    try:
+        result = subprocess.run(
+            ['qodercli', '-p', '--output-format', 'json',
+             '--cwd', worktree_path,
+             '--allowed-tools', 'Read,Write,Edit,Bash,Glob,Grep',
+             '--disallowed-tools', 'WebSearch,WebFetch',
+             prompt],
+            cwd=worktree_path,
+            capture_output=True, text=True, timeout=timeout
+        )
+        return {
+            'success': result.returncode == 0,
+            'exit_code': result.returncode,
+            'stdout': result.stdout[-5000:] if result.stdout else '',
+            'stderr': result.stderr[-2000:] if result.stderr else '',
+            'worker': 'qoder'
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            'success': False, 'exit_code': 124,
+            'stdout': '', 'stderr': f'Timeout after {max_minutes}m',
+            'worker': 'qoder'
+        }
+
+def select_worker():
+    qoder_path = shutil.which('qodercli')
+    if qoder_path:
+        try:
+            result = subprocess.run([qoder_path, '--version'],
+                                   capture_output=True, text=True, timeout=10)
+            if result.returncode == 0:
+                log(f"Qoder CLI available: v{result.stdout.strip()}")
+                return 'qoder'
+        except Exception:
+            pass
+    log("Using Hermes worker (default)")
+    return 'hermes'
+
+def process_task():
+    if not acquire_lock('autopilot-worker'):
+        log("Another worker is running. Exiting.")
+        return False
+    try:
+        found = find_next_task()
+        if not found:
+            log("No queued tasks to process.")
+            return False
+        task_path, task = found
+        task_id = task['task_id']
+        log(f"Processing task: {task_id} ({task['title']})")
+        move_task(task_path, task, 'running')
+        task['started_at'] = datetime.now(timezone.utc).isoformat()
+        task['attempt'] = task.get('attempt', 0) + 1
+        try:
+            wt_path, branch = create_worktree(task)
+            task['worktree'] = wt_path
+            task['branch'] = branch
+        except Exception as e:
+            log(f"Failed to create worktree: {e}", "ERROR")
+            task['error'] = str(e)
+            task['finished_at'] = datetime.now(timezone.utc).isoformat()
+            running_path = os.path.join(AUTOPILOT_ROOT, 'queue', 'running', f"{task_id}.json")
+            move_task(running_path, task, 'failed')
+            return False
+        worker = select_worker()
+        result = execute_qoder(task, wt_path) if worker == 'qoder' else execute_hermes(task, wt_path)
+        task['result'] = result
+        task['finished_at'] = datetime.now(timezone.utc).isoformat()
+        if not result['success']:
+            log(f"Worker returned failure: exit_code={result['exit_code']}", "ERROR")
+            cleanup_worktree(task)
+            running_path = os.path.join(AUTOPILOT_ROOT, 'queue', 'running', f"{task_id}.json")
+            move_task(running_path, task, 'failed')
+            return False
+        cleanup_worktree(task)
+        running_path = os.path.join(AUTOPILOT_ROOT, 'queue', 'running', f"{task_id}.json")
+        move_task(running_path, task, 'done')
+        log(f"Task {task_id} completed.")
+        return True
+    finally:
+        release_lock('autopilot-worker')
+
+if __name__ == '__main__':
+    process_task()

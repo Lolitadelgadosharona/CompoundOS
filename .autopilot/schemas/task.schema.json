@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://compoundos.dev/autopilot/task.schema.json",
+  "title": "Autopilot Task",
+  "description": "Machine-readable task file for the CompoundOS Safe Autopilot",
+  "type": "object",
+  "required": [
+    "task_id",
+    "sprint",
+    "slice",
+    "title",
+    "approval_status",
+    "risk_level",
+    "requirements",
+    "allowed_paths",
+    "forbidden_scope",
+    "acceptance_criteria",
+    "validation_commands",
+    "base_sha",
+    "max_attempts",
+    "max_minutes",
+    "token_budget",
+    "auto_merge_allowed",
+    "owner_decisions",
+    "dependencies"
+  ],
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "pattern": "^TASK-[A-Z0-9]+-[0-9]+$",
+      "description": "Unique task identifier"
+    },
+    "sprint": {
+      "type": "string",
+      "description": "Sprint identifier"
+    },
+    "slice": {
+      "type": "string",
+      "description": "Slice identifier"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "Human-readable task title"
+    },
+    "approval_status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "proposed",
+        "review",
+        "not-authorized",
+        "approved"
+      ],
+      "description": "Only approved tasks may enter running state"
+    },
+    "risk_level": {
+      "type": "string",
+      "enum": [
+        "R0",
+        "R1",
+        "R2",
+        "R3"
+      ],
+      "description": "Risk classification"
+    },
+    "requirements": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "allowed_paths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "forbidden_scope": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "acceptance_criteria": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "validation_commands": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "base_sha": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    },
+    "max_attempts": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10
+    },
+    "max_minutes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1440
+    },
+    "token_budget": {
+      "type": "integer",
+      "minimum": 1000
+    },
+    "auto_merge_allowed": {
+      "type": "boolean"
+    },
+    "owner_decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "description",
+          "selected",
+          "resolved_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "selected": {
+            "type": "string"
+          },
+          "rejected": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "resolved_at": {
+            "type": "string",
+            "format": "date"
+          }
+        }
+      }
+    },
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "created_by": {
+      "type": "string"
+    },
+    "notes": {
+      "type": "string",
+      "maxLength": 5000
+    }
+  },
+  "additionalProperties": false
+}
