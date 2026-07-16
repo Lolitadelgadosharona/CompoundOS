@@ -3,8 +3,9 @@
 ## Status
 
 Approved behavior includes the Slice 1 Household workflow, the Slice 2B local-only
-Investment Policy backend API, and the Slice 2C local-only Policy frontend. Slice
-2A and Slice 2B are Done. Slice 2C is in Review; Slice 3 is not authorized.
+Investment Policy backend API, the Slice 2C local-only Policy frontend, and the
+Slice 3B Decision Journal backend API. Slices 1, 2A, 2B, 2C, 3A are Done. Slice
+3B is in Review; Slice 3C is not authorized.
 
 ## Summary
 

@@ -27,7 +27,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Slice 2C: Investment Policy Frontend Workflow / Done
 - Slice 3 Technical Design Gate: Done
 - Slice 3A: Decision Journal Persistence and Immutability Foundation / Done
-- Slice 3B, 3C: Not Authorized / Not Started
+- Slice 3B: Decision Journal Backend Workflow and API / In Review
+- Slice 3C: Not Authorized / Not Started
 
 ## Planning
 
@@ -44,6 +45,7 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   the Decision Journal data model, lifecycle, API, UI, immutability, and
   concurrency patterns without any implementation.
 - Slice 3 implementation remains unauthorized.
+- Slice 3B implementation was separately authorized on 2026-07-16.
 - OD-S3-1 through OD-S3-15 were all Open — Owner Decision Required; all
   resolved by Project Owner on 2026-07-16.
 
@@ -88,6 +90,17 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   incremental APPROVE WITH NON-BLOCKING FOLLOW-UP, consistency review
   APPROVE WITH ONE MEDIUM FINDING, final focused APPROVE. All findings
   resolved. Zero outstanding issues.
+- Sprint 002 Slice 3B Decision Journal Backend Workflow and API is in Review.
+  Slice 3B implements twelve Decision Journal API endpoints: create Decision
+  Draft, list Decisions, read/update/discard Draft, confirm Draft, read detail
+  with original/effective snapshots, archive/unarchive, append Correction,
+  list Corrections, and Decision audit events. Strict Pydantic contracts,
+  repository queries, atomic service transactions with Policy→Decision→Draft
+  lock ordering, append-only Corrections with per-Decision sequential numbering,
+  atomic never-Confirmed Draft discard with identity deletion, and redacted
+  AuditEvents.
+- Slice 3B adds no frontend, migration, dependency, Compose, CI, authentication,
+  recommendation, Guardian, AI, Broker, trading, or Slice 3C behavior.
 
 ## Review
 
@@ -551,3 +564,14 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - 2026-07-16: Pull request #11 approved for merge. Slice 3A is Done. Sprint 002
   remains In Progress. Slice 3B and Slice 3C remain Not Authorized and Not
   Started. The next step can only be decided by the Project Owner.
+- 2026-07-16: Sprint 002 Slice 3B implementation authorized for the Decision
+  Journal Backend Workflow and API only.
+- 2026-07-16: Slice 3B implements twelve Decision Journal API endpoints with
+  strict Pydantic contracts, repository queries, atomic service transactions,
+  Policy→Decision→Draft lock ordering, append-only Corrections, atomic
+  never-Confirmed Draft discard, and redacted AuditEvents.
+- 2026-07-16: Slice 3B adds no frontend, migration, dependency, Compose, CI,
+  authentication, recommendation, Guardian, AI, Broker, trading, or Slice 3C
+  behavior.
+- 2026-07-16: Slice 3B enters Review. Sprint 002 remains In Progress. Slice 3C
+  remains Not Authorized and Not Started.

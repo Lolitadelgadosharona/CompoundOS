@@ -152,6 +152,40 @@ without adding a Decision use case or user-facing workflow:
   constraints, lifecycle transitions, discard foundation, snapshot immutability,
   correction behavior, and trigger inspection.
 
+## Sprint 002 Slice 3B Architecture
+
+Slice 3B adds the Decision Journal backend workflow and API on top of the
+Slice 3A persistence foundation:
+
+- `decision_schemas.py` defines strict Pydantic request/response contracts with
+  extra=forbid, trim, Unicode code-point length limits, and mechanical ISO date
+  validation. Confirm requires title, decision_summary, rationale, and
+  decision_date. decision_date forbids future dates; review_date allows future.
+- `repositories/decisions.py` provides SQLAlchemy queries for all Decision
+  tables with FOR UPDATE support, cursor pagination for audit events, and
+  per-Decision Correction numbering via MAX+1 under lock.
+- `services/decisions.py` owns transaction boundaries for create, update,
+  discard, confirm, archive, unarchive, and append-correction. Lock ordering is
+  Policy→Decision→Draft. Confirm is a 13-step atomic transaction consuming the
+  Draft and inserting an immutable snapshot. Discard atomically deletes both
+  Draft and Decision identity for never-Confirmed Decisions (OD-S3-13 Option A).
+  Corrections use full replacement snapshots with per-Decision sequential
+  numbering computed under the Decision row lock.
+- `routers/decisions.py` exposes twelve endpoints with prefix `/api/decisions`,
+  mapping domain exceptions to 400/404/409/422 HTTP responses. Detail endpoint
+  constructs original/effective snapshots from transaction-scoped data.
+- AuditEvent metadata is restricted to changed_fields, draft_revision,
+  policy_version_number, and correction_number. No Decision text, Correction
+  text, Policy text, or correction_count is included.
+- Seven action names: decision.draft.created, decision.draft.updated,
+  decision.draft.discarded, decision.confirmed, decision.archived,
+  decision.unarchived, decision.correction.appended.
+- Real PostgreSQL tests cover creation, draft CRUD, confirm, discard,
+  archive/unarchive, corrections, audit events, detail views, and Household
+  timeline inclusion. Non-PostgreSQL tests cover Pydantic schema validation.
+- Slice 3B adds no frontend, migration, dependency, authentication,
+  recommendation, Guardian, AI, Broker, trading, or Slice 3C behavior.
+
 ## Module Boundaries
 
 - `routers/households.py`: four approved HTTP contracts and status mapping
@@ -165,6 +199,10 @@ without adding a Decision use case or user-facing workflow:
   and audit workflow
 - `frontend/lib/policy-api.ts`: typed browser-to-Policy-API boundary and exact
   integer-hundredths display helpers
+- `decision_schemas.py`: strict Decision request/response contracts
+- `repositories/decisions.py`: Decision queries, FOR UPDATE, cursor pagination
+- `services/decisions.py`: Decision transaction boundaries and domain errors
+- `routers/decisions.py`: twelve Decision Journal HTTP endpoints
 
 No Policy, Allocation, Journal, User, Account, AI, Guardian, Broker, or trading
 module is created in Slice 1.

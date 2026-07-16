@@ -16,3 +16,4 @@ This directory records significant architectural decisions for CompoundOS.
 - [ADR 0003: Immutable Investment Policy Snapshots](0003-immutable-investment-policy-snapshots.md) — Accepted for Sprint 002 Slice 2A
 - [ADR 0004: Investment Policy Backend Transactions](0004-investment-policy-backend-transactions.md) — Accepted for Sprint 002 Slice 2B
 - [ADR 0005: Decision Journal Persistence and Immutability](0005-decision-journal-persistence-and-immutability.md) — Accepted for Sprint 002 Slice 3A
+- [ADR 0006: Decision Journal Backend Transactions](0006-decision-journal-backend-transactions.md) — Accepted for Sprint 002 Slice 3B

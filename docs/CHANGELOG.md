@@ -1,5 +1,46 @@
 # Changelog
 
+## [Unreleased] - Sprint 002 Slice 3B In Review
+
+### Added
+
+- Twelve Decision Journal API endpoints on `apps/api/routers/decisions.py`:
+  POST /api/decisions (create Draft), GET /api/decisions (list),
+  GET /api/decisions/{id}/draft, PATCH /api/decisions/{id}/draft,
+  POST /api/decisions/{id}/draft/discard, POST /api/decisions/{id}/draft/confirm,
+  GET /api/decisions/{id} (detail with original/effective snapshots),
+  POST /api/decisions/{id}/archive, POST /api/decisions/{id}/unarchive,
+  POST /api/decisions/{id}/corrections, GET /api/decisions/{id}/corrections,
+  GET /api/decisions/{id}/audit-events
+- Strict Pydantic request/response contracts in `apps/api/decision_schemas.py`
+  with extra=forbid, trim, Unicode code-point length limits, and mechanical
+  ISO date validation (future decision_date rejected, review_date allows future)
+- Decision repository in `apps/api/repositories/decisions.py` with FOR UPDATE
+  support, cursor pagination, and per-Decision Correction numbering
+- Decision service in `apps/api/services/decisions.py` with atomic transactions:
+  Policy→Decision→Draft lock ordering, 13-step Confirm, atomic never-Confirmed
+  Draft discard with identity deletion (OD-S3-13 Option A), full replacement
+  Correction snapshots with MAX+1 numbering under Decision row lock
+- Router registered in `apps/api/main.py` with existing localhost CORS pattern
+- Decision Pydantic schema tests in `tests/api/test_decisions.py` (27 tests)
+- Decision PostgreSQL backend tests in `tests/test_decision_backend.py`
+  (32 tests covering creation, draft CRUD, confirm, discard, archive/unarchive,
+  corrections, audit events, detail views, and Household timeline inclusion)
+- ADR 0006 documenting the Decision Journal backend transaction patterns
+
+### Boundaries
+
+- Slice 3B adds no frontend, `/decisions` page, migration, dependency, Compose,
+  CI, authentication, recommendation, Guardian, AI, Broker, trading, actual
+  holdings, accounts, monetary data, or Slice 3C behavior.
+- Slice 3C (Decision Frontend Workflow): Not Authorized, Not Started.
+
+### Status
+
+- Sprint 002 remains In Progress. Slice 2A, 2B, 2C, 3A remain Done.
+- Slice 3B Decision Journal Backend Workflow and API: In Review.
+- Slice 3C: Not Authorized, Not Started.
+
 ## [Unreleased] - Sprint 002 Slice 3A Complete
 
 ### Added
