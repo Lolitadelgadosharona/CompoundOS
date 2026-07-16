@@ -40,7 +40,15 @@ def postgres_engine() -> Engine:
 def db_session(postgres_engine: Engine) -> Generator[Session, None, None]:
     with postgres_engine.begin() as connection:
         connection.execute(
-            text("TRUNCATE TABLE audit_events, household_profiles RESTART IDENTITY CASCADE")
+            text(
+                "TRUNCATE TABLE decision_corrections, decision_confirmed_snapshots,"
+                " decision_drafts, decisions, audit_events,"
+                " investment_policy_version_allocations,"
+                " investment_policy_draft_allocations,"
+                " investment_policy_versions, investment_policy_drafts,"
+                " investment_policies, household_profiles"
+                " RESTART IDENTITY CASCADE"
+            )
         )
     session_factory = sessionmaker(bind=postgres_engine, expire_on_commit=False)
     with session_factory() as session:
@@ -51,7 +59,15 @@ def db_session(postgres_engine: Engine) -> Generator[Session, None, None]:
 def api_client(postgres_engine: Engine) -> Generator[TestClient, None, None]:
     with postgres_engine.begin() as connection:
         connection.execute(
-            text("TRUNCATE TABLE audit_events, household_profiles RESTART IDENTITY CASCADE")
+            text(
+                "TRUNCATE TABLE decision_corrections, decision_confirmed_snapshots,"
+                " decision_drafts, decisions, audit_events,"
+                " investment_policy_version_allocations,"
+                " investment_policy_draft_allocations,"
+                " investment_policy_versions, investment_policy_drafts,"
+                " investment_policies, household_profiles"
+                " RESTART IDENTITY CASCADE"
+            )
         )
     session_factory = sessionmaker(bind=postgres_engine, expire_on_commit=False)
 
