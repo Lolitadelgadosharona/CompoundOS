@@ -141,8 +141,7 @@ to a separately approved sprint; Sprint 001.1 does not restructure working code.
 
 ## Notes
 
-Slice 2C implements only the local, user-authored Investment Policy frontend. It
-does not implement decision journals, trading, broker integrations,
-authentication, Guardian logic, recommendations, or autonomous agents. Sprint
-002 is not complete; Slice 2C is in Review and Slice 3 is not authorized or
-started.
+Slice 3B implements the Decision Journal backend workflow and API. It does not
+implement the Decision frontend, trading, broker integrations, authentication,
+Guardian logic, recommendations, or autonomous agents. Sprint 002 is not
+complete; Slice 3B is in Review and Slice 3C is not authorized or started.

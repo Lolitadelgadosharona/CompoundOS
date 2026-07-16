@@ -3,6 +3,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from apps.api.routers.decisions import router as decisions_router
 from apps.api.routers.households import router as households_router
 from apps.api.routers.policies import router as policies_router
 
@@ -41,3 +42,4 @@ def api_health() -> dict[str, str]:
 
 app.include_router(households_router)
 app.include_router(policies_router)
+app.include_router(decisions_router)
