@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] - Sprint 002 Slice 2C Review
+## [Unreleased] - Sprint 002 Slice 2C Complete
 
 ### Added
 
@@ -43,11 +43,38 @@
 ### Status
 
 - Slice 2A and Slice 2B remain Done.
-- Slice 2C implementation is complete and is in Review; this is not a
-  production-readiness claim or completion of Sprint 002.
-- PR #9 remains Draft after its initial REQUEST CHANGES review. M-1 through M-4
-  and L-1 through L-6 have been addressed and await independent incremental review.
-- Sprint 002 remains In Progress.
+- Slice 2C passed independent incremental review with conclusion APPROVE. All
+  ten findings from the initial review (M-1 through M-4, L-1 through L-6) are
+  fully resolved with zero new findings.
+- PR #9 approved for merge.
+- Sprint 002 remains In Progress. Slice 3 remains unauthorized and Not Started.
+
+### Review Summary
+
+- Initial independent review: REQUEST CHANGES (M-1 through M-4, L-1 through L-6).
+- M-1 resolved: independent core/history/audit resource states prevent auxiliary
+  failures from hiding a usable workspace.
+- M-2 resolved: workspace-level semantic dirty tracking blocks publication of
+  stale saved snapshots and requires explicit confirmation before reload.
+- M-3 resolved: unified reload confirmation protects both editors from silent
+  data loss; failed reloads preserve local edits.
+- M-4 resolved: generation-guarded and AbortController-coordinated audit reads
+  prevent stale responses from overwriting newer state.
+- L-1 resolved: generation- and cursor-guarded history pagination with stable
+  Version identity deduplication.
+- L-2 resolved: case-preserving allocation display-name comparison matching
+  backend NFKC + trim + whitespace collapse semantics.
+- L-3 resolved: Unicode code-point length validation replacing HTML maxLength,
+  with 200 emoji boundary tests.
+- L-4 resolved: distinct PolicyNetworkError and PolicyApiError classes with
+  neutral messages that never echo response bodies.
+- L-5 resolved: CurrentPublishedSummary component renders immutable Published
+  context alongside an editable Draft.
+- L-6 resolved: row-specific accessible aria-labels for all allocation row
+  controls with name-aware fallbacks.
+- Frontend test suite: 4 files, 62 tests (up from 37), including deferred-promise
+  race condition tests, dirty-state transition tests, Unicode boundary tests,
+  error classification tests, and accessibility tests.
 
 ## [Unreleased] - Sprint 002 Slice 2B Complete
 

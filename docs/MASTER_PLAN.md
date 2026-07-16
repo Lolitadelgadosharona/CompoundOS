@@ -24,7 +24,7 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Current implementation authorization: Slice 2C — Investment Policy Frontend Workflow
 - Slice 2A: Done
 - Slice 2B: Investment Policy Backend Workflow and API / Done
-- Slice 2C: Implementation complete / Review
+- Slice 2C: Investment Policy Frontend Workflow / Done
 - Slice 3: Not authorized / Not Started
 
 ## Planning
@@ -66,7 +66,7 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Sprint 002 remains In Progress.
 - Slice 2A is Done after independent review and approval for merge.
 - Slice 2B is Done after independent review and approval for merge.
-- Slice 2C implementation is complete and is in Review.
+- Slice 2C is Done after independent review and approval for merge.
 - Slice 3 remains unauthorized and Not Started.
 
 ## Review
@@ -141,16 +141,19 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   suitability, score, rebalancing, or automated decision behavior.
 - Policy mutation success and audit refresh failure remain separate outcomes;
   audit retry performs only the audit GET and never replays a mutation.
-- PR #9 independent review conclusion was REQUEST CHANGES. M-1 through M-4 are
-  addressed by independent core/history/audit resource states, workspace-level
-  text and allocation dirty tracking with a publication gate, explicit protected
-  reload confirmation, and generation-guarded AuditEvent refreshes.
-- L-1 through L-6 are addressed by generation- and cursor-guarded history reads,
+- PR #9 initial independent review conclusion was REQUEST CHANGES with four
+  MEDIUM findings (M-1 through M-4) and six LOW findings (L-1 through L-6).
+- M-1 through M-4 were addressed by independent core/history/audit resource
+  states, workspace-level text and allocation dirty tracking with a publication
+  gate, explicit protected reload confirmation, and generation-guarded AuditEvent
+  refreshes.
+- L-1 through L-6 were addressed by generation- and cursor-guarded history reads,
   case-preserving allocation display normalization, Unicode code-point limits,
   distinct safe network/server errors, an explicit current Published summary
   beside a Draft, and row-specific accessible allocation controls.
-- Slice 2C remains in Review and PR #9 remains Draft pending independent
-  incremental review. These fixes do not constitute approval or completion.
+- Final independent incremental review conclusion: APPROVE. All ten findings
+  (M-1 through M-4, L-1 through L-6) are fully resolved. Zero new findings.
+- Pull request #9 approved for merge.
 - Slice 2C adds no backend behavior, migration, dependency, authentication,
   Decision Journal, Guardian, AI, Broker, market, holding, recommendation, or
   trading behavior.
@@ -197,6 +200,16 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Immutable Policy Version history and Policy-filtered audit API
 - Transaction-scoped PATCH response snapshots without post-commit database reads
 - Slice 2B completed without a Policy frontend or complete Policy user experience
+- Sprint 002 Slice 2C: Investment Policy Frontend Workflow
+- Local-only `/policy` page with typed Policy API client, explicit Draft text and
+  allocation saves, mechanical publication review with dirty-state gate, immutable
+  Published and version history views, Policy audit timeline, Draft creation, and
+  confirmed Draft discard
+- Independent core/auxiliary resource isolation, generation-guarded audit and
+  history coordination, Unicode code-point allocation limits, and row-specific
+  accessible control names
+- Frontend test suite expanded from 37 to 62 tests covering async coordination,
+  dirty-state transitions, deferred-promise race conditions, and accessibility
 
 ## Decision Log
 
@@ -342,3 +355,10 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   changing the approved backend contract.
 - 2026-07-14: Slice 2C enters Review. Sprint 002 remains In Progress; Slice 3
   remains unauthorized and Not Started.
+- 2026-07-15: PR #9 initial independent review concluded REQUEST CHANGES (M-1
+  through M-4, L-1 through L-6).
+- 2026-07-15: All ten review findings (M-1 through M-4, L-1 through L-6) resolved
+  in fix commit c732569.
+- 2026-07-15: PR #9 final independent incremental review concluded APPROVE with
+  zero new findings.
+- 2026-07-15: Pull request #9 approved for merge and squash-merged into main.
