@@ -50,6 +50,8 @@ EXPECTED_DECISION_TRIGGERS = {
     "trg_decision_confirmed_snapshot_immutability",
     "trg_decision_correction_immutability",
     "trg_decision_lifecycle_consistency",
+    "trg_decision_lifecycle_consistency_draft",
+    "trg_decision_lifecycle_consistency_snapshot",
 }
 
 SNAPSHOT_FIELDS = (
@@ -720,6 +722,114 @@ def test_draft_and_snapshot_coexist_cannot_commit(
         with pytest.raises(Exception) as exc:
             conn.commit()
         assert "decision_draft_has_snapshot" in str(exc.value)
+        conn.rollback()
+
+
+# ---------------------------------------------------------------------------
+# Deferred trigger bypass regression tests (cross-transaction)
+# ---------------------------------------------------------------------------
+
+
+def test_existing_draft_update_to_confirmed_without_snapshot_fails(
+    db_session: Session,
+    postgres_engine: Engine,
+) -> None:
+    """Bypass scenario 1: UPDATE existing draft to confirmed without snapshot."""
+    # Transaction 1: Create draft decision
+    with postgres_engine.connect() as conn:
+        hid = create_household(conn)
+        did, _drid = create_decision_with_draft(conn, hid)
+        conn.commit()
+
+    # Transaction 2: Update to confirmed without snapshot (should fail)
+    with postgres_engine.connect() as conn:
+        conn.execute(
+            text("UPDATE decisions SET status = 'confirmed' WHERE id = :id"),
+            {"id": did},
+        )
+        with pytest.raises(Exception) as exc:
+            conn.commit()
+        assert "decision_confirmed_requires_snapshot" in str(exc.value)
+        conn.rollback()
+
+
+def test_existing_draft_delete_draft_row_fails(
+    db_session: Session,
+    postgres_engine: Engine,
+) -> None:
+    """Bypass scenario 2: DELETE draft from existing draft decision."""
+    # Transaction 1: Create draft decision
+    with postgres_engine.connect() as conn:
+        hid = create_household(conn)
+        did, drid = create_decision_with_draft(conn, hid)
+        conn.commit()
+
+    # Transaction 2: Delete draft without deleting decision (should fail)
+    with postgres_engine.connect() as conn:
+        conn.execute(
+            text("DELETE FROM decision_drafts WHERE id = :id"),
+            {"id": drid},
+        )
+        with pytest.raises(Exception) as exc:
+            conn.commit()
+        assert "decision_draft_requires_draft_row" in str(exc.value)
+        conn.rollback()
+
+
+def test_existing_draft_insert_snapshot_fails(
+    db_session: Session,
+    postgres_engine: Engine,
+) -> None:
+    """Bypass scenario 3: INSERT snapshot for existing draft decision."""
+    # Transaction 1: Create draft decision
+    with postgres_engine.connect() as conn:
+        hid = create_household(conn)
+        vid = create_policy_version(conn, hid)
+        did, _drid = create_decision_with_draft(conn, hid)
+        conn.commit()
+
+    # Transaction 2: Insert snapshot without confirming (should fail)
+    with postgres_engine.connect() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO decision_confirmed_snapshots "
+                "(id, decision_id, selected_policy_version_id, title,"
+                " decision_summary, rationale, decision_date, confirmed_at) "
+                "VALUES (:id, :did, :vid, 'T', 'S', 'R', CURRENT_DATE, now())"
+            ),
+            {"id": uuid4(), "did": did, "vid": vid},
+        )
+        with pytest.raises(Exception) as exc:
+            conn.commit()
+        assert "decision_draft_has_snapshot" in str(exc.value)
+        conn.rollback()
+
+
+def test_existing_confirmed_insert_draft_fails(
+    db_session: Session,
+    postgres_engine: Engine,
+) -> None:
+    """Bypass scenario 4: INSERT draft for existing confirmed decision."""
+    # Transaction 1: Create confirmed decision
+    with postgres_engine.connect() as conn:
+        hid = create_household(conn)
+        vid = create_policy_version(conn, hid)
+        did, drid = create_decision_with_draft(conn, hid)
+        confirm_decision(conn, did, drid, vid)
+        conn.commit()
+
+    # Transaction 2: Insert draft for confirmed decision (should fail)
+    with postgres_engine.connect() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO decision_drafts "
+                "(id, decision_id, title) VALUES (:id, :did, 'Late Draft')"
+            ),
+            {"id": uuid4(), "did": did},
+        )
+        with pytest.raises(Exception) as exc:
+            conn.commit()
+        assert "decision_confirmed_has_draft" in str(exc.value)
         conn.rollback()
 
 
@@ -1642,17 +1752,38 @@ def test_lifecycle_consistency_trigger_is_deferred(
     postgres_engine: Engine,
 ) -> None:
     with postgres_engine.connect() as connection:
+        # Verify decisions trigger
         row = connection.execute(
             text(
-                "SELECT tgdeferrable, tginitdeferred, tgtype "
+                "SELECT tgdeferrable, tginitdeferred "
                 "FROM pg_trigger "
                 "WHERE tgname = 'trg_decision_lifecycle_consistency'"
             )
         ).one()
-    assert row.tgdeferrable is True
-    assert row.tginitdeferred is True
-    # tgtype encodes trigger events; INSERT-only is expected
-    # (UPDATE validation is handled by the BEFORE lifecycle trigger)
+        assert row.tgdeferrable is True
+        assert row.tginitdeferred is True
+
+        # Verify decision_drafts trigger
+        row = connection.execute(
+            text(
+                "SELECT tgdeferrable, tginitdeferred "
+                "FROM pg_trigger "
+                "WHERE tgname = 'trg_decision_lifecycle_consistency_draft'"
+            )
+        ).one()
+        assert row.tgdeferrable is True
+        assert row.tginitdeferred is True
+
+        # Verify decision_confirmed_snapshots trigger
+        row = connection.execute(
+            text(
+                "SELECT tgdeferrable, tginitdeferred "
+                "FROM pg_trigger "
+                "WHERE tgname = 'trg_decision_lifecycle_consistency_snapshot'"
+            )
+        ).one()
+        assert row.tgdeferrable is True
+        assert row.tginitdeferred is True
 
 
 def test_trigger_error_identifiers(db_session: Session, postgres_engine: Engine) -> None:

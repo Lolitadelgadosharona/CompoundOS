@@ -249,30 +249,49 @@ RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 DECLARE
+    v_decision_id uuid;
     v_current_status text;
     v_has_snapshot boolean;
     v_has_draft boolean;
 BEGIN
-    -- For deferred triggers, NEW holds the original INSERT values,
+    -- Determine which decision_id to check based on the table and operation.
+    -- For decisions table: use NEW.id (INSERT/UPDATE) or OLD.id (DELETE)
+    -- For child tables: use NEW.decision_id (INSERT) or OLD.decision_id (DELETE)
+    IF TG_TABLE_NAME = 'decisions' THEN
+        IF TG_OP = 'DELETE' THEN
+            v_decision_id := OLD.id;
+        ELSE
+            v_decision_id := NEW.id;
+        END IF;
+    ELSE
+        -- Child tables (decision_drafts, decision_confirmed_snapshots)
+        IF TG_OP = 'DELETE' THEN
+            v_decision_id := OLD.decision_id;
+        ELSE
+            v_decision_id := NEW.decision_id;
+        END IF;
+    END IF;
+
+    -- Query the current state of the decision at COMMIT time.
+    -- For deferred triggers, NEW/OLD hold the original values,
     -- which may be stale if the row was updated in the same transaction.
-    -- Query the table to get the current committed-pending state.
     SELECT status INTO v_current_status
     FROM public.decisions
-    WHERE id = NEW.id;
+    WHERE id = v_decision_id;
 
-    -- If the row was deleted after INSERT, there is nothing to check.
+    -- If the decision was deleted (Discard path), there is nothing to check.
     IF v_current_status IS NULL THEN
         RETURN NEW;
     END IF;
 
     SELECT EXISTS(
         SELECT 1 FROM public.decision_confirmed_snapshots
-        WHERE decision_id = NEW.id
+        WHERE decision_id = v_decision_id
     ) INTO v_has_snapshot;
 
     SELECT EXISTS(
         SELECT 1 FROM public.decision_drafts
-        WHERE decision_id = NEW.id
+        WHERE decision_id = v_decision_id
     ) INTO v_has_draft;
 
     IF v_current_status IN ('confirmed', 'archived') THEN
@@ -282,7 +301,7 @@ BEGIN
                 MESSAGE = 'decision_confirmed_requires_snapshot',
                 DETAIL = format(
                     'Decision %s has status %L but no confirmed snapshot.',
-                    NEW.id, v_current_status
+                    v_decision_id, v_current_status
                 );
         END IF;
         IF v_has_draft THEN
@@ -291,7 +310,7 @@ BEGIN
                 MESSAGE = 'decision_confirmed_has_draft',
                 DETAIL = format(
                     'Decision %s has status %L but still has a draft.',
-                    NEW.id, v_current_status
+                    v_decision_id, v_current_status
                 );
         END IF;
     ELSIF v_current_status = 'draft' THEN
@@ -301,7 +320,7 @@ BEGIN
                 MESSAGE = 'decision_draft_has_snapshot',
                 DETAIL = format(
                     'Decision %s has status draft but has a confirmed snapshot.',
-                    NEW.id
+                    v_decision_id
                 );
         END IF;
         IF NOT v_has_draft THEN
@@ -310,7 +329,7 @@ BEGIN
                 MESSAGE = 'decision_draft_requires_draft_row',
                 DETAIL = format(
                     'Decision %s has status draft but no draft row.',
-                    NEW.id
+                    v_decision_id
                 );
         END IF;
     END IF;
@@ -670,7 +689,23 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE CONSTRAINT TRIGGER trg_decision_lifecycle_consistency
-        AFTER INSERT ON public.decisions
+        AFTER INSERT OR UPDATE ON public.decisions
+        DEFERRABLE INITIALLY DEFERRED
+        FOR EACH ROW EXECUTE FUNCTION public.fn_decision_lifecycle_consistency()
+        """
+    )
+    op.execute(
+        """
+        CREATE CONSTRAINT TRIGGER trg_decision_lifecycle_consistency_draft
+        AFTER INSERT OR DELETE ON public.decision_drafts
+        DEFERRABLE INITIALLY DEFERRED
+        FOR EACH ROW EXECUTE FUNCTION public.fn_decision_lifecycle_consistency()
+        """
+    )
+    op.execute(
+        """
+        CREATE CONSTRAINT TRIGGER trg_decision_lifecycle_consistency_snapshot
+        AFTER INSERT OR DELETE ON public.decision_confirmed_snapshots
         DEFERRABLE INITIALLY DEFERRED
         FOR EACH ROW EXECUTE FUNCTION public.fn_decision_lifecycle_consistency()
         """
@@ -678,6 +713,14 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.execute(
+        "DROP TRIGGER IF EXISTS trg_decision_lifecycle_consistency_snapshot "
+        "ON public.decision_confirmed_snapshots"
+    )
+    op.execute(
+        "DROP TRIGGER IF EXISTS trg_decision_lifecycle_consistency_draft "
+        "ON public.decision_drafts"
+    )
     op.execute(
         "DROP TRIGGER IF EXISTS trg_decision_lifecycle_consistency "
         "ON public.decisions"
