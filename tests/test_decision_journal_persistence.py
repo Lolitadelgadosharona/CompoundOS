@@ -11,11 +11,7 @@ from alembic.runtime.migration import MigrationContext
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
 
-from apps.api.models import (
-    Decision,
-)
 from tests.conftest import postgres_test_database_url
 
 pytestmark = pytest.mark.postgres
@@ -460,9 +456,9 @@ def test_decision_journal_schema_constraints_fks_functions_triggers(
 
 
 def test_multiple_independent_decision_drafts_allowed(
-    db_session: Session,
+    postgres_engine: Engine,
 ) -> None:
-    with db_session.connection() as conn:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         did1, drid1 = create_decision_with_draft(conn, hid)
         did2, drid2 = create_decision_with_draft(conn, hid)
@@ -472,8 +468,8 @@ def test_multiple_independent_decision_drafts_allowed(
     assert drid1 != drid2
 
 
-def test_at_most_one_draft_per_decision(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_at_most_one_draft_per_decision(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         did, _ = create_decision_with_draft(conn, hid)
         with pytest.raises(IntegrityError):
@@ -488,8 +484,8 @@ def test_at_most_one_draft_per_decision(db_session: Session) -> None:
         conn.rollback()
 
 
-def test_at_most_one_snapshot_per_decision(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_at_most_one_snapshot_per_decision(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -509,8 +505,8 @@ def test_at_most_one_snapshot_per_decision(db_session: Session) -> None:
         conn.rollback()
 
 
-def test_draft_text_length_constraints(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_draft_text_length_constraints(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         did, _ = create_decision_with_draft(conn, hid)
         conn.commit()
@@ -527,8 +523,8 @@ def test_draft_text_length_constraints(db_session: Session) -> None:
         conn.rollback()
 
 
-def test_decision_date_yesterday_allowed(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_decision_date_yesterday_allowed(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -539,8 +535,8 @@ def test_decision_date_yesterday_allowed(db_session: Session) -> None:
         conn.commit()
 
 
-def test_decision_date_today_allowed(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_decision_date_today_allowed(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -548,8 +544,8 @@ def test_decision_date_today_allowed(db_session: Session) -> None:
         conn.commit()
 
 
-def test_decision_date_tomorrow_rejected(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_decision_date_tomorrow_rejected(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -563,8 +559,8 @@ def test_decision_date_tomorrow_rejected(db_session: Session) -> None:
         conn.rollback()
 
 
-def test_snapshot_invalid_direct_date_rejected(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_snapshot_invalid_direct_date_rejected(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -583,8 +579,8 @@ def test_snapshot_invalid_direct_date_rejected(db_session: Session) -> None:
         conn.rollback()
 
 
-def test_decision_date_boundary_timezone_sensitive(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_decision_date_boundary_timezone_sensitive(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         conn.execute(text("SET TIME ZONE 'UTC'"))
         yesterday = (date.today() - timedelta(days=1)).isoformat()
         hid = create_household(conn)
@@ -596,8 +592,8 @@ def test_decision_date_boundary_timezone_sensitive(db_session: Session) -> None:
         conn.commit()
 
 
-def test_correction_uses_same_date_boundary(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_correction_uses_same_date_boundary(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -626,19 +622,9 @@ def test_correction_uses_same_date_boundary(db_session: Session) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_valid_draft_creation_transaction(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_valid_draft_creation_transaction(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
-
-    decision = Decision(
-        household_id=uuid4(),
-        status="draft",
-    )
-    db_session.add(decision)
-    db_session.flush()
-    db_session.rollback()
-
-    with db_session.connection() as conn:
         did, _drid = create_decision_with_draft(conn, hid)
         conn.commit()
 
@@ -648,11 +634,17 @@ def test_valid_draft_creation_transaction(db_session: Session) -> None:
         )
         assert count == 1
 
+        status = conn.scalar(
+            text("SELECT status FROM decisions WHERE id = :id"),
+            {"id": did},
+        )
+        assert status == "draft"
+
 
 def test_draft_status_without_draft_row_cannot_commit(
-    db_session: Session,
+    postgres_engine: Engine,
 ) -> None:
-    with db_session.connection() as conn:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         did = uuid4()
         conn.execute(
@@ -669,9 +661,9 @@ def test_draft_status_without_draft_row_cannot_commit(
 
 
 def test_confirmed_status_without_snapshot_cannot_commit(
-    db_session: Session,
+    postgres_engine: Engine,
 ) -> None:
-    with db_session.connection() as conn:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         did, drid = create_decision_with_draft(conn, hid)
         conn.execute(
@@ -695,9 +687,9 @@ def test_confirmed_status_without_snapshot_cannot_commit(
 
 
 def test_draft_and_snapshot_coexist_cannot_commit(
-    db_session: Session,
+    postgres_engine: Engine,
 ) -> None:
-    with db_session.connection() as conn:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -716,8 +708,8 @@ def test_draft_and_snapshot_coexist_cannot_commit(
         conn.rollback()
 
 
-def test_draft_to_confirmed_success(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_draft_to_confirmed_success(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -731,8 +723,8 @@ def test_draft_to_confirmed_success(db_session: Session) -> None:
         assert status == "confirmed"
 
 
-def test_confirmed_to_archived_success(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_confirmed_to_archived_success(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -762,8 +754,8 @@ def test_confirmed_to_archived_success(db_session: Session) -> None:
         assert row.archive_reason == "No longer relevant"
 
 
-def test_archived_to_confirmed_success(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_archived_to_confirmed_success(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -802,8 +794,8 @@ def test_archived_to_confirmed_success(db_session: Session) -> None:
         assert row.archive_reason is None
 
 
-def test_forbidden_transitions_fail(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_forbidden_transitions_fail(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -832,8 +824,8 @@ def test_forbidden_transitions_fail(db_session: Session) -> None:
         )
 
 
-def test_archive_requires_archived_at(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_archive_requires_archived_at(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -853,8 +845,8 @@ def test_archive_requires_archived_at(db_session: Session) -> None:
         )
 
 
-def test_unarchive_clears_archive_fields(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_unarchive_clears_archive_fields(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -895,9 +887,9 @@ def test_unarchive_clears_archive_fields(db_session: Session) -> None:
 
 
 def test_archive_fields_only_during_transition(
-    db_session: Session,
+    postgres_engine: Engine,
 ) -> None:
-    with db_session.connection() as conn:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -922,8 +914,8 @@ def test_archive_fields_only_during_transition(
 # ---------------------------------------------------------------------------
 
 
-def test_atomic_draft_and_identity_delete(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_atomic_draft_and_identity_delete(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         did, drid = create_decision_with_draft(conn, hid)
         conn.commit()
@@ -945,8 +937,8 @@ def test_atomic_draft_and_identity_delete(db_session: Session) -> None:
         assert count == 0
 
 
-def test_audit_event_stable_on_identity_delete(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_audit_event_stable_on_identity_delete(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         did, drid = create_decision_with_draft(conn, hid)
         event_id = uuid4()
@@ -979,8 +971,8 @@ def test_audit_event_stable_on_identity_delete(db_session: Session) -> None:
         assert event_count == 1
 
 
-def test_confirmed_identity_delete_fails(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_confirmed_identity_delete_fails(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -997,8 +989,8 @@ def test_confirmed_identity_delete_fails(db_session: Session) -> None:
         )
 
 
-def test_archived_identity_delete_fails(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_archived_identity_delete_fails(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -1024,8 +1016,8 @@ def test_archived_identity_delete_fails(db_session: Session) -> None:
         )
 
 
-def test_identity_delete_failure_rollback(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_identity_delete_failure_rollback(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -1053,8 +1045,8 @@ def test_identity_delete_failure_rollback(db_session: Session) -> None:
         assert status == "confirmed"
 
 
-def test_multi_row_delete_guard(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_multi_row_delete_guard(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         did1, drid1 = create_decision_with_draft(conn, hid)
         did2, drid2 = create_decision_with_draft(conn, hid)
@@ -1069,8 +1061,8 @@ def test_multi_row_delete_guard(db_session: Session) -> None:
         )
 
 
-def test_draft_cascade_on_identity_delete(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_draft_cascade_on_identity_delete(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         did, drid = create_decision_with_draft(conn, hid)
         conn.commit()
@@ -1096,8 +1088,8 @@ def test_draft_cascade_on_identity_delete(db_session: Session) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_snapshot_insert_valid(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_snapshot_insert_valid(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -1114,8 +1106,8 @@ def test_snapshot_insert_valid(db_session: Session) -> None:
         assert title == "Confirmed Title"
 
 
-def test_snapshot_update_any_field_fails(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_snapshot_update_any_field_fails(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -1135,8 +1127,8 @@ def test_snapshot_update_any_field_fails(db_session: Session) -> None:
         )
 
 
-def test_snapshot_policy_version_update_fails(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_snapshot_policy_version_update_fails(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -1159,8 +1151,8 @@ def test_snapshot_policy_version_update_fails(db_session: Session) -> None:
         )
 
 
-def test_snapshot_delete_fails(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_snapshot_delete_fails(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -1180,8 +1172,8 @@ def test_snapshot_delete_fails(db_session: Session) -> None:
         )
 
 
-def test_snapshot_multi_row_update_fails(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_snapshot_multi_row_update_fails(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did1, drid1 = create_decision_with_draft(conn, hid)
@@ -1202,8 +1194,8 @@ def test_snapshot_multi_row_update_fails(db_session: Session) -> None:
         )
 
 
-def test_snapshot_fk_restrict(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_snapshot_fk_restrict(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -1223,8 +1215,8 @@ def test_snapshot_fk_restrict(db_session: Session) -> None:
         )
 
 
-def test_snapshot_rollback_session_reuse(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_snapshot_rollback_session_reuse(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -1258,8 +1250,8 @@ def test_snapshot_rollback_session_reuse(db_session: Session) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_correction_insert_valid(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_correction_insert_valid(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -1280,9 +1272,9 @@ def test_correction_insert_valid(db_session: Session) -> None:
 
 
 def test_correction_confirmed_decision_allowed(
-    db_session: Session,
+    postgres_engine: Engine,
 ) -> None:
-    with db_session.connection() as conn:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -1300,9 +1292,9 @@ def test_correction_confirmed_decision_allowed(
 
 
 def test_correction_archived_decision_allowed(
-    db_session: Session,
+    postgres_engine: Engine,
 ) -> None:
-    with db_session.connection() as conn:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -1323,9 +1315,9 @@ def test_correction_archived_decision_allowed(
 
 
 def test_correction_draft_decision_rejected(
-    db_session: Session,
+    postgres_engine: Engine,
 ) -> None:
-    with db_session.connection() as conn:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -1349,8 +1341,8 @@ def test_correction_draft_decision_rejected(
         )
 
 
-def test_correction_update_fails(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_correction_update_fails(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -1374,8 +1366,8 @@ def test_correction_update_fails(db_session: Session) -> None:
         )
 
 
-def test_correction_delete_fails(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_correction_delete_fails(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -1398,8 +1390,8 @@ def test_correction_delete_fails(db_session: Session) -> None:
         )
 
 
-def test_correction_wrong_actor_fails(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_correction_wrong_actor_fails(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -1416,9 +1408,9 @@ def test_correction_wrong_actor_fails(db_session: Session) -> None:
 
 
 def test_correction_ownership_mismatch_fails(
-    db_session: Session,
+    postgres_engine: Engine,
 ) -> None:
-    with db_session.connection() as conn:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did_a, drid_a = create_decision_with_draft(conn, hid)
@@ -1435,9 +1427,9 @@ def test_correction_ownership_mismatch_fails(
 
 
 def test_correction_selected_policy_version_not_in_table(
-    db_session: Session,
+    postgres_engine: Engine,
 ) -> None:
-    inspector = inspect(db_session.get_bind())
+    inspector = inspect(postgres_engine)
     column_names = {
         col["name"]
         for col in inspector.get_columns("decision_corrections")
@@ -1446,9 +1438,9 @@ def test_correction_selected_policy_version_not_in_table(
 
 
 def test_duplicate_correction_number_fails(
-    db_session: Session,
+    postgres_engine: Engine,
 ) -> None:
-    with db_session.connection() as conn:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -1472,9 +1464,9 @@ def test_duplicate_correction_number_fails(
 
 
 def test_different_decisions_same_correction_number(
-    db_session: Session,
+    postgres_engine: Engine,
 ) -> None:
-    with db_session.connection() as conn:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did_a, drid_a = create_decision_with_draft(conn, hid)
@@ -1489,9 +1481,9 @@ def test_different_decisions_same_correction_number(
 
 
 def test_same_decision_sequential_correction_numbers(
-    db_session: Session,
+    postgres_engine: Engine,
 ) -> None:
-    with db_session.connection() as conn:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -1518,8 +1510,8 @@ def test_same_decision_sequential_correction_numbers(
         assert count == 2
 
 
-def test_correction_fk_restrict(db_session: Session) -> None:
-    with db_session.connection() as conn:
+def test_correction_fk_restrict(postgres_engine: Engine) -> None:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -1543,9 +1535,9 @@ def test_correction_fk_restrict(db_session: Session) -> None:
 
 
 def test_correction_rollback_session_reuse(
-    db_session: Session,
+    postgres_engine: Engine,
 ) -> None:
-    with db_session.connection() as conn:
+    with postgres_engine.connect() as conn:
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
