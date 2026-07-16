@@ -26,7 +26,7 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Slice 2B: Investment Policy Backend Workflow and API / Done
 - Slice 2C: Investment Policy Frontend Workflow / Done
 - Slice 3 Technical Design Gate: Done
-- Slice 3A: Decision Journal Persistence and Immutability Foundation / In Review
+- Slice 3A: Decision Journal Persistence and Immutability Foundation / Done
 - Slice 3B, 3C: Not Authorized / Not Started
 
 ## Planning
@@ -75,9 +75,13 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Slice 2B is Done after independent review and approval for merge.
 - Slice 2C is Done after independent review and approval for merge.
 - Slice 3 Technical Design Gate is Done. PR #10 approved for merge.
-- Slice 3A Decision Journal Persistence and Immutability Foundation is in Review.
-  Migration 0003 creates four Decision Journal tables with five PL/pgSQL trigger
-  functions, lifecycle/consistency/immutability enforcement, and ORM models.
+- Slice 3A Decision Journal Persistence and Immutability Foundation is Done after
+  independent review and approval for merge. Three deferred CONSTRAINT TRIGGERs
+  enforce cross-table lifecycle consistency at COMMIT time: decisions INSERT/UPDATE,
+  decision_drafts INSERT/DELETE, decision_confirmed_snapshots INSERT/DELETE.
+  BLOCKER B1 (deferred trigger coverage gap) was resolved with multi-table trigger
+  events and a shared function that queries current database state at COMMIT time
+  instead of relying on stale NEW records. Four bypass regression tests added.
   Slice 3B and Slice 3C remain Not Authorized and Not Started.
 - OD-S3-1 through OD-S3-15 all Resolved by Project Owner on 2026-07-16.
   Four independent review stages completed: initial REQUEST CHANGES,
@@ -203,6 +207,22 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   PR #10 remains Draft. Slice 3 Implementation remains Not Authorized.
   Slice 3A, 3B, 3C remain Not Started. Merging the Technical Design PR does
   not authorize Slice 3A. Existing Backlog preserved.
+- Sprint 002 Slice 3A Decision Journal Persistence and Immutability Foundation
+  completed independent review.
+- Slice 3A initial independent review conclusion: REQUEST CHANGES with one
+  BLOCKER finding (B1: deferred trigger coverage gap — trigger fires only on
+  decisions INSERT, missing UPDATE and child-table mutations that can bypass
+  lifecycle consistency checks).
+- B1 was resolved by adding two additional deferred CONSTRAINT TRIGGERs on
+  decision_drafts (INSERT/DELETE) and decision_confirmed_snapshots (INSERT/DELETE),
+  updating the shared function to extract decision_id from the correct trigger
+  table, and adding four bypass regression tests covering cross-transaction
+  UPDATE, DELETE, and child-only INSERT scenarios.
+- Sprint 002 Slice 3A final independent review conclusion: APPROVE WITH
+  NON-BLOCKING FOLLOW-UP. All BLOCKER, HIGH, and MEDIUM findings resolved.
+  Zero outstanding issues. 138 required PostgreSQL tests passed, 0 skipped.
+- Pull request #11 approved for merge.
+- Slice 3A adds no Decision service, API, frontend, or Slice 3B/3C behavior.
 
 ## Done
 
@@ -255,6 +275,24 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   accessible control names
 - Frontend test suite expanded from 37 to 62 tests covering async coordination,
   dirty-state transitions, deferred-promise race conditions, and accessibility
+- Sprint 002 Slice 3A: Decision Journal Persistence and Immutability Foundation
+- Alembic revision `0003_decision_journal_foundation` creating four Decision
+  Journal tables with five PL/pgSQL trigger functions
+- Three deferred CONSTRAINT TRIGGERs on decisions (INSERT/UPDATE),
+  decision_drafts (INSERT/DELETE), and decision_confirmed_snapshots
+  (INSERT/DELETE) for cross-table lifecycle consistency at COMMIT time
+- Shared deferred trigger function queries current database state at COMMIT
+  instead of relying on stale NEW records, preventing bypass via child-table
+  mutations and cross-transaction updates
+- Named CHECK constraints, UNIQUE constraints, and FK RESTRICT/NO ACTION on
+  all four tables for status, text, date, correction numbering, and ownership
+- SQLAlchemy ORM models aligned with migration: Decision, DecisionDraft,
+  DecisionConfirmedSnapshot, DecisionCorrection
+- 138 real PostgreSQL tests passed (0 skipped) covering migration lifecycle,
+  schema, constraints, lifecycle transitions, immutability, corrections,
+  deferred consistency, and bypass regression
+- Slice 3A completed without a Decision service, API, frontend, or Slice 3B/3C
+  behavior
 
 ## Decision Log
 
@@ -496,3 +534,20 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - 2026-07-16: Slice 3A adds no Decision service, repository workflow, API
   endpoint, Pydantic contract, router, frontend client, or /decisions page.
 - 2026-07-16: Slice 3B and Slice 3C remain Not Authorized and Not Started.
+- 2026-07-16: Sprint 002 Slice 3A initial independent review concluded REQUEST
+  CHANGES with one BLOCKER finding (B1: deferred trigger fires only on decisions
+  INSERT, missing UPDATE and child-table mutations that bypass lifecycle
+  consistency checks via cross-transaction UPDATE, Draft deletion, snapshot
+  insertion, and confirmed-to-draft regression).
+- 2026-07-16: B1 resolved by adding two deferred CONSTRAINT TRIGGERs on
+  decision_drafts (AFTER INSERT OR DELETE) and decision_confirmed_snapshots
+  (AFTER INSERT OR DELETE), expanding decisions trigger to INSERT OR UPDATE, and
+  updating the shared function to extract decision_id from TG_TABLE_NAME and
+  query current database state at COMMIT time instead of relying on stale NEW
+  records. Four bypass regression tests added and passing.
+- 2026-07-16: Sprint 002 Slice 3A final independent review concluded APPROVE
+  WITH NON-BLOCKING FOLLOW-UP. All BLOCKER, HIGH, and MEDIUM findings resolved.
+  Zero outstanding issues. 138 required PostgreSQL tests passed, 0 skipped.
+- 2026-07-16: Pull request #11 approved for merge. Slice 3A is Done. Sprint 002
+  remains In Progress. Slice 3B and Slice 3C remain Not Authorized and Not
+  Started. The next step can only be decided by the Project Owner.

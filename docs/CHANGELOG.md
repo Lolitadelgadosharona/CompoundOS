@@ -42,8 +42,32 @@
 
 - Sprint 002 remains In Progress. Slice 2A, 2B, 2C remain Done.
 - Slice 3 Technical Design Gate: Done.
-- Slice 3A Decision Journal Persistence and Immutability Foundation: In Review.
+- Slice 3A Decision Journal Persistence and Immutability Foundation: Done.
+- Independent review: initial REQUEST CHANGES (1 BLOCKER), final APPROVE WITH
+  NON-BLOCKING FOLLOW-UP. BLOCKER B1 (deferred trigger coverage gap) resolved
+  with three cross-table deferred CONSTRAINT TRIGGERs and four bypass regression
+  tests. 138 required PostgreSQL tests passed, 0 skipped.
+- PR #11 approved for merge.
 - Slice 3B and Slice 3C: Not Authorized, Not Started.
+
+### Review Summary
+
+- Initial independent review: REQUEST CHANGES with one BLOCKER finding.
+- B1 resolved: deferred trigger coverage gap — original trigger fires only on
+  decisions INSERT, missing UPDATE and child-table mutations that can bypass
+  lifecycle consistency checks. Fixed by adding deferred CONSTRAINT TRIGGERs on
+  decision_drafts (AFTER INSERT OR DELETE) and decision_confirmed_snapshots
+  (AFTER INSERT OR DELETE), expanding decisions trigger to INSERT OR UPDATE, and
+  updating the shared function to extract decision_id from TG_TABLE_NAME and
+  query current database state at COMMIT time instead of relying on stale NEW
+  records.
+- Four bypass regression tests added: cross-transaction UPDATE to confirmed
+  without snapshot, Draft deletion leaving orphan identity, snapshot insertion
+  with retained Draft, and confirmed-to-draft status regression.
+- Final independent review conclusion: APPROVE WITH NON-BLOCKING FOLLOW-UP.
+- All BLOCKER, HIGH, and MEDIUM findings resolved. Zero outstanding issues.
+- Real PostgreSQL test suite: 138 passed, 43 deselected, 0 skipped, 20 warnings.
+- Frontend test suite: 4 files, 62 tests passed (no regressions).
 
 ## [Unreleased] - Sprint 002 Slice 3 Technical Design Gate Complete
 
