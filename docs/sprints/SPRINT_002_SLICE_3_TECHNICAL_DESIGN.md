@@ -883,8 +883,14 @@ This is recorded as **OD-S3-9** — Resolved by Project Owner — 2026-07-16.
 | `decision.unarchived` | POST unarchive | Archived → Confirmed (list) |
 | `decision.correction.appended` | POST correction | New Correction |
 
-**Status: pending technical review.** The owner must approve the final action
-names.
+**Status: Accepted for Slice 3 implementation design.** These seven action
+names are final for the Decision Journal technical design. They follow the
+existing Policy audit pattern (`policy.created`, `policy.draft.created`,
+`policy.published`, etc.). All API transactions, audit sections, service
+layers, UI label mappings, and test matrices must use these exact strings.
+No additional action names are permitted in Slice 3. The names carry no
+recommendation, score, approval, or trade meaning. Any future rename or
+addition requires a migration and API compatibility review.
 
 ### 5.2 AuditEvent Fields
 
@@ -1588,7 +1594,7 @@ displays `effective_snapshot`. Both are always consistent with the API.
 |---|---|
 | Method | `GET` |
 | Path | `/api/decisions/{decision_id}/audit-events` |
-| Query | `before_sequence_number` (optional cursor), `limit` (1-100, default 20) |
+| Query | `before_sequence_number` (optional cursor), `limit` (1-100, default 50) |
 | Response | `200` with `{ items: [...], next_before_sequence_number: int or null }` |
 | Errors | `404` (decision not found) |
 | Ownership | Filtered by `household_id` + `entity_type = "Decision"` + `entity_id` |
@@ -1856,6 +1862,28 @@ Owner decisions (OD-S3-1 through OD-S3-15, 2026-07-16).
 - **Decision-filtered audit**: verify the Decision-filtered endpoint
   returns only events for the specified decision_id and respects
   `household_id` ownership.
+- **decision_date boundary — Schema/API validation**:
+  verify yesterday (allowed), today (allowed), tomorrow (rejected with
+  mechanical date validation error), invalid ISO date string (422),
+  impossible calendar date such as February 30 (422).
+  For Draft: null or missing `decision_date` is permitted.
+  For Confirm: null or missing `decision_date` returns a mechanical
+  incomplete-field error.
+  For Correction: yesterday and today `decision_date` are allowed;
+  future `decision_date` is rejected.
+- **decision_date boundary — PostgreSQL enforcement**:
+  verify Confirmed snapshot and Correction rows both execute
+  `decision_date <= CURRENT_DATE` via the named CHECK constraint.
+  Direct SQL insertion of a future `decision_date` fails.
+  The named CHECK constraint exists on both `decision_confirmed_snapshots`
+  and `decision_corrections` tables.
+  Timezone does not alter DATE boundary semantics (PostgreSQL DATE type
+  is timezone-independent at the storage level).
+- **decision_date boundary — UI behavior**:
+  verify future `decision_date` displays a neutral technical error message.
+  The UI does not send a Confirm or Correction mutation when the date is
+  invalid. The date validation is not described as investment advice or
+  market timing judgment.
 
 ### 11.3 Concurrency Tests
 

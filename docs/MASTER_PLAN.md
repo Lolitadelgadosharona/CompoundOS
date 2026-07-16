@@ -28,8 +28,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Slice 3: Technical Design Owner Decisions Resolved / Implementation Not
   Authorized
 - Slice 3 Technical Design: Draft PR on planning branch, OD-S3-1 through
-  OD-S3-15 all Resolved by Project Owner — 2026-07-16, design decision
-  changes pending final consistency review
+  OD-S3-15 all Resolved by Project Owner — 2026-07-16, final consistency
+  review completed with one MEDIUM pagination fix and two LOW follow-ups
 
 ## Planning
 
@@ -80,7 +80,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   `planning/sprint-002-slice-3-decision-journal` branch as a Draft PR.
 - Slice 3 implementation remains unauthorized and Not Started.
 - OD-S3-1 through OD-S3-15 were all Open — Owner Decision Required; all
-  resolved by Project Owner on 2026-07-16.
+  resolved by Project Owner on 2026-07-16. Final consistency review
+  completed 2026-07-16 with one MEDIUM and two LOW documentation fixes.
 
 ## Review
 
@@ -194,10 +195,12 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   data model, field rules, dates, Policy Version reference, Confirm transaction,
   Archive/unarchive, Correction model, Audit, PostgreSQL triggers,
   constraints/FKs, concurrency, API, UI, retention, test matrix, dependencies,
-  Definition of Done, and implementation split. PR #10 remains Draft. Design
-  decision changes pending final consistency review. Slice 3 Implementation
-  remains Not Authorized. Slice 3A, 3B, 3C remain Not Started. Merging the
-  Technical Design PR does not authorize Slice 3A. Existing Backlog preserved.
+  Definition of Done, and implementation split. Final consistency review
+  completed: one MEDIUM pagination default fix (§8.12 default 20→50), two LOW
+  follow-ups resolved (action names finality, decision_date boundary tests).
+  PR #10 remains Draft. Slice 3 Implementation remains Not Authorized.
+  Slice 3A, 3B, 3C remain Not Started. Merging the Technical Design PR does
+  not authorize Slice 3A. Existing Backlog preserved.
 
 ## Done
 
@@ -460,3 +463,17 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   Implementation remains Not Authorized. Slice 3A, 3B, 3C remain Not Started.
   Merging the Technical Design PR does not authorize Slice 3A. Existing Backlog
   preserved.
+- 2026-07-16: Final Owner Decision Consistency Review of PR #10 concluded
+  APPROVE WITH ONE MEDIUM FINDING: 14 of 15 ODs fully consistent; 1 MEDIUM
+  (§8.12 pagination default 20 vs §5.6/OD table default 50); 2 LOW (NBF-1:
+  §5.1 AuditEvent action names pending marker; NBF-2: §11.2 missing explicit
+  decision_date boundary test).
+- 2026-07-16: All three consistency review findings revised in the technical
+  design document. M-1 fixed: §8.12 pagination default corrected to 50.
+  NBF-1 resolved: §5.1 action names marked "Accepted for Slice 3
+  implementation design" with explicit finality requirements. NBF-2 resolved:
+  §11.2 test matrix now includes decision_date boundary tests (Schema/API,
+  PostgreSQL, UI). OD-S3-1 through OD-S3-15 remain Resolved — no Owner
+  Decision changed. PR #10 remains Draft. Slice 3 Implementation remains
+  Not Authorized. Slice 3A, 3B, 3C remain Not Started. Design pending final
+  focused re-review. Existing Backlog preserved.
