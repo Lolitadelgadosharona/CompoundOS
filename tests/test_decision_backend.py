@@ -108,6 +108,7 @@ def _ensure_policy_and_version(session: Session) -> tuple:
             version_number=1,
             status="published",
             published_at=now,
+            sealed_at=now,
             objectives=draft.objectives,
             time_horizon=draft.time_horizon,
             liquidity="",
