@@ -25,9 +25,11 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Slice 2A: Done
 - Slice 2B: Investment Policy Backend Workflow and API / Done
 - Slice 2C: Investment Policy Frontend Workflow / Done
-- Slice 3: Technical Design proposed / Implementation Not Authorized
-- Slice 3 Technical Design: Draft PR on planning branch, awaiting review and owner
-  decisions on OD-S3-1 through OD-S3-12
+- Slice 3: Technical Design Owner Decisions Resolved / Implementation Not
+  Authorized
+- Slice 3 Technical Design: Draft PR on planning branch, OD-S3-1 through
+  OD-S3-15 all Resolved by Project Owner — 2026-07-16, design decision
+  changes pending final consistency review
 
 ## Planning
 
@@ -44,7 +46,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   the Decision Journal data model, lifecycle, API, UI, immutability, and
   concurrency patterns without any implementation.
 - Slice 3 implementation remains unauthorized.
-- OD-S3-1 through OD-S3-12 are all Open — Owner Decision Required.
+- OD-S3-1 through OD-S3-15 were all Open — Owner Decision Required; all
+  resolved by Project Owner on 2026-07-16.
 
 ## Backlog
 
@@ -76,7 +79,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Slice 3 Technical Design is proposed on the
   `planning/sprint-002-slice-3-decision-journal` branch as a Draft PR.
 - Slice 3 implementation remains unauthorized and Not Started.
-- OD-S3-1 through OD-S3-12 are all Open — Owner Decision Required.
+- OD-S3-1 through OD-S3-15 were all Open — Owner Decision Required; all
+  resolved by Project Owner on 2026-07-16.
 
 ## Review
 
@@ -173,7 +177,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   snapshot corrections, cursor-based audit pagination, and a three-layer
   immutability design.
 - Twelve Open Decisions (OD-S3-1 through OD-S3-12) are recorded and all marked
-  Open — Owner Decision Required.
+  Open — Owner Decision Required. Three additional Open Decisions added
+  (OD-S3-13 through OD-S3-15) during fix revision, total fifteen.
 - The design compares three data model approaches, eight domain design
   questions, three correction models, and four immutability enforcement layers.
 - No implementation is included; the design covers only proposed schema, API
@@ -181,6 +186,18 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Draft PR on `planning/sprint-002-slice-3-decision-journal` branch; the PR
   remains Draft and is not approved for merge.
 - Merging the design PR does not authorize Slice 3 implementation.
+- 2026-07-16: OD-S3-1 through OD-S3-15 all Resolved by Project Owner. All
+  fifteen owner decisions recorded in the technical design with Selected option,
+  Rejected alternatives, and Resolved date. NBF-1 (Correction trigger status
+  validation) and NBF-2 (DELETE trigger draft-only guard) resolved in design.
+  Global consistency revision applied across all sections: scope, lifecycle,
+  data model, field rules, dates, Policy Version reference, Confirm transaction,
+  Archive/unarchive, Correction model, Audit, PostgreSQL triggers,
+  constraints/FKs, concurrency, API, UI, retention, test matrix, dependencies,
+  Definition of Done, and implementation split. PR #10 remains Draft. Design
+  decision changes pending final consistency review. Slice 3 Implementation
+  remains Not Authorized. Slice 3A, 3B, 3C remain Not Started. Merging the
+  Technical Design PR does not authorize Slice 3A. Existing Backlog preserved.
 
 ## Done
 
@@ -415,3 +432,31 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   PR #10 remains Draft and is not approved for merge. Design remains pending
   independent re-review. Slice 3 Implementation remains Not Authorized.
   Slice 3A, 3B, 3C remain Not Started.
+- 2026-07-16: Incremental Technical Design Re-Review concluded APPROVE WITH
+  NON-BLOCKING FOLLOW-UP. All eight original findings (M-1 through M-5, L-1
+  through L-3) are RESOLVED. Two new LOW non-blocking findings: NBF-1
+  (Correction trigger missing status validation) and NBF-2 (lifecycle trigger
+  missing discarded transition).
+- 2026-07-16: OD-S3-1 through OD-S3-15 all Resolved by Project Owner.
+  OD-S3-1 (Option B: multiple independent Drafts), OD-S3-2 (title, summary,
+  rationale, decision_date required at Confirm), OD-S3-3 (no classification in
+  MVP), OD-S3-4 (DATE, backfill allowed, future forbidden), OD-S3-5 (current
+  Published Version only, lock + re-validate), OD-S3-6 (consume Draft + immutable
+  snapshot), OD-S3-7 (Archive = list hiding, allow unarchive, optional reason),
+  OD-S3-8 (full replacement snapshot), OD-S3-9 (user text/dates correctable,
+  Policy Version/audit/archive metadata not correctable), OD-S3-10 (Decision-
+  filtered audit + Household timeline includes, cursor pagination), OD-S3-11
+  (provisional MVP non-advisory copy), OD-S3-12 (3A/3B/3C split), OD-S3-13
+  (Option A: atomic identity deletion for never-Confirmed discard), OD-S3-14
+  (Option A: per-decision sequential via Decision lock + MAX+1), OD-S3-15
+  (Option A: Archived still allows Correction).
+- 2026-07-16: NBF-1 resolved: Correction INSERT trigger now validates Decision
+  status IN ('confirmed', 'archived') with stable SQLSTATE/error identifiers.
+  NBF-2 resolved: new DELETE guard trigger fn_decision_identity_delete_guard
+  allows DELETE only when status=draft; forbids confirmed/archived DELETE.
+- 2026-07-16: Global consistency revision applied across all design sections.
+  All conditional/Open language replaced with resolved decisions. PR #10 remains
+  Draft. Design decision changes pending final consistency review. Slice 3
+  Implementation remains Not Authorized. Slice 3A, 3B, 3C remain Not Started.
+  Merging the Technical Design PR does not authorize Slice 3A. Existing Backlog
+  preserved.
