@@ -25,11 +25,9 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Slice 2A: Done
 - Slice 2B: Investment Policy Backend Workflow and API / Done
 - Slice 2C: Investment Policy Frontend Workflow / Done
-- Slice 3: Technical Design Owner Decisions Resolved / Implementation Not
-  Authorized
-- Slice 3 Technical Design: Draft PR on planning branch, OD-S3-1 through
-  OD-S3-15 all Resolved by Project Owner — 2026-07-16, final consistency
-  review completed with one MEDIUM pagination fix and two LOW follow-ups
+- Slice 3 Technical Design Gate: Done
+- Slice 3: Implementation Not Authorized / Not Started
+- Slice 3A, 3B, 3C: Not Started
 
 ## Planning
 
@@ -76,12 +74,13 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Slice 2A is Done after independent review and approval for merge.
 - Slice 2B is Done after independent review and approval for merge.
 - Slice 2C is Done after independent review and approval for merge.
-- Slice 3 Technical Design is proposed on the
-  `planning/sprint-002-slice-3-decision-journal` branch as a Draft PR.
+- Slice 3 Technical Design Gate is Done. PR #10 approved for merge.
 - Slice 3 implementation remains unauthorized and Not Started.
-- OD-S3-1 through OD-S3-15 were all Open — Owner Decision Required; all
-  resolved by Project Owner on 2026-07-16. Final consistency review
-  completed 2026-07-16 with one MEDIUM and two LOW documentation fixes.
+- OD-S3-1 through OD-S3-15 all Resolved by Project Owner on 2026-07-16.
+  Four independent review stages completed: initial REQUEST CHANGES,
+  incremental APPROVE WITH NON-BLOCKING FOLLOW-UP, consistency review
+  APPROVE WITH ONE MEDIUM FINDING, final focused APPROVE. All findings
+  resolved. Zero outstanding issues.
 
 ## Review
 
@@ -477,3 +476,11 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   Decision changed. PR #10 remains Draft. Slice 3 Implementation remains
   Not Authorized. Slice 3A, 3B, 3C remain Not Started. Design pending final
   focused re-review. Existing Backlog preserved.
+- 2026-07-16: Final Focused Incremental Re-Review of PR #10 concluded APPROVE.
+  M-1 (pagination default), NBF-1 (action names), NBF-2 (decision_date tests)
+  all confirmed RESOLVED. Zero new findings. No regressions detected. OD-S3-1
+  through OD-S3-15 remain Resolved.
+- 2026-07-16: PR #10 approved for merge. Technical Design Gate Done. Merging
+  the Technical Design PR does not authorize Slice 3A. Slice 3 Implementation
+  remains Not Authorized. Slice 3A, 3B, 3C remain Not Started. The next step
+  can only be decided by the Project Owner.

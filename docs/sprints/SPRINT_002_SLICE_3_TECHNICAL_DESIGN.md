@@ -1,7 +1,7 @@
 # Sprint 002 Slice 3 Technical Design: Decision Journal and Append-Only Corrections
 
 - Date: 2026-07-15
-- Status: **Resolved by Project Owner — 2026-07-16**
+- Status: **Approved Technical Design — Implementation Not Authorized**
 - Authorization: Slice 3 Technical Design Gate only; implementation is **Not Authorized**
 - Branch: `planning/sprint-002-slice-3-decision-journal`
 - Baseline: `main` at `18697b4757be96f82aa1a7f62453a7751e148cc5`
@@ -2089,17 +2089,56 @@ The following are explicitly out of scope for Slice 3:
 
 ## 18. Document Status
 
-This document records **Resolved Owner Decisions** as of 2026-07-16 on the
-`planning/sprint-002-slice-3-decision-journal` branch (PR #10, Draft). It is
-not merged and does not authorize implementation.
+**Approved Technical Design — Implementation Not Authorized**
 
-OD-S3-1 through OD-S3-15 are all Resolved.
+This document records the approved technical design for the Sprint 002 Slice 3
+Decision Journal feature. It was independently reviewed through four review
+stages, revised for all findings, and approved for merge.
 
-Next steps:
+### 18.1 Review History
 
-1. Final consistency review of Owner Decision integration.
-2. Merge approved design into `main` (does not authorize Slice 3A).
-3. Only then: separate decision on whether to authorize Slice 3A.
+1. **Initial Technical Design Review** — REQUEST CHANGES.
+   Five MEDIUM findings (M-1 through M-5) and three LOW findings (L-1 through
+   L-3). All eight findings addressed in fix revision commit
+   `1cecef9ba5cb6f4db06cdf419c41ff5d930c29c6`.
+
+2. **Incremental Technical Design Re-Review** — APPROVE WITH NON-BLOCKING
+   FOLLOW-UP. All eight original findings (M-1 through M-5, L-1 through L-3)
+   resolved. Two new LOW non-blocking findings recorded: NBF-1 (Correction
+   trigger status validation) and NBF-2 (DELETE trigger draft-only guard).
+   Both resolved in subsequent Owner Decision integration.
+
+3. **Owner Decision Consistency Review** — APPROVE WITH ONE MEDIUM FINDING.
+   14 of 15 Owner Decisions fully consistent across all design sections.
+   1 MEDIUM finding (M-1: §8.12 pagination default 20 vs §5.6/OD table
+   default 50) and 2 LOW follow-ups (NBF-1: §5.1 action names pending marker;
+   NBF-2: §11.2 missing explicit decision_date boundary test). All three
+   resolved in fix commit `964bdab27e6ad58421ff27fd0969b13eb87f6e39`.
+
+4. **Final Focused Incremental Re-Review** — APPROVE. M-1, NBF-1, NBF-2 all
+   confirmed RESOLVED. Zero new findings. No regressions.
+
+### 18.2 Owner Decisions
+
+OD-S3-1 through OD-S3-15 are all **Resolved — 2026-07-16**. No Open Owner
+Decisions remain. Resolved decisions must not be reopened without a separate
+approved Sprint.
+
+### 18.3 Implementation Authorization
+
+Merging this technical design into `main` does **not** authorize Slice 3
+implementation. Each implementation slice (3A, 3B, 3C) requires separate
+explicit authorization by the Project Owner.
+
+- Slice 3 Implementation: **Not Authorized**
+- Slice 3A (Decision Persistence and Immutability): **Not Started**
+- Slice 3B (Decision Backend Workflow and API): **Not Started**
+- Slice 3C (Decision Frontend Workflow): **Not Started**
+
+### 18.4 PR Status
+
+- PR #10: approved for merge
+- Technical Design merge does not authorize Slice 3A
 
 ---
 
