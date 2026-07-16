@@ -1,5 +1,74 @@
 # Changelog
 
+## [Unreleased] - Sprint 002 Slice 3A Complete
+
+### Added
+
+- Alembic revision `0003_decision_journal_foundation` creating four Decision
+  Journal tables: `decisions` (stable identity), `decision_drafts`,
+  `decision_confirmed_snapshots`, and `decision_corrections`
+- Five PL/pgSQL trigger functions: identity lifecycle transitions, identity
+  delete guard (draft-only DELETE), confirmed snapshot immutability,
+  correction immutability with status/ownership validation, and deferred
+  commit-time lifecycle consistency enforcement
+- Named CHECK constraints for status values, text lengths, date boundaries,
+  correction numbering, actor, and archive reason on all four tables
+- UNIQUE constraints: at most one Draft per Decision, at most one Confirmed
+  snapshot per Decision, per-Decision sequential correction numbering
+- FK constraints with ON DELETE RESTRICT/NO ACTION for snapshot and correction
+  references; ON DELETE CASCADE for Draft-to-Decision enabling atomic discard
+- Deferred CONSTRAINT TRIGGER on decisions for cross-table draft/snapshot
+  consistency verification at commit time
+- SQLAlchemy ORM models aligned with the migration: Decision, DecisionDraft,
+  DecisionConfirmedSnapshot, DecisionCorrection
+- Comprehensive real-PostgreSQL test suite (60 tests) covering migration
+  lifecycle, schema inspection, data model constraints, lifecycle transitions,
+  discard foundation, snapshot immutability, correction behavior, and trigger
+  inspection
+- ADR 0005 documenting the Decision Journal persistence and immutability
+  foundation
+
+### Boundaries
+
+- Slice 3A adds no Decision service, repository workflow, API endpoint,
+  Pydantic contract, router, or frontend `/decisions` page.
+- No AuditEvent business write workflow, Redis logic, authentication,
+  multi-user, multi-household, recommendation, Guardian, AI, Broker, trading,
+  actual holdings, accounts, or monetary data is included.
+- Slice 3B (Decision Backend Workflow and API): Not Authorized, Not Started.
+- Slice 3C (Decision Frontend Workflow): Not Authorized, Not Started.
+
+### Status
+
+- Sprint 002 remains In Progress. Slice 2A, 2B, 2C remain Done.
+- Slice 3 Technical Design Gate: Done.
+- Slice 3A Decision Journal Persistence and Immutability Foundation: Done.
+- Independent review: initial REQUEST CHANGES (1 BLOCKER), final APPROVE WITH
+  NON-BLOCKING FOLLOW-UP. BLOCKER B1 (deferred trigger coverage gap) resolved
+  with three cross-table deferred CONSTRAINT TRIGGERs and four bypass regression
+  tests. 138 required PostgreSQL tests passed, 0 skipped.
+- PR #11 approved for merge.
+- Slice 3B and Slice 3C: Not Authorized, Not Started.
+
+### Review Summary
+
+- Initial independent review: REQUEST CHANGES with one BLOCKER finding.
+- B1 resolved: deferred trigger coverage gap — original trigger fires only on
+  decisions INSERT, missing UPDATE and child-table mutations that can bypass
+  lifecycle consistency checks. Fixed by adding deferred CONSTRAINT TRIGGERs on
+  decision_drafts (AFTER INSERT OR DELETE) and decision_confirmed_snapshots
+  (AFTER INSERT OR DELETE), expanding decisions trigger to INSERT OR UPDATE, and
+  updating the shared function to extract decision_id from TG_TABLE_NAME and
+  query current database state at COMMIT time instead of relying on stale NEW
+  records.
+- Four bypass regression tests added: cross-transaction UPDATE to confirmed
+  without snapshot, Draft deletion leaving orphan identity, snapshot insertion
+  with retained Draft, and confirmed-to-draft status regression.
+- Final independent review conclusion: APPROVE WITH NON-BLOCKING FOLLOW-UP.
+- All BLOCKER, HIGH, and MEDIUM findings resolved. Zero outstanding issues.
+- Real PostgreSQL test suite: 138 passed, 43 deselected, 0 skipped, 20 warnings.
+- Frontend test suite: 4 files, 62 tests passed (no regressions).
+
 ## [Unreleased] - Sprint 002 Slice 3 Technical Design Gate Complete
 
 ### Added

@@ -112,6 +112,46 @@ Slice 2A persistence design:
 Slice 2C adds no backend module, database change, authentication, recommendation,
 Guardian, AI, Broker, trading, actual-holdings, or Decision Journal behavior.
 
+## Sprint 002 Slice 3A Architecture
+
+Slice 3A extends the persistence foundation with Decision Journal immutability
+without adding a Decision use case or user-facing workflow:
+
+- Alembic revision `0003_decision_journal_foundation` creates four Decision
+  Journal tables on top of the existing Household, Policy, and Audit schema.
+- `decisions` is the stable identity row: `id`, `household_id`, `status`,
+  `created_at`, and optional `archived_at`/`archive_reason`. Status is
+  constrained to `draft`, `confirmed`, or `archived`.
+- `decision_drafts` holds the mutable working draft for each Decision identity.
+  A UNIQUE constraint on `decision_id` enforces at most one Draft per Decision.
+  The Draft-to-Decision FK uses ON DELETE CASCADE to enable atomic discard of
+  never-confirmed identities.
+- `decision_confirmed_snapshots` is the immutable point-in-time record created
+  at Confirm. A BEFORE INSERT OR UPDATE OR DELETE trigger prohibits all
+  modification after insertion. Each snapshot references the current Published
+  InvestmentPolicyVersion via RESTRICT FK.
+- `decision_corrections` is an append-only full-replacement snapshot. A BEFORE
+  trigger validates Decision status (`confirmed` or `archived`), actor
+  (`local-owner`), correction number positivity, and snapshot ownership
+  consistency. UPDATE and DELETE are unconditionally forbidden.
+- Five PL/pgSQL trigger functions enforce lifecycle transitions
+  (`draft→confirmed`, `confirmed→archived`, `archived→confirmed`), delete
+  guards (only `draft` status with no snapshot may be deleted), snapshot
+  immutability, correction validation, and deferred cross-table consistency.
+- A CONSTRAINT TRIGGER (`DEFERRABLE INITIALLY DEFERRED`) on decisions verifies
+  at COMMIT time that `draft` status has a Draft row and no snapshot, while
+  `confirmed`/`archived` status has a snapshot and no Draft.
+- `decision_date` is DATE type with `decision_date <= CURRENT_DATE` enforced by
+  named CHECK constraints on snapshots and corrections.
+- Per-Decision correction numbering uses `UNIQUE(decision_id, correction_number)`.
+  The service computes `MAX+1` under a Decision row lock; the database does not
+  claim to guarantee gapless sequences.
+- SQLAlchemy models mirror the migration. No Decision service, repository
+  workflow, API endpoint, Pydantic contract, router, or frontend is introduced.
+- Real PostgreSQL tests cover migration lifecycle, schema inspection, data model
+  constraints, lifecycle transitions, discard foundation, snapshot immutability,
+  correction behavior, and trigger inspection.
+
 ## Module Boundaries
 
 - `routers/households.py`: four approved HTTP contracts and status mapping

@@ -256,4 +256,8 @@ def test_migration_contains_only_approved_product_tables(postgres_engine) -> Non
         "investment_policy_drafts",
         "investment_policy_version_allocations",
         "investment_policy_versions",
+        "decisions",
+        "decision_drafts",
+        "decision_confirmed_snapshots",
+        "decision_corrections",
     }

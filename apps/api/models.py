@@ -9,6 +9,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Identity,
@@ -357,3 +358,316 @@ class InvestmentPolicyVersionAllocation(Base):
     normalized_asset_class_name: Mapped[str] = mapped_column(Text, nullable=False)
     target_percentage: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
+
+# ---------------------------------------------------------------------------
+# Decision Journal (Slice 3A)
+# ---------------------------------------------------------------------------
+
+
+class Decision(Base):
+    __tablename__ = "decisions"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft', 'confirmed', 'archived')",
+            name="ck_decisions_status_values",
+        ),
+        CheckConstraint(
+            "archive_reason IS NULL OR char_length(archive_reason) <= 4000",
+            name="ck_decisions_archive_reason_length",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    household_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "household_profiles.id",
+            name="fk_decisions_household_id_household_profiles",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    archived_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    archive_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class DecisionDraft(Base):
+    __tablename__ = "decision_drafts"
+    __table_args__ = (
+        CheckConstraint(
+            "char_length(title) <= 500",
+            name="ck_decision_drafts_title_length",
+        ),
+        CheckConstraint(
+            "char_length(decision_summary) <= 8000",
+            name="ck_decision_drafts_decision_summary_length",
+        ),
+        CheckConstraint(
+            "char_length(rationale) <= 8000",
+            name="ck_decision_drafts_rationale_length",
+        ),
+        CheckConstraint(
+            "char_length(alternatives_considered) <= 8000",
+            name="ck_decision_drafts_alternatives_considered_length",
+        ),
+        CheckConstraint(
+            "char_length(risks_and_uncertainties) <= 8000",
+            name="ck_decision_drafts_risks_and_uncertainties_length",
+        ),
+        CheckConstraint(
+            "char_length(evidence_or_sources) <= 8000",
+            name="ck_decision_drafts_evidence_or_sources_length",
+        ),
+        CheckConstraint(
+            "char_length(expected_outcome) <= 4000",
+            name="ck_decision_drafts_expected_outcome_length",
+        ),
+        CheckConstraint(
+            "char_length(review_trigger) <= 4000",
+            name="ck_decision_drafts_review_trigger_length",
+        ),
+        CheckConstraint(
+            "char_length(notes) <= 8000",
+            name="ck_decision_drafts_notes_length",
+        ),
+        CheckConstraint(
+            "revision >= 1",
+            name="ck_decision_drafts_revision_positive",
+        ),
+        UniqueConstraint(
+            "decision_id",
+            name="uq_decision_drafts_decision_id",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    decision_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "decisions.id",
+            name="fk_decision_drafts_decision_id_decisions",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    )
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    decision_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    rationale: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    alternatives_considered: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    risks_and_uncertainties: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    evidence_or_sources: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    expected_outcome: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    review_trigger: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    review_date: Mapped[Optional[Any]] = mapped_column(
+        Date, nullable=True
+    )
+    decision_date: Mapped[Optional[Any]] = mapped_column(
+        Date, nullable=True
+    )
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    revision: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("1")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class DecisionConfirmedSnapshot(Base):
+    __tablename__ = "decision_confirmed_snapshots"
+    __table_args__ = (
+        CheckConstraint(
+            "char_length(title) <= 500",
+            name="ck_decision_snapshots_title_length",
+        ),
+        CheckConstraint(
+            "char_length(decision_summary) <= 8000",
+            name="ck_decision_snapshots_decision_summary_length",
+        ),
+        CheckConstraint(
+            "char_length(rationale) <= 8000",
+            name="ck_decision_snapshots_rationale_length",
+        ),
+        CheckConstraint(
+            "char_length(alternatives_considered) <= 8000",
+            name="ck_decision_snapshots_alternatives_considered_length",
+        ),
+        CheckConstraint(
+            "char_length(risks_and_uncertainties) <= 8000",
+            name="ck_decision_snapshots_risks_and_uncertainties_length",
+        ),
+        CheckConstraint(
+            "char_length(evidence_or_sources) <= 8000",
+            name="ck_decision_snapshots_evidence_or_sources_length",
+        ),
+        CheckConstraint(
+            "char_length(expected_outcome) <= 4000",
+            name="ck_decision_snapshots_expected_outcome_length",
+        ),
+        CheckConstraint(
+            "char_length(review_trigger) <= 4000",
+            name="ck_decision_snapshots_review_trigger_length",
+        ),
+        CheckConstraint(
+            "char_length(notes) <= 8000",
+            name="ck_decision_snapshots_notes_length",
+        ),
+        CheckConstraint(
+            "decision_date <= CURRENT_DATE",
+            name="ck_decision_snapshots_decision_date_not_future",
+        ),
+        UniqueConstraint(
+            "decision_id",
+            name="uq_decision_snapshots_decision_id",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    decision_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "decisions.id",
+            name="fk_decision_snapshots_decision_id_decisions",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    selected_policy_version_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "investment_policy_versions.id",
+            name="fk_decision_snapshots_policy_version_id_policy_versions",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    decision_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    rationale: Mapped[str] = mapped_column(Text, nullable=False)
+    alternatives_considered: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    risks_and_uncertainties: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    evidence_or_sources: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    expected_outcome: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    review_trigger: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    review_date: Mapped[Optional[Any]] = mapped_column(
+        Date, nullable=True
+    )
+    decision_date: Mapped[Any] = mapped_column(
+        Date, nullable=False
+    )
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    confirmed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class DecisionCorrection(Base):
+    __tablename__ = "decision_corrections"
+    __table_args__ = (
+        CheckConstraint(
+            "char_length(title) <= 500",
+            name="ck_decision_corrections_title_length",
+        ),
+        CheckConstraint(
+            "char_length(decision_summary) <= 8000",
+            name="ck_decision_corrections_decision_summary_length",
+        ),
+        CheckConstraint(
+            "char_length(rationale) <= 8000",
+            name="ck_decision_corrections_rationale_length",
+        ),
+        CheckConstraint(
+            "char_length(alternatives_considered) <= 8000",
+            name="ck_decision_corrections_alternatives_considered_length",
+        ),
+        CheckConstraint(
+            "char_length(risks_and_uncertainties) <= 8000",
+            name="ck_decision_corrections_risks_and_uncertainties_length",
+        ),
+        CheckConstraint(
+            "char_length(evidence_or_sources) <= 8000",
+            name="ck_decision_corrections_evidence_or_sources_length",
+        ),
+        CheckConstraint(
+            "char_length(expected_outcome) <= 4000",
+            name="ck_decision_corrections_expected_outcome_length",
+        ),
+        CheckConstraint(
+            "char_length(review_trigger) <= 4000",
+            name="ck_decision_corrections_review_trigger_length",
+        ),
+        CheckConstraint(
+            "char_length(notes) <= 8000",
+            name="ck_decision_corrections_notes_length",
+        ),
+        CheckConstraint(
+            "char_length(correction_reason) BETWEEN 1 AND 8000",
+            name="ck_decision_corrections_correction_reason_length",
+        ),
+        CheckConstraint(
+            "decision_date <= CURRENT_DATE",
+            name="ck_decision_corrections_decision_date_not_future",
+        ),
+        CheckConstraint(
+            "correction_number >= 1",
+            name="ck_decision_corrections_correction_number_positive",
+        ),
+        CheckConstraint(
+            "actor = 'local-owner'",
+            name="ck_decision_corrections_actor_local_owner",
+        ),
+        UniqueConstraint(
+            "decision_id",
+            "correction_number",
+            name="uq_decision_corrections_decision_correction_number",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    decision_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "decisions.id",
+            name="fk_decision_corrections_decision_id_decisions",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    corrected_entry_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "decision_confirmed_snapshots.id",
+            name="fk_decision_corrections_corrected_entry_id_snapshots",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    correction_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    correction_reason: Mapped[str] = mapped_column(Text, nullable=False)
+    actor: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'local-owner'")
+    )
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    decision_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    rationale: Mapped[str] = mapped_column(Text, nullable=False)
+    alternatives_considered: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    risks_and_uncertainties: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    evidence_or_sources: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    expected_outcome: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    review_trigger: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    review_date: Mapped[Optional[Any]] = mapped_column(
+        Date, nullable=True
+    )
+    decision_date: Mapped[Any] = mapped_column(
+        Date, nullable=False
+    )
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
