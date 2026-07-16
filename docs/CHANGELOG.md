@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] - Sprint 002 Slice 3B In Review
+## [Unreleased] - Sprint 002 Slice 3B Complete
 
 ### Added
 
@@ -37,8 +37,10 @@
 
 ### Status
 
-- Sprint 002 remains In Progress. Slice 2A, 2B, 2C, 3A remain Done.
-- Slice 3B Decision Journal Backend Workflow and API: In Review.
+- Sprint 002 remains In Progress. Slice 2A, 2B, 2C, 3A, 3B remain Done.
+- Slice 3B Decision Journal Backend Workflow and API: Done.
+- CI: 6/6 checks pass (push + pull_request × infrastructure/backend/frontend),
+  302 tests total (102 non-PostgreSQL + 138 PostgreSQL + 62 frontend).
 - Slice 3C: Not Authorized, Not Started.
 
 ## [Unreleased] - Sprint 002 Slice 3A Complete

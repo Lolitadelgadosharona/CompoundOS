@@ -27,7 +27,7 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Slice 2C: Investment Policy Frontend Workflow / Done
 - Slice 3 Technical Design Gate: Done
 - Slice 3A: Decision Journal Persistence and Immutability Foundation / Done
-- Slice 3B: Decision Journal Backend Workflow and API / In Review
+- Slice 3B: Decision Journal Backend Workflow and API / Done
 - Slice 3C: Not Authorized / Not Started
 
 ## Planning
@@ -90,7 +90,7 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   incremental APPROVE WITH NON-BLOCKING FOLLOW-UP, consistency review
   APPROVE WITH ONE MEDIUM FINDING, final focused APPROVE. All findings
   resolved. Zero outstanding issues.
-- Sprint 002 Slice 3B Decision Journal Backend Workflow and API is in Review.
+- Sprint 002 Slice 3B Decision Journal Backend Workflow and API is Done.
   Slice 3B implements twelve Decision Journal API endpoints: create Decision
   Draft, list Decisions, read/update/discard Draft, confirm Draft, read detail
   with original/effective snapshots, archive/unarchive, append Correction,
@@ -98,9 +98,10 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   repository queries, atomic service transactions with Policy→Decision→Draft
   lock ordering, append-only Corrections with per-Decision sequential numbering,
   atomic never-Confirmed Draft discard with identity deletion, and redacted
-  AuditEvents.
+  AuditEvents. CI: 6/6 checks pass, 302 tests total.
 - Slice 3B adds no frontend, migration, dependency, Compose, CI, authentication,
   recommendation, Guardian, AI, Broker, trading, or Slice 3C behavior.
+  Slice 3C: Not Authorized, Not Started.
 
 ## Review
 
@@ -574,4 +575,10 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   authentication, recommendation, Guardian, AI, Broker, trading, or Slice 3C
   behavior.
 - 2026-07-16: Slice 3B enters Review. Sprint 002 remains In Progress. Slice 3C
+  remains Not Authorized and Not Started.
+- 2026-07-16: Slice 3B review completed — APPROVE WITH NON-BLOCKING FOLLOW-UP.
+  Review findings (M-1, L-1 through L-5) and CI test failures (Policy Version
+  trigger interaction, autobegin transaction conflict, missing confirmation
+  field) resolved. CI: 6/6 checks pass, 302 tests (102 non-PG + 138 PG +
+  62 frontend). Slice 3B is Done. Sprint 002 remains In Progress. Slice 3C
   remains Not Authorized and Not Started.
