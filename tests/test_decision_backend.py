@@ -6,7 +6,7 @@ corrections, audit events, concurrency, rollback, and error mapping.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date
 from uuid import uuid4
 
 import pytest
@@ -26,10 +26,8 @@ from apps.api.models import (
     AuditEvent,
     Decision,
     HouseholdProfile,
-    InvestmentPolicyVersion,
 )
 from apps.api.repositories.decisions import (
-    get_current_published_version,
     get_draft,
     get_household_id,
     get_snapshot,
@@ -78,55 +76,61 @@ def _ensure_household(engine: Engine) -> None:
 
 
 def _ensure_policy_and_version(session: Session) -> tuple:
-    """Ensure a published Policy Version exists for confirm tests."""
-    from apps.api.repositories.households import get_current_household
-    from apps.api.repositories.policies import (
-        add_draft as add_policy_draft,
+    """Ensure a published Policy Version exists for confirm tests.
+
+    Uses Policy service functions which wrap session.begin() for proper
+    transaction management required by the version immutability trigger.
+    """
+    from apps.api.policy_schemas import (
+        AllocationItemInput,
+        AllocationReplaceRequest,
+        PolicyDraftUpdate,
+        PublishPolicyDraftRequest,
     )
-    from apps.api.repositories.policies import (
-        add_policy,
-        get_policy,
+    from apps.api.repositories.households import get_current_household
+    from apps.api.repositories.policies import get_current_published, get_policy
+    from apps.api.services.policies import (
+        create_policy,
+        publish_draft,
+        replace_allocations,
+        update_draft_text,
     )
 
     household = get_current_household(session)
     policy = get_policy(session, household.id)
     if policy is None:
-        policy = add_policy(session, household.id)
-        session.flush()
-
-    published = get_current_published_version(session, policy.id)
-    if published is None:
-        draft = add_policy_draft(session, policy.id)
-        draft.objectives = "Test objectives"
-        draft.time_horizon = "Long term"
-        draft.decision_process = "Structured"
-        session.flush()
-
-        now = datetime.now(timezone.utc)
-        published = InvestmentPolicyVersion(
-            policy_id=policy.id,
-            version_number=1,
-            status="unsealed",
-            objectives=draft.objectives,
-            time_horizon=draft.time_horizon,
-            liquidity="",
-            diversification="",
-            contribution_policy="",
-            rebalancing_policy="",
-            prohibited_assets="",
-            leverage_policy="",
-            decision_process=draft.decision_process,
-            notes="",
+        policy, draft, _ = create_policy(session)
+        # rev 1 → update → rev 2
+        update_draft_text(
+            session,
+            PolicyDraftUpdate(
+                expected_revision=1,
+                objectives="Test objectives",
+                time_horizon="Long term",
+                decision_process="Structured",
+            ),
         )
-        session.add(published)
-        session.flush()
-        published.status = "published"
-        published.published_at = now
-        published.sealed_at = now
-        session.flush()
-        session.delete(draft)
-        session.flush()
+        # rev 2 → replace allocations → rev 3
+        replace_allocations(
+            session,
+            AllocationReplaceRequest(
+                expected_revision=2,
+                items=[
+                    AllocationItemInput(
+                        asset_class_name="Equities",
+                        target_percentage="100.00",
+                    ),
+                ],
+            ),
+        )
+        # publish with rev 3
+        version, _ = publish_draft(
+            session,
+            PublishPolicyDraftRequest(expected_revision=3),
+        )
+        return policy, version
 
+    published = get_current_published(session, policy.id)
     return policy, published
 
 
