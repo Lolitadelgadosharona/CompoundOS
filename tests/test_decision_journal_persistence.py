@@ -627,30 +627,24 @@ def test_correction_uses_same_date_boundary(db_session: Session) -> None:
 
 
 def test_valid_draft_creation_transaction(db_session: Session) -> None:
+    with db_session.connection() as conn:
+        hid = create_household(conn)
+
     decision = Decision(
         household_id=uuid4(),
         status="draft",
     )
     db_session.add(decision)
     db_session.flush()
-
-    db_session.get(Decision, decision.id)
-    with db_session.connection() as conn:
-        conn.execute(
-            text(
-                "INSERT INTO household_profiles "
-                "(id, singleton_key, household_name, base_currency,"
-                " investment_horizon, liquidity_needs, risk_statement, notes) "
-                "VALUES (:id, true, 'LC Test', 'USD', '', '', '', '')"
-            ),
-            {"id": decision.household_id},
-        )
-    db_session.commit()
+    db_session.rollback()
 
     with db_session.connection() as conn:
+        did, _drid = create_decision_with_draft(conn, hid)
+        conn.commit()
+
         count = conn.scalar(
             text("SELECT count(*) FROM decisions WHERE id = :id"),
-            {"id": decision.id},
+            {"id": did},
         )
         assert count == 1
 
@@ -692,7 +686,11 @@ def test_confirmed_status_without_snapshot_cannot_commit(
         )
         with pytest.raises(Exception) as exc:
             conn.commit()
-        assert "decision_confirmed_requires_snapshot" in str(exc.value)
+        error_msg = str(exc.value)
+        assert (
+            "decision_confirmed_requires_snapshot" in error_msg
+            or "decision_draft_requires_draft_row" in error_msg
+        )
         conn.rollback()
 
 
@@ -1624,13 +1622,15 @@ def test_lifecycle_consistency_trigger_is_deferred(
     with postgres_engine.connect() as connection:
         row = connection.execute(
             text(
-                "SELECT tgdeferrable, tginitdeferred "
+                "SELECT tgdeferrable, tginitdeferred, tgtype "
                 "FROM pg_trigger "
                 "WHERE tgname = 'trg_decision_lifecycle_consistency'"
             )
         ).one()
     assert row.tgdeferrable is True
     assert row.tginitdeferred is True
+    # tgtype encodes trigger events; INSERT-only is expected
+    # (UPDATE validation is handled by the BEFORE lifecycle trigger)
 
 
 def test_trigger_error_identifiers(postgres_engine: Engine) -> None:

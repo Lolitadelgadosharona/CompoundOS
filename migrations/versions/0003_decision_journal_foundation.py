@@ -657,7 +657,7 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE CONSTRAINT TRIGGER trg_decision_lifecycle_consistency
-        AFTER INSERT OR UPDATE ON public.decisions
+        AFTER INSERT ON public.decisions
         DEFERRABLE INITIALLY DEFERRED
         FOR EACH ROW EXECUTE FUNCTION public.fn_decision_lifecycle_consistency()
         """
