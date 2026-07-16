@@ -1,5 +1,56 @@
 # Changelog
 
+## [Unreleased] - Sprint 002 Slice 3 Technical Design Gate Complete
+
+### Added
+
+- Decision Journal Technical Design document covering Approach C (Stable
+  Decision Identity + Draft + Immutable Confirmed Snapshot + Append-Only
+  Correction) for the Decision Journal data model
+- Fifteen Owner Decisions (OD-S3-1 through OD-S3-15) all Resolved by Project
+  Owner — 2026-07-16, covering: multiple independent Drafts, Confirm required
+  fields (mechanical validation only), no classification/tags, DATE type with
+  future decision_date forbidden, current Published Policy Version reference
+  only, 13-step Confirm transaction consuming Draft, Archive/unarchive
+  lifecycle, full replacement Correction snapshots, correctable field set,
+  Decision-filtered audit with Household timeline inclusion, provisional
+  non-advisory UI copy, 3A/3B/3C implementation split, atomic never-Confirmed
+  Draft discard with identity deletion, per-Decision sequential Correction
+  numbering via MAX+1, and Archived Decision Correction eligibility
+- Key design boundaries: Policy → Decision → Draft lock order, immutable
+  Confirmed snapshot, atomic never-confirmed Draft discard, full replacement
+  Corrections, per-Decision Correction numbering, Archive/unarchive,
+  Archived Correction eligibility, Decision-filtered audit, Household
+  timeline inclusion
+- Seven AuditEvent action names following the existing Policy audit pattern:
+  `decision.draft.created`, `decision.draft.updated`,
+  `decision.draft.discarded`, `decision.confirmed`, `decision.archived`,
+  `decision.unarchived`, `decision.correction.appended`
+- Cursor-based Decision audit pagination: `before_sequence_number`, default 50,
+  max 100, DB DESC / API ASC
+
+### Boundaries
+
+- No schema, migration, backend, API, frontend, or tests implementation is
+  included. This is a design-only document.
+- Merging the Technical Design does not authorize Slice 3 implementation.
+- Slice 3A (Decision Persistence and Immutability): Not Started.
+- Slice 3B (Decision Backend Workflow and API): Not Started.
+- Slice 3C (Decision Frontend Workflow): Not Started.
+- The Decision Journal records only what the user types, confirms, archives,
+  and corrects. No recommendation, evaluation, scoring, suitability, AI,
+  Guardian, Broker, market data, actual holdings, or trading behavior.
+
+### Status
+
+- Sprint 002 remains In Progress. Slice 2A, 2B, 2C remain Done.
+- Slice 3 Technical Design Gate: Done.
+- Independent review passed through four stages: initial REQUEST CHANGES
+  (5 MEDIUM, 3 LOW), incremental APPROVE WITH NON-BLOCKING FOLLOW-UP,
+  consistency review APPROVE WITH ONE MEDIUM FINDING, final focused APPROVE.
+- All review findings resolved. Zero outstanding issues.
+- PR #10 approved for merge.
+
 ## [Unreleased] - Sprint 002 Slice 2C Complete
 
 ### Added
