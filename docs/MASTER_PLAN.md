@@ -25,7 +25,9 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Slice 2A: Done
 - Slice 2B: Investment Policy Backend Workflow and API / Done
 - Slice 2C: Investment Policy Frontend Workflow / Done
-- Slice 3: Not authorized / Not Started
+- Slice 3: Technical Design proposed / Implementation Not Authorized
+- Slice 3 Technical Design: Draft PR on planning branch, awaiting review and owner
+  decisions on OD-S3-1 through OD-S3-12
 
 ## Planning
 
@@ -38,7 +40,11 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Slice 2A implementation was separately authorized on 2026-07-14.
 - Slice 2B implementation was separately authorized on 2026-07-14.
 - Slice 2C implementation was separately authorized on 2026-07-14.
-- Slice 3 remains unauthorized.
+- Slice 3 Technical Design Gate authorized on 2026-07-15. The design proposes
+  the Decision Journal data model, lifecycle, API, UI, immutability, and
+  concurrency patterns without any implementation.
+- Slice 3 implementation remains unauthorized.
+- OD-S3-1 through OD-S3-12 are all Open — Owner Decision Required.
 
 ## Backlog
 
@@ -67,7 +73,10 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Slice 2A is Done after independent review and approval for merge.
 - Slice 2B is Done after independent review and approval for merge.
 - Slice 2C is Done after independent review and approval for merge.
-- Slice 3 remains unauthorized and Not Started.
+- Slice 3 Technical Design is proposed on the
+  `planning/sprint-002-slice-3-decision-journal` branch as a Draft PR.
+- Slice 3 implementation remains unauthorized and Not Started.
+- OD-S3-1 through OD-S3-12 are all Open — Owner Decision Required.
 
 ## Review
 
@@ -158,6 +167,20 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   Decision Journal, Guardian, AI, Broker, market, holding, recommendation, or
   trading behavior.
 - Slice 3 remains unauthorized and Not Started.
+- Sprint 002 Slice 3 Technical Design Gate authorized on 2026-07-15.
+- The technical design proposes Approach C (Stable Decision Identity + Draft +
+  Confirmed Version) for the Decision Journal data model, with full replacement
+  snapshot corrections, cursor-based audit pagination, and a three-layer
+  immutability design.
+- Twelve Open Decisions (OD-S3-1 through OD-S3-12) are recorded and all marked
+  Open — Owner Decision Required.
+- The design compares three data model approaches, eight domain design
+  questions, three correction models, and four immutability enforcement layers.
+- No implementation is included; the design covers only proposed schema, API
+  contracts, UI states, concurrency patterns, and test matrices.
+- Draft PR on `planning/sprint-002-slice-3-decision-journal` branch; the PR
+  remains Draft and is not approved for merge.
+- Merging the design PR does not authorize Slice 3 implementation.
 
 ## Done
 
@@ -362,3 +385,15 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - 2026-07-15: PR #9 final independent incremental review concluded APPROVE with
   zero new findings.
 - 2026-07-15: Pull request #9 approved for merge and squash-merged into main.
+- 2026-07-15: Sprint 002 Slice 3 Technical Design Gate authorized. The design
+  covers Decision Journal data model, lifecycle, API, UI, immutability,
+  concurrency, audit, and open decisions. No implementation is authorized.
+- 2026-07-15: Technical design recommends Approach C (Stable Decision Identity +
+  Draft + Confirmed Version) with full replacement snapshot corrections.
+- 2026-07-15: Twelve Open Decisions (OD-S3-1 through OD-S3-12) recorded, all
+  marked Open — Owner Decision Required.
+- 2026-07-15: Draft PR created on planning/sprint-002-slice-3-decision-journal
+  branch. The PR remains Draft and is not approved for merge.
+- 2026-07-15: Merging the Slice 3 Technical Design does not authorize Slice 3
+  implementation. Each implementation slice (3A, 3B, 3C) requires separate
+  explicit authorization.
