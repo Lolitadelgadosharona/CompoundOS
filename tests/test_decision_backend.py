@@ -129,7 +129,7 @@ def _ensure_policy_and_version(session: Session) -> tuple:
         # publish with rev 3
         version, _ = publish_draft(
             session,
-            PublishPolicyDraftRequest(expected_revision=3),
+            PublishPolicyDraftRequest(expected_revision=3, confirmation=True),
         )
         return policy, version
 
