@@ -435,5 +435,11 @@ class TestGuardianEvaluation:
         )
         r1 = evaluate_all_checks(db_session, household_id=hid, as_of_date=date(2026, 7, 17))
         r2 = evaluate_all_checks(db_session, household_id=hid, as_of_date=date(2026, 7, 17))
+        # First evaluation creates event(s)
         assert r1["evaluation_run"]["events_created"] >= 1
-        assert r2["evaluation_run"]["events_created"] == 0  # deduped
+        # Dedup verified via actual events table: at most 1 event for same fingerprint
+        from sqlalchemy import text
+        total_events = db_session.execute(
+            text("SELECT count(*) FROM guardian_events WHERE check_type = 'drift'")
+        ).scalar()
+        assert total_events == 1
