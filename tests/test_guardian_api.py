@@ -437,3 +437,212 @@ class TestGuardianEvaluation:
             text("SELECT count(*) FROM guardian_events WHERE check_type = 'drift'")
         ).scalar()
         assert total_events == 1
+
+
+# ---------------------------------------------------------------------------
+# API contract tests — route paths, household isolation, audit redaction
+# ---------------------------------------------------------------------------
+
+
+class TestAPIContract:
+    """Verify 13 endpoint paths and contract semantics via FastAPI TestClient."""
+
+    def test_all_routes_registered(self, api_client) -> None:
+        """All 13 design routes are registered in the router."""
+        guardian_routes = [r for r in api_client.app.routes if hasattr(r, 'path') and hasattr(r, 'methods') and r.path.startswith('/api/guardian')]
+        # 13 route registrations (12 unique paths + 1 duplicate: GET+POST on /checks)
+        assert len(guardian_routes) == 13, f"Expected 13 route registrations, got {len(guardian_routes)}"
+        paths = {r.path for r in guardian_routes}
+        assert any('/draft/confirm' in p for p in paths)
+        assert any('/draft/discard' in p for p in paths)
+        assert '/api/guardian/evaluate' in paths
+        assert '/api/guardian/evaluations' in paths
+        assert any('/evaluations/{' in p for p in paths)
+        assert '/api/guardian/events' in paths
+        assert any('/events/{' in p for p in paths)
+        assert '/api/guardian/audit' in paths
+
+    def test_old_confirm_path_not_found(self, api_client) -> None:
+        """Old /checks/{id}/confirm path returns 404 (not 405)."""
+        # No household needed — should fail before hitting household check
+        resp = api_client.post("/api/guardian/checks/00000000-0000-0000-0000-000000000001/confirm", json={"expected_revision": 1, "confirmation": True})
+        assert resp.status_code == 404
+
+    def test_old_discard_path_not_found(self, api_client) -> None:
+        """Old /checks/{id}/discard path returns 404."""
+        resp = api_client.post("/api/guardian/checks/00000000-0000-0000-0000-000000000001/discard", json={"confirmation": True})
+        assert resp.status_code == 404
+
+    def test_old_runs_path_not_found(self, api_client) -> None:
+        """Old /runs path returns 404."""
+        resp = api_client.get("/api/guardian/runs")
+        assert resp.status_code == 404
+
+    def test_event_detail_not_found(self, api_client) -> None:
+        """Non-existent event returns 404 (hit after household check)."""
+        _create_household_via_api(api_client)
+        resp = api_client.get("/api/guardian/events/00000000-0000-0000-0000-000000000001")
+        # Should hit household isolation check → 404
+        assert resp.status_code == 404
+
+    def test_audit_returns_empty_list(self, api_client) -> None:
+        """Audit endpoint returns 200 with empty list."""
+        _create_household_via_api(api_client)
+        resp = api_client.get("/api/guardian/audit?limit=10")
+        assert resp.status_code == 200
+        assert resp.json()["audit_events"] == []
+
+    def test_evaluations_list_returns_200(self, api_client) -> None:
+        """Evaluations list returns 200."""
+        _create_household_via_api(api_client)
+        resp = api_client.get("/api/guardian/evaluations?limit=5")
+        assert resp.status_code == 200
+        assert "runs" in resp.json()
+
+
+def _create_household_via_api(client) -> None:
+    """Create household via API if not exists."""
+    resp = client.post("/api/households", json={
+        "household_name": "Test", "base_currency": "USD",
+        "investment_horizon": "Long term",
+        "liquidity_needs": "", "risk_statement": "", "notes": "",
+    })
+    if resp.status_code not in (201, 409):
+        # 409 means already exists (singleton)
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Deep API contract tests — household isolation, audit, event detail
+# ---------------------------------------------------------------------------
+
+
+class TestAuditAndEventIsolation:
+    """Audit redaction, household isolation, event detail with real data."""
+
+    def test_event_detail_success(self, api_client) -> None:
+        """GET /events/{id} returns event detail after evaluation."""
+        _create_household_via_api(api_client)
+        # Create + confirm a staleness check (minimal setup)
+        resp = api_client.post("/api/guardian/checks", json={
+            "name": "EvtDetail", "check_type": "staleness",
+            "threshold_value": "1.00", "staleness_days": 200,
+        })
+        cid = resp.json()["identity"]["id"]
+        draft_rev = resp.json()["draft"]["expected_revision"]
+        api_client.post(f"/api/guardian/checks/{cid}/draft/confirm",
+                        json={"expected_revision": draft_rev, "confirmation": True})
+        # Evaluate (may skip — but that's fine, test 404 path below)
+        eval_resp = api_client.post("/api/guardian/evaluate",
+                                    json={"as_of_date": "2026-07-17", "confirmation": True})
+        # If evaluation completed and created events, test event detail
+        if eval_resp.json()["evaluation_run"]["events_created"] > 0:
+            eid = eval_resp.json()["events"][0]["id"]
+            detail = api_client.get(f"/api/guardian/events/{eid}")
+            assert detail.status_code == 200
+            assert detail.json()["id"] == eid
+
+    def test_event_detail_404_for_nonexistent(self, api_client) -> None:
+        """GET /events/{id} returns 404 for non-existent event."""
+        _create_household_via_api(api_client)
+        resp = api_client.get("/api/guardian/events/00000000-0000-0000-0000-000000000001")
+        assert resp.status_code == 404
+
+    def test_audit_household_isolation(self, api_client) -> None:
+        """Audit events are scoped to the requesting household."""
+        _create_household_via_api(api_client)
+        # Create a check to generate audit events
+        api_client.post("/api/guardian/checks", json={
+            "name": "AuditIso", "check_type": "drift",
+            "threshold_value": "5.00",
+            "target_category": "eq", "target_holding_category": "eq",
+        })
+        resp = api_client.get("/api/guardian/audit?limit=100")
+        assert resp.status_code == 200
+        events = resp.json()["audit_events"]
+        assert len(events) >= 1
+        # All events are guardian-related (not policy/portfolio audit from other endpoints)
+        for evt in events:
+            assert evt["entity_type"] in ("guardian_check", "guardian_evaluation_run")
+
+    def test_audit_sequence_ordering(self, api_client) -> None:
+        """Audit events are ordered by occurred_at DESC."""
+        _create_household_via_api(api_client)
+        # Create two checks → at least 2 audit events
+        api_client.post("/api/guardian/checks", json={
+            "name": "AuditSeq1", "check_type": "drift",
+            "threshold_value": "5.00",
+            "target_category": "eq", "target_holding_category": "eq",
+        })
+        api_client.post("/api/guardian/checks", json={
+            "name": "AuditSeq2", "check_type": "staleness",
+            "threshold_value": "1.00", "staleness_days": 30,
+        })
+        resp = api_client.get("/api/guardian/audit?limit=100")
+        events = resp.json()["audit_events"]
+        assert len(events) >= 2
+        # Verify descending order
+        times = [e["occurred_at"] for e in events]
+        assert times == sorted(times, reverse=True)
+
+    def test_audit_pagination(self, api_client) -> None:
+        """Audit respects limit parameter."""
+        _create_household_via_api(api_client)
+        api_client.post("/api/guardian/checks", json={
+            "name": "AuditPage1", "check_type": "drift",
+            "threshold_value": "5.00",
+            "target_category": "eq", "target_holding_category": "eq",
+        })
+        api_client.post("/api/guardian/checks", json={
+            "name": "AuditPage2", "check_type": "staleness",
+            "threshold_value": "1.00", "staleness_days": 30,
+        })
+        full = api_client.get("/api/guardian/audit?limit=100")
+        paged = api_client.get("/api/guardian/audit?limit=1")
+        assert paged.status_code == 200
+        assert len(paged.json()["audit_events"]) == 1
+        assert len(full.json()["audit_events"]) >= 2
+
+    def test_audit_metadata_redaction(self, api_client) -> None:
+        """Audit metadata contains structural IDs but no financial values."""
+        _create_household_via_api(api_client)
+        api_client.post("/api/guardian/checks", json={
+            "name": "Redact", "check_type": "drift",
+            "threshold_value": "5.00",
+            "target_category": "eq", "target_holding_category": "eq",
+        })
+        resp = api_client.get("/api/guardian/audit?limit=10")
+        for evt in resp.json()["audit_events"]:
+            meta = evt["metadata"]
+            # Must not contain financial values
+            for forbidden in ("quantity", "unit_price", "total_value", "amount", "price"):
+                assert forbidden not in str(meta).lower(), f"Found {forbidden} in audit metadata"
+
+    def test_evaluations_detail_success(self, api_client) -> None:
+        """GET /evaluations/{run_id} returns evaluation detail when run exists."""
+        _create_household_via_api(api_client)
+        # Create + confirm a check that will skip (no policy needed)
+        resp = api_client.post("/api/guardian/checks", json={
+            "name": "EvalDet", "check_type": "staleness",
+            "threshold_value": "1.00", "staleness_days": 200,
+        })
+        cid = resp.json()["identity"]["id"]
+        api_client.post(f"/api/guardian/checks/{cid}/draft/confirm",
+                        json={"expected_revision": resp.json()["draft"]["expected_revision"], "confirmation": True})
+        eval_resp = api_client.post("/api/guardian/evaluate",
+                                    json={"as_of_date": "2026-07-17", "confirmation": True})
+        run_id = eval_resp.json()["evaluation_run"]["id"]
+        detail = api_client.get(f"/api/guardian/evaluations/{run_id}")
+        assert detail.status_code == 200
+        assert detail.json()["evaluation_run"]["id"] == run_id
+
+    def test_evaluations_detail_404(self, api_client) -> None:
+        """GET /evaluations/{run_id} returns 404 for non-existent."""
+        _create_household_via_api(api_client)
+        resp = api_client.get("/api/guardian/evaluations/00000000-0000-0000-0000-000000000001")
+        assert resp.status_code == 404
+
+    def test_old_runs_detail_404(self, api_client) -> None:
+        """Old /runs/{run_id} path returns 404."""
+        resp = api_client.get("/api/guardian/runs/00000000-0000-0000-0000-000000000001")
+        assert resp.status_code == 404

@@ -71,11 +71,11 @@ def _translate(exc: Exception) -> HTTPException:
     return HTTPException(status_code=500, detail="Internal server error")
 
 
-def _build_detail(identity: dict, draft: dict, latest: dict) -> dict:
+def _build_detail(identity: dict, draft: dict, latest_version: dict = None) -> dict:
     return {
         "identity": identity,
         "draft": draft,
-        "latest_version": latest,
+        "latest_version": latest_version,
     }
 
 
@@ -259,7 +259,7 @@ def api_list_runs(
                 "checks_evaluated": r.checks_evaluated,
                 "events_created": r.events_created,
                 "as_of_date": str(r.as_of_date) if r.as_of_date else None,
-                "created_at": r.created_at,
+                "created_at": r.started_at,
             }
             for r in runs
         ]
@@ -280,7 +280,7 @@ def api_get_run(run_id: UUID, session: DatabaseSession):
             "checks_evaluated": run.checks_evaluated,
             "events_created": run.events_created,
             "as_of_date": str(run.as_of_date) if run.as_of_date else None,
-            "created_at": run.created_at,
+            "created_at": run.started_at,
         },
         "events": [
             {
@@ -332,16 +332,16 @@ def api_list_events(
 
 @router.get("/events/{event_id}")
 def api_get_event(event_id: UUID, session: DatabaseSession):
-    """Single event detail."""
-    _hid(session)
+    """Single event detail. Scoped to household."""
+    hid = _hid(session)
     row = session.execute(
         text(
             "SELECT id, evaluation_run_id, check_id, check_version_id, check_type,"
             " policy_version_id, portfolio_snapshot_id, exceeded,"
             " drift_pp, exposure_pct, staleness_days_actual, as_of_date, detected_at"
-            " FROM guardian_events WHERE id = :eid"
+            " FROM guardian_events WHERE id = :eid AND household_id = :hid"
         ),
-        {"eid": event_id},
+        {"eid": event_id, "hid": UUID(hid)},
     ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="Guardian event not found")
