@@ -12,42 +12,17 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 
 ## Current Sprint
 
-- Sprint 001: Project Foundation
-- Status: Done
-- Scope: final foundation verification, frontend health test, and Docker-based
-  local development configuration
-- Sprint 002: In Progress
-- Completed work: Implementation Slice 1 — Household and Persistence Foundation
-- Completed work: Implementation Slice 2A — Investment Policy Persistence and
-  Immutability Foundation
-- Slice 2 Technical Design: Approved
-- Current implementation authorization: Slice 2C — Investment Policy Frontend Workflow
-- Slice 2A: Done
-- Slice 2B: Investment Policy Backend Workflow and API / Done
-- Slice 2C: Investment Policy Frontend Workflow / Done
-- Slice 3 Technical Design Gate: Done
-- Slice 3A: Decision Journal Persistence and Immutability Foundation / Done
-- Slice 3B: Decision Journal Backend Workflow and API / Done
-- Slice 3C: Not Authorized / Not Started
-
-## Planning
-
-- Sprint 002 selected direction: Household Investment Policy + Decision Journal.
-- Planning pull request #4 completed independent planning review and is approved
-  for merge.
-- Sprint 002 Slice 1 planning and implementation are complete; later
-  implementation slices remain unauthorized.
-- Sprint 002 Slice 2 technical design is authorized for planning and review only.
-- Slice 2A implementation was separately authorized on 2026-07-14.
-- Slice 2B implementation was separately authorized on 2026-07-14.
-- Slice 2C implementation was separately authorized on 2026-07-14.
-- Slice 3 Technical Design Gate authorized on 2026-07-15. The design proposes
-  the Decision Journal data model, lifecycle, API, UI, immutability, and
-  concurrency patterns without any implementation.
-- Slice 3 implementation remains unauthorized.
-- Slice 3B implementation was separately authorized on 2026-07-16.
-- OD-S3-1 through OD-S3-15 were all Open — Owner Decision Required; all
-  resolved by Project Owner on 2026-07-16.
+- Sprint 001: Project Foundation — Done
+- Sprint 002: Household Investment Policy + Decision Journal — Done
+  - Slice 1: Household and Persistence Foundation — Done
+  - Slice 2A: Investment Policy Persistence Foundation — Done
+  - Slice 2B: Investment Policy Backend Workflow and API — Done
+  - Slice 2C: Investment Policy Frontend Workflow — Done
+  - Slice 3A: Decision Journal Persistence Foundation — Done
+  - Slice 3B: Decision Journal Backend Workflow and API — Done
+  - Slice 3C: Decision Journal Frontend — Done
+  - Safe Autopilot Foundation — Done
+- Sprint 003: Not Authorized / Not Started
 
 ## Backlog
 
@@ -72,171 +47,7 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 
 ## In Progress
 
-- Sprint 002 remains In Progress.
-- Slice 2A is Done after independent review and approval for merge.
-- Slice 2B is Done after independent review and approval for merge.
-- Slice 2C is Done after independent review and approval for merge.
-- Slice 3 Technical Design Gate is Done. PR #10 approved for merge.
-- Slice 3A Decision Journal Persistence and Immutability Foundation is Done after
-  independent review and approval for merge. Three deferred CONSTRAINT TRIGGERs
-  enforce cross-table lifecycle consistency at COMMIT time: decisions INSERT/UPDATE,
-  decision_drafts INSERT/DELETE, decision_confirmed_snapshots INSERT/DELETE.
-  BLOCKER B1 (deferred trigger coverage gap) was resolved with multi-table trigger
-  events and a shared function that queries current database state at COMMIT time
-  instead of relying on stale NEW records. Four bypass regression tests added.
-  Slice 3B and Slice 3C remain Not Authorized and Not Started.
-- OD-S3-1 through OD-S3-15 all Resolved by Project Owner on 2026-07-16.
-  Four independent review stages completed: initial REQUEST CHANGES,
-  incremental APPROVE WITH NON-BLOCKING FOLLOW-UP, consistency review
-  APPROVE WITH ONE MEDIUM FINDING, final focused APPROVE. All findings
-  resolved. Zero outstanding issues.
-- Sprint 002 Slice 3B Decision Journal Backend Workflow and API is Done.
-  Slice 3B implements twelve Decision Journal API endpoints: create Decision
-  Draft, list Decisions, read/update/discard Draft, confirm Draft, read detail
-  with original/effective snapshots, archive/unarchive, append Correction,
-  list Corrections, and Decision audit events. Strict Pydantic contracts,
-  repository queries, atomic service transactions with Policy→Decision→Draft
-  lock ordering, append-only Corrections with per-Decision sequential numbering,
-  atomic never-Confirmed Draft discard with identity deletion, and redacted
-  AuditEvents. CI: 6/6 checks pass, 302 tests total.
-- Slice 3B adds no frontend, migration, dependency, Compose, CI, authentication,
-  recommendation, Guardian, AI, Broker, trading, or Slice 3C behavior.
-  Slice 3C: Not Authorized, Not Started.
-
-## Review
-
-- Planning PR #4 initial review requested documentation changes.
-- Required planning changes were addressed.
-- Final planning review conclusion: APPROVE.
-- Planning PR #4 approved for merge.
-- Sprint 002 Slice 1 initial review conclusion: REQUEST CHANGES.
-- Review finding M-1 was resolved with an explicit real PostgreSQL CI gate that
-  cannot silently skip in required mode.
-- Review finding M-2 was resolved with matching named PostgreSQL and Pydantic
-  safety constraints.
-- Review finding M-3 was resolved by separating mutation success from audit
-  refresh failure and providing a GET-only retry.
-- Sprint 002 Slice 1 final independent review conclusion: APPROVE WITH
-  NON-BLOCKING FOLLOW-UP.
-- Pull request #5 approved for merge.
-- Sprint 002 Slice 2 technical design reviewed.
-- Owner decisions OD-1 through OD-6 resolved on 2026-07-14.
-- The AuditEvent deterministic database insertion-ordering requirement was
-  resolved in the design with a database-generated sequence number; it is not a
-  claim about concurrent transaction commit order.
-- Sprint 002 Slice 2 Technical Design final independent review conclusion:
-  APPROVE.
-- Pull request #6 approved for merge.
-- Merging the design pull request does not authorize Slice 2 implementation.
-- Sprint 002 Slice 2A persistence and immutability foundation completed
-  independent Review.
-- Slice 2A contains migration, ORM mapping, database constraints, immutable
-  snapshot triggers, AuditEvent insertion sequencing, and real PostgreSQL tests.
-- Slice 2A adds no Policy service, repository workflow, API, or frontend.
-- Sprint 002 Slice 2A final independent review conclusion: APPROVE WITH
-  NON-BLOCKING FOLLOW-UP.
-- The review found zero BLOCKER, HIGH, MEDIUM, or LOW findings and recorded two
-  non-blocking maintenance follow-ups in the Backlog.
-- Pull request #7 approved for merge.
-- Sprint 002 remains In Progress; Slice 2B, Slice 2C, and Slice 3 are not
-  authorized and Not Started.
-- Sprint 002 Slice 2B backend workflow and API is in Review.
-- Slice 2B contains strict Policy contracts, repository queries, atomic service
-  transactions, locking, immutable publication orchestration, version reads, and
-  Policy-filtered AuditEvent reads.
-- Slice 2B adds no frontend, recommendation, Guardian, AI, Broker, trading,
-  authentication, Slice 2C, or Slice 3 behavior.
-- Sprint 002 Slice 2B independent review conclusion: REQUEST CHANGES, with two
-  MEDIUM findings (post-commit PATCH response snapshot race and blocking test
-  coverage) and one LOW finding (non-empty Policy-create bodies were ignored).
-- M-1 is addressed by constructing the complete Draft response snapshot while
-  the Policy-then-Draft transaction is still locked, then returning only the
-  scalar DTO after a successful commit with no post-commit query.
-- M-2 is addressed with deterministic independent-session concurrency tests,
-  transaction-stage rollback tests, audit-window and ownership filtering tests,
-  complete Policy text boundaries, exact publish totals, and error/session reuse
-  coverage against real PostgreSQL.
-- L-1 is partially resolved: an omitted body and `{}` follow the contract, while
-  non-empty objects, scalars, and arrays return 422 without creating Policy state.
-  Explicit JSON `null` is still treated as an omitted body and returns 201; this
-  remaining LOW issue is a non-blocking Backlog follow-up.
-- Sprint 002 Slice 2B final incremental review conclusion: APPROVE WITH
-  NON-BLOCKING FOLLOW-UP.
-- Pull request #8 approved for merge.
-- Slice 2B completes the Policy backend workflow and API only; it does not include
-  the Policy frontend or a complete Policy user experience.
-- Sprint 002 Slice 2C Investment Policy frontend implementation is in Review.
-- Slice 2C provides the local-only `/policy` workflow for the sole Household and
-  Policy: explicit Draft text and allocation saves, mechanical publication review,
-  immutable Published and history reads, Policy audit reads, Draft creation, and
-  confirmed Draft discard.
-- The frontend preserves decimal percentage strings and computes displayed totals
-  by parsing them into integer hundredths; it provides no recommendation,
-  suitability, score, rebalancing, or automated decision behavior.
-- Policy mutation success and audit refresh failure remain separate outcomes;
-  audit retry performs only the audit GET and never replays a mutation.
-- PR #9 initial independent review conclusion was REQUEST CHANGES with four
-  MEDIUM findings (M-1 through M-4) and six LOW findings (L-1 through L-6).
-- M-1 through M-4 were addressed by independent core/history/audit resource
-  states, workspace-level text and allocation dirty tracking with a publication
-  gate, explicit protected reload confirmation, and generation-guarded AuditEvent
-  refreshes.
-- L-1 through L-6 were addressed by generation- and cursor-guarded history reads,
-  case-preserving allocation display normalization, Unicode code-point limits,
-  distinct safe network/server errors, an explicit current Published summary
-  beside a Draft, and row-specific accessible allocation controls.
-- Final independent incremental review conclusion: APPROVE. All ten findings
-  (M-1 through M-4, L-1 through L-6) are fully resolved. Zero new findings.
-- Pull request #9 approved for merge.
-- Slice 2C adds no backend behavior, migration, dependency, authentication,
-  Decision Journal, Guardian, AI, Broker, market, holding, recommendation, or
-  trading behavior.
-- Slice 3 remains unauthorized and Not Started.
-- Sprint 002 Slice 3 Technical Design Gate authorized on 2026-07-15.
-- The technical design proposes Approach C (Stable Decision Identity + Draft +
-  Confirmed Version) for the Decision Journal data model, with full replacement
-  snapshot corrections, cursor-based audit pagination, and a three-layer
-  immutability design.
-- Twelve Open Decisions (OD-S3-1 through OD-S3-12) are recorded and all marked
-  Open — Owner Decision Required. Three additional Open Decisions added
-  (OD-S3-13 through OD-S3-15) during fix revision, total fifteen.
-- The design compares three data model approaches, eight domain design
-  questions, three correction models, and four immutability enforcement layers.
-- No implementation is included; the design covers only proposed schema, API
-  contracts, UI states, concurrency patterns, and test matrices.
-- Draft PR on `planning/sprint-002-slice-3-decision-journal` branch; the PR
-  remains Draft and is not approved for merge.
-- Merging the design PR does not authorize Slice 3 implementation.
-- 2026-07-16: OD-S3-1 through OD-S3-15 all Resolved by Project Owner. All
-  fifteen owner decisions recorded in the technical design with Selected option,
-  Rejected alternatives, and Resolved date. NBF-1 (Correction trigger status
-  validation) and NBF-2 (DELETE trigger draft-only guard) resolved in design.
-  Global consistency revision applied across all sections: scope, lifecycle,
-  data model, field rules, dates, Policy Version reference, Confirm transaction,
-  Archive/unarchive, Correction model, Audit, PostgreSQL triggers,
-  constraints/FKs, concurrency, API, UI, retention, test matrix, dependencies,
-  Definition of Done, and implementation split. Final consistency review
-  completed: one MEDIUM pagination default fix (§8.12 default 20→50), two LOW
-  follow-ups resolved (action names finality, decision_date boundary tests).
-  PR #10 remains Draft. Slice 3 Implementation remains Not Authorized.
-  Slice 3A, 3B, 3C remain Not Started. Merging the Technical Design PR does
-  not authorize Slice 3A. Existing Backlog preserved.
-- Sprint 002 Slice 3A Decision Journal Persistence and Immutability Foundation
-  completed independent review.
-- Slice 3A initial independent review conclusion: REQUEST CHANGES with one
-  BLOCKER finding (B1: deferred trigger coverage gap — trigger fires only on
-  decisions INSERT, missing UPDATE and child-table mutations that can bypass
-  lifecycle consistency checks).
-- B1 was resolved by adding two additional deferred CONSTRAINT TRIGGERs on
-  decision_drafts (INSERT/DELETE) and decision_confirmed_snapshots (INSERT/DELETE),
-  updating the shared function to extract decision_id from the correct trigger
-  table, and adding four bypass regression tests covering cross-transaction
-  UPDATE, DELETE, and child-only INSERT scenarios.
-- Sprint 002 Slice 3A final independent review conclusion: APPROVE WITH
-  NON-BLOCKING FOLLOW-UP. All BLOCKER, HIGH, and MEDIUM findings resolved.
-  Zero outstanding issues. 138 required PostgreSQL tests passed, 0 skipped.
-- Pull request #11 approved for merge.
-- Slice 3A adds no Decision service, API, frontend, or Slice 3B/3C behavior.
+- Sprint 003: Not Authorized / Not Started
 
 ## Done
 
