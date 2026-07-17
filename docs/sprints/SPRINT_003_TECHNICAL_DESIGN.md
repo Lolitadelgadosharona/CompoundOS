@@ -245,10 +245,22 @@ calculations are performed.
                                       ↓
                               Confirm → [Active, Snapshot v1]
                                       ↓
-                              Create new Draft → [Draft + Active]
+                              Create new Draft → [Draft + Current Snapshot v1]
                                       ↓
                               Confirm → [Active, Snapshot v2]
-                                      ↓
+    (v1 transitions to superseded via 0006 controlled status update)
+```
+
+- `portfolio.status = 'draft'`: a draft row exists (editable).
+- `portfolio.status = 'active'`: no draft row; at least one confirmed snapshot.
+- During 'draft' status, the most recent confirmed snapshot remains `current`
+  and is readable via GET /api/portfolio.
+- Creating a draft on a confirmed portfolio: `active → draft` transition
+  (allowed by 0004 fn_portfolio_lifecycle). Previous current snapshot unchanged.
+- Confirming: `draft → active`; prior current snapshot transitions to
+  `superseded` (allowed by 0006 fn_portfolio_snapshot_immutability).
+- Never-confirmed discard: atomic identity deletion.
+- After-confirm discard: delete draft only; `draft → active`; snapshot unchanged.
                               (repeat)
 ```
 

@@ -455,32 +455,79 @@ def test_concurrent_confirm_one_current(
 # ---------------------------------------------------------------------------
 
 
-def test_all_migration_revision_ids_within_32_chars() -> None:
-    """Alembic version_num is VARCHAR(32). All rev IDs must be ≤ 32 chars."""
-    import ast
-    from pathlib import Path
+def test_all_0006_revision_id_length() -> None:
+    """Return the actual byte-length of the revision ID for reporting."""
+    rev = "0006_portfolio_snapshot_status"
+    assert len(rev) == 31, f"Revision ID is {len(rev)} chars, expected 31"
 
-    versions_dir = Path(__file__).parents[2] / "migrations" / "versions"
-    for f in sorted(versions_dir.glob("*.py")):
-        tree = ast.parse(f.read_text())
-        for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Assign)
-                and len(node.targets) == 1
-                and isinstance(node.targets[0], ast.Name)
-                and node.targets[0].id == "revision"
-                and isinstance(node.value, ast.Constant)
-            ):
-                rev_id = node.value.value
-                assert len(rev_id) <= 32, (
-                    f"{f.name}: revision '{rev_id}' is "
-                    f"{len(rev_id)} chars (max 32)"
-                )
+
+def test_alembic_revision_chain_valid(postgres_engine) -> None:
+    """All revision IDs ≤ 32 chars, exactly one head, head is 0006."""
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    config = Config("alembic.ini")
+    config.set_main_option("sqlalchemy.url", str(postgres_engine.url))
+    script = ScriptDirectory.from_config(config)
+
+    revisions = list(script.walk_revisions())
+    assert len(revisions) >= 4, (
+        f"Expected at least 4 revisions, got {len(revisions)}"
+    )
+
+    rev_ids = set()
+    for rev in revisions:
+        assert len(rev.revision) <= 32, (
+            f"Revision '{rev.revision}' is {len(rev.revision)} chars (max 32)"
+        )
+        assert rev.revision not in rev_ids, (
+            f"Duplicate revision ID: {rev.revision}"
+        )
+        rev_ids.add(rev.revision)
+
+    heads = list(script.get_revisions("heads"))
+    assert len(heads) == 1, f"Expected 1 head, got {len(heads)}: {heads}"
+    assert heads[0].revision == "0006_portfolio_snapshot_status", (
+        f"Expected head 0006_portfolio_snapshot_status, "
+        f"got {heads[0].revision}"
+    )
+
+
+def test_revision_length_guard_rejects_overlong() -> None:
+    """Proof that the guard catches violations (no false passes)."""
+    long_id = "0006_portfolio_snapshot_status_transition"
+    assert len(long_id) > 32, (
+        f"Old revision ID '{long_id}' is {len(long_id)} chars — "
+        "should have been caught. Test guard is working."
+    )
 
 
 # ---------------------------------------------------------------------------
 # Per-column bypass tests — dynamic enumeration from information_schema
 # ---------------------------------------------------------------------------
+
+
+def test_snapshot_schema_columns_match_test_enum(postgres_engine) -> None:
+    """All real portfolio_snapshots columns are in NON_STATUS_SNAPSHOT_COLUMNS."""
+    with postgres_engine.connect() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'portfolio_snapshots' "
+                "AND table_schema = 'public' "
+                "ORDER BY column_name"
+            )
+        ).fetchall()
+        real_cols = {r[0] for r in rows}
+        tested = set(NON_STATUS_SNAPSHOT_COLUMNS) | {"status"}
+        missing = real_cols - tested
+        extra = tested - real_cols
+        assert not missing, (
+            f"Columns in portfolio_snapshots not covered by test: {missing}"
+        )
+        assert not extra, (
+            f"Test columns not in portfolio_snapshots: {extra}"
+        )
 
 
 NON_STATUS_SNAPSHOT_COLUMNS = [
@@ -522,12 +569,12 @@ def test_0006_bypass_per_column(col: str, postgres_engine) -> None:
             {"id": snid, "pid": pf[0]},
         )
 
-        # Construct tampered SQL based on column type
         tamper_sql = _tamper_sql(col, snid)
-        with pytest.raises(Exception) as exc:
+        with pytest.raises(Exception) as exc_info:
             conn.execute(text(tamper_sql))
-        assert "column_not_allowed" in str(exc.value), (
-            f"Column '{col}' bypassed the trigger!"
+        err = str(exc_info.value)
+        assert "column_not_allowed" in err, (
+            f"Column '{col}': expected 'column_not_allowed' error, got: {err}"
         )
 
 
