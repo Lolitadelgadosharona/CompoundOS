@@ -1,6 +1,6 @@
 """Allow controlled snapshot status transition: current → superseded.
 
-Revision ID: 0006_portfolio_snapshot_status_transition
+Revision ID: 0006_portfolio_snapshot_status
 Revises: 0005_portfolio_cash_unit_price
 Create Date: 2026-07-17
 
@@ -9,18 +9,17 @@ Owner Decision (2026-07-17):
   All other UPDATE and all DELETE remain forbidden.
   Snapshot holdings remain fully immutable.
 
-Background:
-  0004 fn_portfolio_snapshot_immutability rejected ALL UPDATE.
-  But the design requires current→superseded when a correction
-  or new snapshot is confirmed. This migration relaxes the trigger
-  to allow exactly that single controlled transition.
+Key change from 0004:
+  Uses to_jsonb(row) - 'status' for future-proof column comparison
+  rather than manually enumerating columns. Any column other than
+  status that differs during current→superseded triggers an error.
 """
 
 from typing import Sequence, Union
 
 from alembic import op
 
-revision: str = "0006_portfolio_snapshot_status_transition"
+revision: str = "0006_portfolio_snapshot_status"
 down_revision: Union[str, None] = "0005_portfolio_cash_unit_price"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -40,21 +39,18 @@ BEGIN
     IF TG_OP = 'UPDATE' THEN
         -- Allow exactly one controlled transition: current → superseded
         IF OLD.status = 'current' AND NEW.status = 'superseded' THEN
-            -- Verify no other columns changed
-            IF OLD.id             IS NOT DISTINCT FROM NEW.id
-               AND OLD.portfolio_id  IS NOT DISTINCT FROM NEW.portfolio_id
-               AND OLD.version_number IS NOT DISTINCT FROM NEW.version_number
-               AND OLD.confirmed_at   IS NOT DISTINCT FROM NEW.confirmed_at
-               AND OLD.holding_count  IS NOT DISTINCT FROM NEW.holding_count
-               AND OLD.valuation_date IS NOT DISTINCT FROM NEW.valuation_date
-               AND OLD.notes          IS NOT DISTINCT FROM NEW.notes
+            -- Verify no other columns changed using JSONB row diff
+            IF (to_jsonb(NEW) - 'status')
+               IS NOT DISTINCT FROM
+               (to_jsonb(OLD) - 'status')
             THEN
                 RETURN NEW;
             END IF;
             RAISE EXCEPTION USING
                 ERRCODE = '55000',
                 MESSAGE = 'portfolio_snapshot_update_column_not_allowed',
-                DETAIL  = 'Only status may change during current→superseded transition.';
+                DETAIL  = 'Only status may change during current→superseded '
+                          'transition.';
         END IF;
 
         RAISE EXCEPTION USING
