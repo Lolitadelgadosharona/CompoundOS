@@ -607,7 +607,7 @@ def _audit(session: Session, hid: UUID, action: str, eid: str, meta: dict) -> No
             "INSERT INTO audit_events (id, household_id, actor, action,"
             " entity_type, entity_id, metadata, occurred_at)"
             " VALUES (:id, :hid, 'owner', :action, 'guardian_check', :eid,"
-            " :meta::jsonb, NOW())"
+            " CAST(:meta AS jsonb), NOW())"
         ),
         {"id": uuid4(), "hid": hid, "action": action, "eid": eid,
          "meta": json.dumps(meta)},
@@ -642,7 +642,7 @@ def _audit_eval(
             "INSERT INTO audit_events (id, household_id, actor, action,"
             " entity_type, entity_id, metadata, occurred_at)"
             " VALUES (:id, :hid, 'owner', :action, 'guardian_evaluation_run', :eid,"
-            " :meta::jsonb, NOW())"
+            " CAST(:meta AS jsonb), NOW())"
         ),
         {
             "id": uuid4(), "hid": hid,

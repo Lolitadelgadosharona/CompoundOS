@@ -441,7 +441,7 @@ def add_audit_event(
         text(
             "INSERT INTO audit_events (id, household_id, actor, action,"
             " entity_type, entity_id, metadata, occurred_at)"
-            " VALUES (:id, :hid, :actor, :action, :etype, :eid, :meta::jsonb, :now)"
+            " VALUES (:id, :hid, :actor, :action, :etype, :eid, CAST(:meta AS jsonb), :now)"
         ),
         {
             "id": id,
