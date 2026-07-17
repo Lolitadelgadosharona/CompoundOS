@@ -57,7 +57,11 @@ def db_session(postgres_engine: Engine) -> Generator[Session, None, None]:
                 " investment_policy_version_allocations,"
                 " investment_policy_draft_allocations,"
                 " investment_policy_versions, investment_policy_drafts,"
-                " investment_policies, household_profiles"
+                " investment_policies,"
+                " guardian_events, guardian_evaluation_runs,"
+                " guardian_check_confirmed, guardian_check_drafts,"
+                " guardian_checks,"
+                " household_profiles"
                 " RESTART IDENTITY CASCADE"
             )
         )
@@ -79,7 +83,11 @@ def api_client(postgres_engine: Engine) -> Generator[TestClient, None, None]:
                 " investment_policy_version_allocations,"
                 " investment_policy_draft_allocations,"
                 " investment_policy_versions, investment_policy_drafts,"
-                " investment_policies, household_profiles"
+                " investment_policies,"
+                " guardian_events, guardian_evaluation_runs,"
+                " guardian_check_confirmed, guardian_check_drafts,"
+                " guardian_checks,"
+                " household_profiles"
                 " RESTART IDENTITY CASCADE"
             )
         )

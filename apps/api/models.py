@@ -907,3 +907,253 @@ class PortfolioSnapshotHolding(Base):
     sort_order: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default=text("0")
     )
+
+
+# ---------------------------------------------------------------------------
+# Guardian (Sprint 004)
+# ---------------------------------------------------------------------------
+
+
+class GuardianCheck(Base):
+    __tablename__ = "guardian_checks"
+    __table_args__ = (
+        CheckConstraint(
+            "check_type IN ('drift','category_exposure','staleness')",
+            name="ck_guardian_checks_type",
+        ),
+        CheckConstraint(
+            "status IN ('draft','confirmed')",
+            name="ck_guardian_checks_status",
+        ),
+        UniqueConstraint("canonical_name", name="uq_guardian_checks_name"),
+        Index("ix_guardian_checks_household", "household_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    household_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "household_profiles.id",
+            name="fk_guardian_checks_household_id",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    canonical_name: Mapped[str] = mapped_column(Text, nullable=False)
+    check_type: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, default="draft", server_default=text("'draft'")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class GuardianCheckDraft(Base):
+    __tablename__ = "guardian_check_drafts"
+    __table_args__ = (
+        CheckConstraint(
+            "threshold_value > 0 AND threshold_value <= 100",
+            name="ck_guardian_drafts_threshold",
+        ),
+        CheckConstraint(
+            "staleness_days IS NULL OR staleness_days > 0",
+            name="ck_guardian_drafts_staleness_days",
+        ),
+        CheckConstraint(
+            "severity IN ('info','warning','critical')",
+            name="ck_guardian_drafts_severity",
+        ),
+    )
+
+    check_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "guardian_checks.id",
+            name="fk_guardian_check_drafts_check_id",
+            ondelete="CASCADE",
+        ),
+        primary_key=True,
+    )
+    threshold_value: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2), nullable=False
+    )
+    target_category: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    target_holding_category: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )
+    staleness_days: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )
+    severity: Mapped[str] = mapped_column(
+        Text, nullable=False, default="info", server_default=text("'info'")
+    )
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    expected_revision: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class GuardianCheckConfirmed(Base):
+    __tablename__ = "guardian_check_confirmed"
+    __table_args__ = (
+        UniqueConstraint(
+            "check_id", "version_number",
+            name="uq_guardian_check_confirmed_version",
+        ),
+        Index("ix_guardian_check_confirmed_check", "check_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    check_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "guardian_checks.id",
+            name="fk_guardian_check_confirmed_check_id",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    check_type: Mapped[str] = mapped_column(Text, nullable=False)
+    threshold_value: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2), nullable=False
+    )
+    target_category: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    target_holding_category: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )
+    staleness_days: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )
+    severity: Mapped[str] = mapped_column(Text, nullable=False)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    confirmed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class GuardianEvaluationRun(Base):
+    __tablename__ = "guardian_evaluation_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('completed','skipped_no_published_policy',"
+            "'skipped_no_portfolio_snapshot','skipped_zero_total_value')",
+            name="ck_guardian_evaluation_runs_status",
+        ),
+        CheckConstraint(
+            "checks_evaluated >= 0",
+            name="ck_guardian_evaluation_runs_checks_evaluated",
+        ),
+        CheckConstraint(
+            "events_created >= 0",
+            name="ck_guardian_evaluation_runs_events_created",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    household_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "household_profiles.id",
+            name="fk_guardian_evaluation_runs_household_id",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    checks_evaluated: Mapped[int] = mapped_column(Integer, nullable=False)
+    events_created: Mapped[int] = mapped_column(Integer, nullable=False)
+    skip_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    as_of_date: Mapped[Any] = mapped_column(Date, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    completed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class GuardianEvent(Base):
+    __tablename__ = "guardian_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "check_version_id", "policy_version_id", "portfolio_snapshot_id",
+            name="uq_guardian_events_drift_exposure",
+        ),
+        UniqueConstraint(
+            "check_version_id", "portfolio_snapshot_id", "as_of_date",
+            name="uq_guardian_events_staleness",
+        ),
+        Index("ix_guardian_events_check", "check_id"),
+        Index("ix_guardian_events_run", "evaluation_run_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    evaluation_run_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "guardian_evaluation_runs.id",
+            name="fk_guardian_events_evaluation_run_id",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    household_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "household_profiles.id",
+            name="fk_guardian_events_household_id",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    check_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "guardian_checks.id",
+            name="fk_guardian_events_check_id",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    check_version_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "guardian_check_confirmed.id",
+            name="fk_guardian_events_check_version_id",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    policy_version_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "investment_policy_versions.id",
+            name="fk_guardian_events_policy_version_id",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    portfolio_snapshot_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "portfolio_snapshots.id",
+            name="fk_guardian_events_portfolio_snapshot_id",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    detected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    drift_pp: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(5, 2), nullable=True
+    )
+    exposure_pct: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(5, 2), nullable=True
+    )
+    staleness_days_actual: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )
+    exceeded: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("TRUE")
+    )
+    as_of_date: Mapped[Any] = mapped_column(Date, nullable=False)
