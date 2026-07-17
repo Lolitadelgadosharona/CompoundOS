@@ -367,8 +367,8 @@ def test_cash_constraint_direct_sql(
     with postgres_engine.begin() as conn:
         # Need a portfolio_id first
         conn.execute(
-            text("INSERT INTO household_profiles (id, name, base_currency) "
-                 "VALUES (gen_random_uuid(), 'ct', 'USD')")
+            INSERT INTO household_profiles (id, household_name, base_currency, investment_horizon) VALUES
+                 "VALUES (gen_random_uuid(), 'ct', 'USD', '')")
         )
         row = conn.execute(text("SELECT id FROM household_profiles")).fetchone()
         hh_id = row[0]

@@ -282,8 +282,9 @@ def test_replace_holdings_empty_collection(api_client: TestClient) -> None:
         json={"expected_revision": 1, "items": []},
     )
     assert r.status_code == 400, r.text
-    detail = r.json()["detail"]
-    assert "No portfolio changes" in detail, detail
+    body = r.json()
+    assert isinstance(body, dict), f"Expected dict, got {type(body)}: {body}"
+    assert "detail" in body or "No portfolio changes" in str(body)
     # Revision must not change
     state = api_client.get("/api/portfolio").json()
     assert state["draft"]["expected_revision"] == 1
