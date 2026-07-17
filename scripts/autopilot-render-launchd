@@ -40,16 +40,20 @@ def render_launchd(output_path=None, repo_root=None, home=None):
 
     # Resolve ProgramArguments
     program = p.get('ProgramArguments', [])
-    # Find the best Python interpreter
+    # Find the best Python interpreter (prefer system python3 which
+    # has macOS Full Disk Access for background processes).
     venv_python = os.path.join(repo_root, '.venv', 'bin', 'python3')
     if not os.path.isfile(venv_python):
         venv_python = os.path.join(repo_root, '.venv', 'bin', 'python')
+    # Prefer /usr/bin/python3 for launchd — avoids venv Full Disk Access issues
+    system_python = '/usr/bin/python3'
+    python_interp = system_python if os.path.isfile(system_python) else venv_python
     resolved = []
     for arg in program:
         arg = arg.replace('${REPO_ROOT}', repo_root)
         arg = arg.replace('${HOME}', home)
         arg = arg.replace('${AUTOPILOT_ROOT}', autopilot_root)
-        arg = arg.replace('${PYTHON_PATH}', venv_python)
+        arg = arg.replace('${PYTHON_PATH}', python_interp)
         resolved.append(arg)
     p['ProgramArguments'] = resolved
 
