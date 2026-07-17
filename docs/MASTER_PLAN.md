@@ -307,6 +307,17 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   deferred consistency, and bypass regression
 - Slice 3A completed without a Decision service, API, frontend, or Slice 3B/3C
   behavior
+- Sprint 002 Safe Autopilot Foundation: Self-driving infrastructure for automated
+  task execution, review, and CI monitoring via Hermes and Qoder CLI agents.
+  Includes main CLI (install/start/stop/restart/status/logs/doctor/dry-run/
+  enqueue/unblock), worker with isolated git worktrees, launchd-based supervisor
+  with crash recovery, blind code reviewer, CI monitor, structured task schema
+  with approval/risk gates, and 34 automated tests. Qoder CLI v1.0.47 detected
+  as headless-capable but currently verified_healthy=false (TLS/auth failure).
+  Hermes v0.17.0 is the always-available default worker. Codex not installed
+  (circuit breaker open). Auto-merge globally disabled pending independent
+  security review. PR #13 squash-merged after two rounds of independent blind
+  review with all BLOCKER/HIGH/MEDIUM findings resolved.
 
 ## Decision Log
 
