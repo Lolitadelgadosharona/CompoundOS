@@ -1,0 +1,2587 @@
+================================================================================
+FILE: requirements.txt
+================================================================================
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+httpx==0.28.1
+pydantic==2.13.4
+SQLAlchemy==2.0.51
+psycopg[binary]==3.2.13
+alembic==1.16.5
+pytest==8.3.4
+ruff==0.8.3
+
+================================================================================
+FILE: pyproject.toml
+================================================================================
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+================================================================================
+FILE: pytest.ini
+================================================================================
+[pytest]
+testpaths = tests
+pythonpath = .
+
+================================================================================
+FILE: alembic.ini
+================================================================================
+[alembic]
+script_location = migrations
+prepend_sys_path = .
+sqlalchemy.url = postgresql+psycopg://compoundos:local-development-only@127.0.0.1:5432/compoundos
+
+[loggers]
+keys = root,sqlalchemy,alembic
+
+[handlers]
+keys = console
+
+[formatters]
+keys = generic
+
+[logger_root]
+level = WARN
+handlers = console
+qualname =
+
+[logger_sqlalchemy]
+level = WARN
+handlers =
+qualname = sqlalchemy.engine
+
+[logger_alembic]
+level = INFO
+handlers =
+qualname = alembic
+
+[handler_console]
+class = StreamHandler
+args = (sys.stderr,)
+level = NOTSET
+formatter = generic
+
+[formatter_generic]
+format = %(levelname)-5.5s [%(name)s] %(message)s
+datefmt = %H:%M:%S
+
+================================================================================
+FILE: .env.example
+================================================================================
+POSTGRES_USER=compoundos
+POSTGRES_PASSWORD=local-development-only
+POSTGRES_DB=compoundos
+DATABASE_URL=postgresql+psycopg://compoundos:local-development-only@127.0.0.1:5432/compoundos
+REDIS_URL=redis://localhost:6379/0
+NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
+
+================================================================================
+FILE: .gitignore
+================================================================================
+# OS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+npm-debug.log*
+
+# Environment
+.env
+.env.*
+!.env.example
+!frontend/.env.example
+
+# Docker
+*.local
+
+================================================================================
+FILE: compose.yaml
+================================================================================
+services:
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://127.0.0.1:8000}
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://localhost:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-compoundos}:${POSTGRES_PASSWORD:-local-development-only}@postgres:5432/${POSTGRES_DB:-compoundos}
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://localhost:8000/health')
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-compoundos}:${POSTGRES_PASSWORD:-local-development-only}@postgres:5432/${POSTGRES_DB:-compoundos}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-compoundos}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-development-only}
+      POSTGRES_DB: ${POSTGRES_DB:-compoundos}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:
+
+================================================================================
+FILE: .github/workflows/ci.yml
+================================================================================
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  infrastructure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect Docker Compose version
+        run: docker compose version
+      - name: Validate Docker Compose configuration
+        run: docker compose config
+      - name: Verify localhost-only host bindings
+        run: |
+          docker compose config --format json > /tmp/compose.json
+          python - <<'PY'
+          import json
+
+          with open("/tmp/compose.json", encoding="utf-8") as config_file:
+              config = json.load(config_file)
+
+          expected = {
+              "web": ("127.0.0.1", 3000, 3000),
+              "api": ("127.0.0.1", 8000, 8000),
+              "postgres": ("127.0.0.1", 5432, 5432),
+              "redis": ("127.0.0.1", 6379, 6379),
+          }
+          for service_name, expected_binding in expected.items():
+              ports = config["services"][service_name].get("ports", [])
+              bindings = {
+                  (port.get("host_ip"), int(port["published"]), int(port["target"]))
+                  for port in ports
+              }
+              if bindings != {expected_binding}:
+                  raise SystemExit(
+                      f"{service_name} ports must equal {expected_binding}, got {sorted(bindings)}"
+                  )
+          PY
+
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: compoundos
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: compoundos_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U compoundos -d compoundos_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://compoundos:ci-only-password@127.0.0.1:5432/compoundos_test
+      TEST_DATABASE_URL: postgresql+psycopg://compoundos:ci-only-password@127.0.0.1:5432/compoundos_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run database migrations
+        run: |
+          alembic upgrade head
+          alembic current
+      - name: Run backend lint
+        run: ruff check apps tests
+      - name: Run backend tests
+        run: pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Pin npm version
+        run: npm install --global npm@10.9.8
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Run frontend lint
+        run: npm run lint
+      - name: Run frontend type check
+        run: npm run type-check
+      - name: Run frontend tests
+        run: npm test
+      - name: Build frontend
+        run: npm run build
+      - name: Audit production frontend dependencies
+        run: npm audit --omit=dev
+
+================================================================================
+FILE: apps/api/config.py
+================================================================================
+import os
+
+DEFAULT_DEVELOPMENT_DATABASE_URL = (
+    "postgresql+psycopg://compoundos:local-development-only@127.0.0.1:5432/compoundos"
+)
+
+
+def get_database_url() -> str:
+    """Return the explicit PostgreSQL connection URL for local development."""
+    return os.environ.get("DATABASE_URL", DEFAULT_DEVELOPMENT_DATABASE_URL)
+
+================================================================================
+FILE: apps/api/database.py
+================================================================================
+from collections.abc import Generator
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+
+from apps.api.config import get_database_url
+
+engine = create_engine(get_database_url(), pool_pre_ping=True)
+SessionLocal = sessionmaker(bind=engine, class_=Session, expire_on_commit=False)
+
+
+def get_session() -> Generator[Session, None, None]:
+    """Provide one synchronous SQLAlchemy session per request."""
+    with SessionLocal() as session:
+        yield session
+
+================================================================================
+FILE: apps/api/models.py
+================================================================================
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any
+from uuid import UUID, uuid4
+
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class HouseholdProfile(Base):
+    __tablename__ = "household_profiles"
+    __table_args__ = (
+        CheckConstraint("singleton_key", name="ck_household_profiles_singleton_key"),
+        UniqueConstraint("singleton_key", name="uq_household_profiles_singleton_key"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    singleton_key: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    household_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    base_currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    investment_horizon: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    liquidity_needs: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    risk_statement: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class AuditEvent(Base):
+    __tablename__ = "audit_events"
+    __table_args__ = (
+        Index("ix_audit_events_household_order", "household_id", "occurred_at", "id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    household_id: Mapped[UUID] = mapped_column(
+        ForeignKey("household_profiles.id", ondelete="RESTRICT"), nullable=False
+    )
+    actor: Mapped[str] = mapped_column(String(50), nullable=False)
+    action: Mapped[str] = mapped_column(String(50), nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    entity_id: Mapped[UUID] = mapped_column(nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    event_metadata: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JSONB, nullable=False, default=dict
+    )
+
+================================================================================
+FILE: apps/api/schemas.py
+================================================================================
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any, Optional
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+HOUSEHOLD_NAME_MAX_LENGTH = 200
+INVESTMENT_HORIZON_MAX_LENGTH = 2_000
+LIQUIDITY_NEEDS_MAX_LENGTH = 4_000
+RISK_STATEMENT_MAX_LENGTH = 4_000
+NOTES_MAX_LENGTH = 8_000
+
+
+class HouseholdFields(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    household_name: str = Field(min_length=1, max_length=HOUSEHOLD_NAME_MAX_LENGTH)
+    base_currency: str = Field(pattern=r"^[A-Z]{3}$")
+    investment_horizon: str = Field(default="", max_length=INVESTMENT_HORIZON_MAX_LENGTH)
+    liquidity_needs: str = Field(default="", max_length=LIQUIDITY_NEEDS_MAX_LENGTH)
+    risk_statement: str = Field(default="", max_length=RISK_STATEMENT_MAX_LENGTH)
+    notes: str = Field(default="", max_length=NOTES_MAX_LENGTH)
+
+
+class HouseholdCreate(HouseholdFields):
+    pass
+
+
+class HouseholdUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    household_name: Optional[str] = Field(
+        default=None, min_length=1, max_length=HOUSEHOLD_NAME_MAX_LENGTH
+    )
+    base_currency: Optional[str] = Field(default=None, pattern=r"^[A-Z]{3}$")
+    investment_horizon: Optional[str] = Field(
+        default=None, max_length=INVESTMENT_HORIZON_MAX_LENGTH
+    )
+    liquidity_needs: Optional[str] = Field(default=None, max_length=LIQUIDITY_NEEDS_MAX_LENGTH)
+    risk_statement: Optional[str] = Field(default=None, max_length=RISK_STATEMENT_MAX_LENGTH)
+    notes: Optional[str] = Field(default=None, max_length=NOTES_MAX_LENGTH)
+
+    @field_validator("*")
+    @classmethod
+    def reject_explicit_null(cls, value: Optional[str]) -> str:
+        if value is None:
+            raise ValueError("field cannot be null")
+        return value
+
+
+class HouseholdResponse(HouseholdFields):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+class AuditEventResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    household_id: UUID
+    actor: str
+    action: str
+    entity_type: str
+    entity_id: UUID
+    occurred_at: datetime
+    metadata: dict[str, Any] = Field(validation_alias="event_metadata")
+
+================================================================================
+FILE: apps/api/main.py
+================================================================================
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+from apps.api.routers.households import router as households_router
+
+app = FastAPI(title="CompoundOS API", version="0.1.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PATCH"],
+    allow_headers=["Content-Type"],
+)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(
+    _request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """Return validation details without echoing sensitive request values."""
+    details = [
+        {"loc": error["loc"], "msg": error["msg"], "type": error["type"]}
+        for error in exc.errors()
+    ]
+    return JSONResponse(status_code=422, content={"detail": details})
+
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.get("/api/health")
+def api_health() -> dict[str, str]:
+    return {"status": "ok", "service": "api"}
+
+
+app.include_router(households_router)
+
+================================================================================
+FILE: apps/api/repositories/households.py
+================================================================================
+from __future__ import annotations
+
+from typing import Any
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from apps.api.models import AuditEvent, HouseholdProfile
+
+AUDIT_ACTOR = "local-owner"
+HOUSEHOLD_ENTITY_TYPE = "HouseholdProfile"
+
+
+def get_current_household(session: Session) -> HouseholdProfile | None:
+    return session.scalar(select(HouseholdProfile))
+
+
+def add_household(session: Session, values: dict[str, Any]) -> HouseholdProfile:
+    household = HouseholdProfile(**values)
+    session.add(household)
+    session.flush()
+    return household
+
+
+def add_audit_event(
+    session: Session,
+    *,
+    household_id: UUID,
+    action: str,
+    changed_fields: list[str],
+) -> AuditEvent:
+    event = AuditEvent(
+        household_id=household_id,
+        actor=AUDIT_ACTOR,
+        action=action,
+        entity_type=HOUSEHOLD_ENTITY_TYPE,
+        entity_id=household_id,
+        event_metadata={"changed_fields": sorted(changed_fields)},
+    )
+    session.add(event)
+    session.flush()
+    return event
+
+
+def list_audit_events(session: Session, household_id: UUID) -> list[AuditEvent]:
+    statement = (
+        select(AuditEvent)
+        .where(AuditEvent.household_id == household_id)
+        .order_by(AuditEvent.occurred_at, AuditEvent.id)
+    )
+    return list(session.scalars(statement))
+
+================================================================================
+FILE: apps/api/services/households.py
+================================================================================
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from apps.api.models import AuditEvent, HouseholdProfile
+from apps.api.repositories.households import (
+    add_audit_event,
+    add_household,
+    get_current_household,
+    list_audit_events,
+)
+from apps.api.schemas import HouseholdCreate, HouseholdUpdate
+
+
+class HouseholdAlreadyExistsError(Exception):
+    pass
+
+
+class HouseholdNotFoundError(Exception):
+    pass
+
+
+class NoHouseholdChangesError(Exception):
+    pass
+
+
+def _is_singleton_conflict(exc: IntegrityError) -> bool:
+    diagnostics = getattr(exc.orig, "diag", None)
+    return (
+        getattr(diagnostics, "constraint_name", None)
+        == "uq_household_profiles_singleton_key"
+    )
+
+
+def create_household(session: Session, payload: HouseholdCreate) -> HouseholdProfile:
+    values = payload.model_dump()
+    try:
+        with session.begin():
+            household = add_household(session, values)
+            add_audit_event(
+                session,
+                household_id=household.id,
+                action="household.created",
+                changed_fields=list(values),
+            )
+        return household
+    except IntegrityError as exc:
+        session.rollback()
+        if not _is_singleton_conflict(exc):
+            raise
+        raise HouseholdAlreadyExistsError from exc
+
+
+def read_current_household(session: Session) -> HouseholdProfile:
+    household = get_current_household(session)
+    if household is None:
+        raise HouseholdNotFoundError
+    return household
+
+
+def update_current_household(
+    session: Session, payload: HouseholdUpdate
+) -> HouseholdProfile:
+    submitted = payload.model_dump(exclude_unset=True)
+    if not submitted:
+        raise NoHouseholdChangesError
+
+    with session.begin():
+        household = get_current_household(session)
+        if household is None:
+            raise HouseholdNotFoundError
+
+        changed = [name for name, value in submitted.items() if getattr(household, name) != value]
+        if not changed:
+            raise NoHouseholdChangesError
+
+        for name in changed:
+            setattr(household, name, submitted[name])
+        household.updated_at = datetime.now(timezone.utc)
+        session.flush()
+        add_audit_event(
+            session,
+            household_id=household.id,
+            action="household.updated",
+            changed_fields=changed,
+        )
+    return household
+
+
+def read_current_audit_events(session: Session) -> list[AuditEvent]:
+    household = read_current_household(session)
+    return list_audit_events(session, household.id)
+
+================================================================================
+FILE: apps/api/routers/households.py
+================================================================================
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+
+from apps.api.database import get_session
+from apps.api.schemas import (
+    AuditEventResponse,
+    HouseholdCreate,
+    HouseholdResponse,
+    HouseholdUpdate,
+)
+from apps.api.services.households import (
+    HouseholdAlreadyExistsError,
+    HouseholdNotFoundError,
+    NoHouseholdChangesError,
+    create_household,
+    read_current_audit_events,
+    read_current_household,
+    update_current_household,
+)
+
+router = APIRouter(prefix="/api/households", tags=["households"])
+DatabaseSession = Annotated[Session, Depends(get_session)]
+
+
+@router.post("", response_model=HouseholdResponse, status_code=status.HTTP_201_CREATED)
+def create(payload: HouseholdCreate, session: DatabaseSession) -> HouseholdResponse:
+    try:
+        return HouseholdResponse.model_validate(create_household(session, payload))
+    except HouseholdAlreadyExistsError as exc:
+        raise HTTPException(status_code=409, detail="A household profile already exists") from exc
+
+
+@router.get("/current", response_model=HouseholdResponse)
+def get_current(session: DatabaseSession) -> HouseholdResponse:
+    try:
+        return HouseholdResponse.model_validate(read_current_household(session))
+    except HouseholdNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Household profile not found") from exc
+
+
+@router.patch("/current", response_model=HouseholdResponse)
+def update_current(payload: HouseholdUpdate, session: DatabaseSession) -> HouseholdResponse:
+    try:
+        return HouseholdResponse.model_validate(update_current_household(session, payload))
+    except HouseholdNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Household profile not found") from exc
+    except NoHouseholdChangesError as exc:
+        raise HTTPException(status_code=400, detail="No household changes provided") from exc
+
+
+@router.get("/current/audit-events", response_model=list[AuditEventResponse])
+def get_current_audit_events(session: DatabaseSession) -> list[AuditEventResponse]:
+    try:
+        return [
+            AuditEventResponse.model_validate(event)
+            for event in read_current_audit_events(session)
+        ]
+    except HouseholdNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Household profile not found") from exc
+
+================================================================================
+FILE: apps/api/Dockerfile
+================================================================================
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+COPY requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY apps ./apps
+COPY migrations ./migrations
+COPY alembic.ini ./alembic.ini
+
+EXPOSE 8000
+
+CMD ["python", "-m", "uvicorn", "apps.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+================================================================================
+FILE: migrations/env.py
+================================================================================
+from logging.config import fileConfig
+
+from alembic import context
+from sqlalchemy import engine_from_config, pool
+
+from apps.api.config import get_database_url
+from apps.api.models import Base
+
+config = context.config
+config.set_main_option("sqlalchemy.url", get_database_url())
+
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name)
+
+target_metadata = Base.metadata
+
+
+def run_migrations_offline() -> None:
+    context.configure(
+        url=config.get_main_option("sqlalchemy.url"),
+        target_metadata=target_metadata,
+        literal_binds=True,
+        dialect_opts={"paramstyle": "named"},
+    )
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+def run_migrations_online() -> None:
+    connectable = engine_from_config(
+        config.get_section(config.config_ini_section, {}),
+        prefix="sqlalchemy.",
+        poolclass=pool.NullPool,
+    )
+    with connectable.connect() as connection:
+        context.configure(connection=connection, target_metadata=target_metadata)
+        with context.begin_transaction():
+            context.run_migrations()
+
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()
+
+================================================================================
+FILE: migrations/script.py.mako
+================================================================================
+"""${message}
+
+Revision ID: ${up_revision}
+Revises: ${down_revision | comma,n}
+Create Date: ${create_date}
+"""
+from typing import Sequence, Union
+
+from alembic import op
+import sqlalchemy as sa
+${imports if imports else ""}
+
+revision: str = ${repr(up_revision)}
+down_revision: Union[str, None] = ${repr(down_revision)}
+branch_labels: Union[str, Sequence[str], None] = ${repr(branch_labels)}
+depends_on: Union[str, Sequence[str], None] = ${repr(depends_on)}
+
+
+def upgrade() -> None:
+    ${upgrades if upgrades else "pass"}
+
+
+def downgrade() -> None:
+    ${downgrades if downgrades else "pass"}
+
+================================================================================
+FILE: migrations/versions/0001_household_persistence.py
+================================================================================
+"""Create HouseholdProfile and AuditEvent persistence.
+
+Revision ID: 0001_household_persistence
+Revises:
+Create Date: 2026-07-13
+"""
+
+from typing import Sequence, Union
+
+import sqlalchemy as sa
+from alembic import op
+from sqlalchemy.dialects import postgresql
+
+revision: str = "0001_household_persistence"
+down_revision: Union[str, None] = None
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
+
+
+def upgrade() -> None:
+    op.create_table(
+        "household_profiles",
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("singleton_key", sa.Boolean(), server_default=sa.text("true"), nullable=False),
+        sa.Column("household_name", sa.String(length=200), nullable=False),
+        sa.Column("base_currency", sa.String(length=3), nullable=False),
+        sa.Column("investment_horizon", sa.Text(), nullable=False),
+        sa.Column("liquidity_needs", sa.Text(), nullable=False),
+        sa.Column("risk_statement", sa.Text(), nullable=False),
+        sa.Column("notes", sa.Text(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+        ),
+        sa.CheckConstraint("singleton_key", name="ck_household_profiles_singleton_key"),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("singleton_key", name="uq_household_profiles_singleton_key"),
+    )
+    op.create_table(
+        "audit_events",
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("household_id", sa.Uuid(), nullable=False),
+        sa.Column("actor", sa.String(length=50), nullable=False),
+        sa.Column("action", sa.String(length=50), nullable=False),
+        sa.Column("entity_type", sa.String(length=50), nullable=False),
+        sa.Column("entity_id", sa.Uuid(), nullable=False),
+        sa.Column(
+            "occurred_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+        ),
+        sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.ForeignKeyConstraint(
+            ["household_id"], ["household_profiles.id"], ondelete="RESTRICT"
+        ),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_index(
+        "ix_audit_events_household_order",
+        "audit_events",
+        ["household_id", "occurred_at", "id"],
+        unique=False,
+    )
+
+
+def downgrade() -> None:
+    op.drop_index("ix_audit_events_household_order", table_name="audit_events")
+    op.drop_table("audit_events")
+    op.drop_table("household_profiles")
+
+================================================================================
+FILE: tests/conftest.py
+================================================================================
+from __future__ import annotations
+
+import os
+from collections.abc import Generator
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
+
+from apps.api.database import get_session
+from apps.api.main import app
+
+
+@pytest.fixture(scope="session")
+def postgres_engine() -> Engine:
+    database_url = os.environ.get("TEST_DATABASE_URL")
+    if not database_url:
+        pytest.skip("TEST_DATABASE_URL is required for PostgreSQL integration tests")
+    engine = create_engine(database_url, pool_pre_ping=True)
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        yield engine
+    finally:
+        engine.dispose()
+
+
+@pytest.fixture()
+def db_session(postgres_engine: Engine) -> Generator[Session, None, None]:
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            text("TRUNCATE TABLE audit_events, household_profiles RESTART IDENTITY CASCADE")
+        )
+    session_factory = sessionmaker(bind=postgres_engine, expire_on_commit=False)
+    with session_factory() as session:
+        yield session
+
+
+@pytest.fixture()
+def api_client(postgres_engine: Engine) -> Generator[TestClient, None, None]:
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            text("TRUNCATE TABLE audit_events, household_profiles RESTART IDENTITY CASCADE")
+        )
+    session_factory = sessionmaker(bind=postgres_engine, expire_on_commit=False)
+
+    def override_session() -> Generator[Session, None, None]:
+        with session_factory() as session:
+            yield session
+
+    app.dependency_overrides[get_session] = override_session
+    try:
+        with TestClient(app) as client:
+            yield client
+    finally:
+        app.dependency_overrides.clear()
+
+================================================================================
+FILE: tests/api/test_health.py
+================================================================================
+from fastapi.testclient import TestClient
+
+from apps.api.main import app
+
+client = TestClient(app)
+
+
+def test_root_health_endpoint() -> None:
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_api_health_endpoint() -> None:
+    response = client.get("/api/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok", "service": "api"}
+
+================================================================================
+FILE: tests/api/test_households.py
+================================================================================
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import func, inspect, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from apps.api.models import AuditEvent, HouseholdProfile
+from apps.api.schemas import HouseholdCreate, HouseholdUpdate
+from apps.api.services import households as household_service
+
+HOUSEHOLD_PAYLOAD: dict[str, str] = {
+    "household_name": "Wang Household",
+    "base_currency": "USD",
+    "investment_horizon": "Long term",
+    "liquidity_needs": "User-entered liquidity context",
+    "risk_statement": "User-entered risk context",
+    "notes": "Private household notes",
+}
+
+
+def create_household(client: TestClient, payload: dict[str, Any] | None = None):
+    return client.post("/api/households", json=payload or HOUSEHOLD_PAYLOAD)
+
+
+def test_get_current_returns_404_without_household(api_client: TestClient) -> None:
+    response = api_client.get("/api/households/current")
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Household profile not found"}
+
+
+def test_create_get_and_audit_household(api_client: TestClient) -> None:
+    created = create_household(api_client)
+    assert created.status_code == 201
+    body = created.json()
+    assert body["household_name"] == HOUSEHOLD_PAYLOAD["household_name"]
+    assert body["base_currency"] == "USD"
+    assert "singleton_key" not in body
+
+    retrieved = api_client.get("/api/households/current")
+    assert retrieved.status_code == 200
+    assert retrieved.json() == body
+
+    audit = api_client.get("/api/households/current/audit-events")
+    assert audit.status_code == 200
+    events = audit.json()
+    assert len(events) == 1
+    assert events[0]["actor"] == "local-owner"
+    assert events[0]["action"] == "household.created"
+    assert events[0]["metadata"] == {"changed_fields": sorted(HOUSEHOLD_PAYLOAD)}
+    assert not set(HOUSEHOLD_PAYLOAD.values()) & set(events[0]["metadata"]["changed_fields"])
+
+
+def test_second_create_conflicts_and_client_identifiers_are_rejected(
+    api_client: TestClient,
+) -> None:
+    assert create_household(api_client).status_code == 201
+    second_create = create_household(
+        api_client, {**HOUSEHOLD_PAYLOAD, "household_name": "Other"}
+    )
+    assert second_create.status_code == 409
+
+    supplied_id = create_household(api_client, {**HOUSEHOLD_PAYLOAD, "id": "client-id"})
+    assert supplied_id.status_code == 422
+    assert "client-id" not in supplied_id.text
+
+
+@pytest.mark.parametrize("field", ["id", "actor", "created_at", "updated_at", "unknown"])
+def test_patch_rejects_unapproved_fields(api_client: TestClient, field: str) -> None:
+    assert create_household(api_client).status_code == 201
+    response = api_client.patch("/api/households/current", json={field: "sensitive-value"})
+    assert response.status_code == 422
+    assert "sensitive-value" not in response.text
+
+
+def test_patch_rejects_explicit_null(api_client: TestClient) -> None:
+    assert create_household(api_client).status_code == 201
+    response = api_client.patch("/api/households/current", json={"notes": None})
+    assert response.status_code == 422
+
+
+def test_patch_updates_allowed_fields_and_appends_ordered_audit_event(
+    api_client: TestClient,
+) -> None:
+    assert create_household(api_client).status_code == 201
+    response = api_client.patch(
+        "/api/households/current",
+        json={"household_name": "Updated Household", "notes": "Updated private notes"},
+    )
+    assert response.status_code == 200
+    assert response.json()["household_name"] == "Updated Household"
+
+    events = api_client.get("/api/households/current/audit-events").json()
+    assert [event["action"] for event in events] == ["household.created", "household.updated"]
+    assert events[1]["metadata"] == {"changed_fields": ["household_name", "notes"]}
+    assert "Updated private notes" not in str(events)
+
+
+def test_empty_and_noop_patch_return_400(api_client: TestClient) -> None:
+    assert create_household(api_client).status_code == 201
+    assert api_client.patch("/api/households/current", json={}).status_code == 400
+    noop = api_client.patch(
+        "/api/households/current", json={"household_name": HOUSEHOLD_PAYLOAD["household_name"]}
+    )
+    assert noop.status_code == 400
+    assert len(api_client.get("/api/households/current/audit-events").json()) == 1
+
+
+def test_validation_is_strict_and_does_not_echo_sensitive_input(api_client: TestClient) -> None:
+    invalid = {
+        **HOUSEHOLD_PAYLOAD,
+        "household_name": "   ",
+        "base_currency": "usd",
+        "risk_statement": "secret-risk-text",
+        "unexpected": "secret-extra-text",
+    }
+    response = create_household(api_client, invalid)
+    assert response.status_code == 422
+    assert "secret-risk-text" not in response.text
+    assert "secret-extra-text" not in response.text
+
+
+def test_database_singleton_constraint_is_enforced(db_session: Session) -> None:
+    first = HouseholdProfile(**HOUSEHOLD_PAYLOAD)
+    db_session.add(first)
+    db_session.commit()
+    db_session.add(HouseholdProfile(**{**HOUSEHOLD_PAYLOAD, "household_name": "Other"}))
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+    db_session.rollback()
+    assert db_session.scalar(select(func.count()).select_from(HouseholdProfile)) == 1
+
+
+def test_audit_failure_rolls_back_household_create(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail_audit(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("simulated audit failure")
+
+    monkeypatch.setattr(household_service, "add_audit_event", fail_audit)
+    with pytest.raises(RuntimeError, match="simulated audit failure"):
+        household_service.create_household(db_session, HouseholdCreate(**HOUSEHOLD_PAYLOAD))
+    assert db_session.scalar(select(func.count()).select_from(HouseholdProfile)) == 0
+    assert db_session.scalar(select(func.count()).select_from(AuditEvent)) == 0
+
+
+def test_audit_failure_rolls_back_household_update(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    household_service.create_household(db_session, HouseholdCreate(**HOUSEHOLD_PAYLOAD))
+
+    def fail_audit(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("simulated audit failure")
+
+    monkeypatch.setattr(household_service, "add_audit_event", fail_audit)
+    with pytest.raises(RuntimeError, match="simulated audit failure"):
+        household_service.update_current_household(
+            db_session, HouseholdUpdate(household_name="Should Roll Back")
+        )
+    db_session.expire_all()
+    household = db_session.scalar(select(HouseholdProfile))
+    assert household is not None
+    assert household.household_name == HOUSEHOLD_PAYLOAD["household_name"]
+    assert db_session.scalar(select(func.count()).select_from(AuditEvent)) == 1
+
+
+def test_migration_contains_only_approved_product_tables(postgres_engine) -> None:
+    tables = set(inspect(postgres_engine).get_table_names())
+    assert tables - {"alembic_version"} == {"household_profiles", "audit_events"}
+
+================================================================================
+FILE: tests/api/test_validation.py
+================================================================================
+import pytest
+from pydantic import ValidationError
+
+from apps.api.schemas import HouseholdCreate
+
+
+def test_household_name_is_trimmed() -> None:
+    payload = HouseholdCreate(household_name="  Home  ", base_currency="USD")
+    assert payload.household_name == "Home"
+
+
+@pytest.mark.parametrize("currency", ["usd", "US", "USDD", "12A"])
+def test_base_currency_requires_three_uppercase_letters(currency: str) -> None:
+    with pytest.raises(ValidationError):
+        HouseholdCreate(household_name="Home", base_currency=currency)
+
+
+def test_household_text_limits_are_enforced() -> None:
+    with pytest.raises(ValidationError):
+        HouseholdCreate(household_name="Home", base_currency="USD", notes="x" * 8_001)
+
+================================================================================
+FILE: frontend/package.json
+================================================================================
+{
+  "name": "compoundos-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "npm@10.9.8",
+  "engines": {
+    "node": ">=22 <23",
+    "npm": ">=10 <11"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint . --max-warnings=0",
+    "test": "vitest run",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "next": "16.2.10",
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.15.3",
+    "@types/react": "19.1.2",
+    "@types/react-dom": "19.1.2",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.1",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "16.2.10",
+    "jsdom": "29.1.1",
+    "typescript": "5.8.3",
+    "vitest": "4.1.10"
+  },
+  "overrides": {
+    "postcss": "8.5.10"
+  }
+}
+
+================================================================================
+FILE: frontend/next.config.mjs
+================================================================================
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  reactStrictMode: true,
+};
+
+export default nextConfig;
+
+================================================================================
+FILE: frontend/vitest.config.ts
+================================================================================
+import { defineConfig } from "vitest/config";
+
+export default defineConfig({
+  test: {
+    environment: "jsdom",
+    globals: true,
+  },
+});
+
+================================================================================
+FILE: frontend/lib/household-api.ts
+================================================================================
+export type HouseholdInput = {
+  household_name: string;
+  base_currency: string;
+  investment_horizon: string;
+  liquidity_needs: string;
+  risk_statement: string;
+  notes: string;
+};
+
+export type HouseholdProfile = HouseholdInput & {
+  id: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AuditEvent = {
+  id: string;
+  household_id: string;
+  actor: string;
+  action: string;
+  entity_type: string;
+  entity_id: string;
+  occurred_at: string;
+  metadata: { changed_fields?: string[] };
+};
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+
+export class HouseholdApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
+async function responseError(response: Response): Promise<HouseholdApiError> {
+  const body = (await response.json().catch(() => null)) as { detail?: unknown } | null;
+  const message =
+    typeof body?.detail === "string" ? body.detail : `Request failed with status ${response.status}`;
+  return new HouseholdApiError(message, response.status);
+}
+
+export async function getCurrentHousehold(): Promise<HouseholdProfile | null> {
+  const response = await fetch(`${API_BASE_URL}/api/households/current`, { cache: "no-store" });
+  if (response.status === 404) return null;
+  if (!response.ok) throw await responseError(response);
+  return (await response.json()) as HouseholdProfile;
+}
+
+export async function createHousehold(payload: HouseholdInput): Promise<HouseholdProfile> {
+  const response = await fetch(`${API_BASE_URL}/api/households`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw await responseError(response);
+  return (await response.json()) as HouseholdProfile;
+}
+
+export async function updateHousehold(payload: HouseholdInput): Promise<HouseholdProfile> {
+  const response = await fetch(`${API_BASE_URL}/api/households/current`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw await responseError(response);
+  return (await response.json()) as HouseholdProfile;
+}
+
+export async function getAuditEvents(): Promise<AuditEvent[]> {
+  const response = await fetch(`${API_BASE_URL}/api/households/current/audit-events`, {
+    cache: "no-store",
+  });
+  if (response.status === 404) return [];
+  if (!response.ok) throw await responseError(response);
+  return (await response.json()) as AuditEvent[];
+}
+
+================================================================================
+FILE: frontend/app/household/page.tsx
+================================================================================
+import { HouseholdClient } from "./household-client";
+
+export default function HouseholdPage() {
+  return <HouseholdClient />;
+}
+
+================================================================================
+FILE: frontend/app/household/household-client.tsx
+================================================================================
+"use client";
+
+import { FormEvent, useEffect, useState } from "react";
+
+import {
+  AuditEvent,
+  createHousehold,
+  getAuditEvents,
+  getCurrentHousehold,
+  HouseholdApiError,
+  HouseholdInput,
+  HouseholdProfile,
+  updateHousehold,
+} from "../../lib/household-api";
+
+const LOCAL_ONLY_NOTICE =
+  "This Sprint 002 build is for local, single-user development only. It has no authentication and must not be exposed to the public internet.";
+
+const NON_ADVISORY_NOTICE =
+  "CompoundOS records information you enter. It does not evaluate whether an investment policy or decision is suitable, appropriate, or likely to succeed. Policy links and validations are for recordkeeping only and do not constitute investment, tax, or legal advice.";
+
+const EMPTY_FORM: HouseholdInput = {
+  household_name: "",
+  base_currency: "USD",
+  investment_horizon: "",
+  liquidity_needs: "",
+  risk_statement: "",
+  notes: "",
+};
+
+async function fetchHouseholdData() {
+  const [profile, auditEvents] = await Promise.all([
+    getCurrentHousehold(),
+    getAuditEvents(),
+  ]);
+  return { profile, auditEvents };
+}
+
+type HouseholdFormProps = {
+  initialValue: HouseholdInput;
+  submitLabel: string;
+  onCancel?: () => void;
+  onSubmit: (value: HouseholdInput) => Promise<void>;
+};
+
+function HouseholdForm({ initialValue, submitLabel, onCancel, onSubmit }: HouseholdFormProps) {
+  const [form, setForm] = useState<HouseholdInput>(initialValue);
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  function updateField(field: keyof HouseholdInput, value: string) {
+    setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const householdName = form.household_name.trim();
+    if (!householdName) {
+      setError("Household name is required.");
+      return;
+    }
+    if (!/^[A-Z]{3}$/.test(form.base_currency)) {
+      setError("Base currency must be a three-letter uppercase code.");
+      return;
+    }
+
+    setError(null);
+    setSubmitting(true);
+    try {
+      await onSubmit({ ...form, household_name: householdName });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The household request failed.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form className="household-form" onSubmit={handleSubmit} noValidate>
+      <label>
+        Household name
+        <input
+          maxLength={200}
+          onChange={(event) => updateField("household_name", event.target.value)}
+          required
+          value={form.household_name}
+        />
+      </label>
+      <label>
+        Base currency
+        <input
+          aria-describedby="currency-hint"
+          maxLength={3}
+          onChange={(event) => updateField("base_currency", event.target.value)}
+          pattern="[A-Z]{3}"
+          required
+          value={form.base_currency}
+        />
+        <span className="hint" id="currency-hint">
+          Three uppercase letters, such as USD, CNY, or HKD. No conversion is performed.
+        </span>
+      </label>
+      <label>
+        Investment horizon
+        <textarea
+          maxLength={2000}
+          onChange={(event) => updateField("investment_horizon", event.target.value)}
+          value={form.investment_horizon}
+        />
+      </label>
+      <label>
+        Liquidity needs
+        <textarea
+          maxLength={4000}
+          onChange={(event) => updateField("liquidity_needs", event.target.value)}
+          value={form.liquidity_needs}
+        />
+      </label>
+      <label>
+        Risk statement
+        <textarea
+          maxLength={4000}
+          onChange={(event) => updateField("risk_statement", event.target.value)}
+          value={form.risk_statement}
+        />
+        <span className="hint">Saved as your text without interpretation.</span>
+      </label>
+      <label>
+        Notes
+        <textarea
+          maxLength={8000}
+          onChange={(event) => updateField("notes", event.target.value)}
+          value={form.notes}
+        />
+      </label>
+      {error ? <p className="error" role="alert">{error}</p> : null}
+      <div className="actions">
+        <button className="primary-button" disabled={submitting} type="submit">
+          {submitting ? "Saving…" : submitLabel}
+        </button>
+        {onCancel ? (
+          <button disabled={submitting} onClick={onCancel} type="button">
+            Cancel
+          </button>
+        ) : null}
+      </div>
+    </form>
+  );
+}
+
+function HouseholdSummary({ profile }: { profile: HouseholdProfile }) {
+  const fields: Array<[string, string]> = [
+    ["Base currency", profile.base_currency],
+    ["Investment horizon", profile.investment_horizon],
+    ["Liquidity needs", profile.liquidity_needs],
+    ["Risk statement", profile.risk_statement],
+    ["Notes", profile.notes],
+  ];
+
+  return (
+    <dl className="summary-grid">
+      {fields.map(([label, value]) => (
+        <div key={label}>
+          <dt>{label}</dt>
+          <dd>{value || "Not provided"}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function AuditTimeline({ events }: { events: AuditEvent[] }) {
+  return (
+    <section className="panel" aria-labelledby="audit-heading">
+      <div className="section-heading">
+        <p className="eyebrow">Read-only history</p>
+        <h2 id="audit-heading">Audit timeline</h2>
+      </div>
+      {events.length === 0 ? (
+        <p>No audit events yet.</p>
+      ) : (
+        <ol className="timeline">
+          {events.map((event) => (
+            <li key={event.id}>
+              <strong>{event.action === "household.created" ? "Profile created" : "Profile updated"}</strong>
+              <span>{new Date(event.occurred_at).toLocaleString()}</span>
+              <span>Actor: {event.actor}</span>
+              <span>Fields: {event.metadata.changed_fields?.join(", ") ?? "None"}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  );
+}
+
+export function HouseholdClient() {
+  const [profile, setProfile] = useState<HouseholdProfile | null>(null);
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+
+  async function reload() {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const result = await fetchHouseholdData();
+      setProfile(result.profile);
+      setAuditEvents(result.auditEvents);
+    } catch (caught) {
+      setLoadError(
+        caught instanceof HouseholdApiError ? caught.message : "Unable to load household data.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    let active = true;
+    void fetchHouseholdData()
+      .then((result) => {
+        if (!active) return;
+        setProfile(result.profile);
+        setAuditEvents(result.auditEvents);
+      })
+      .catch((caught: unknown) => {
+        if (!active) return;
+        setLoadError(
+          caught instanceof HouseholdApiError ? caught.message : "Unable to load household data.",
+        );
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function handleCreate(value: HouseholdInput) {
+    const created = await createHousehold(value);
+    setProfile(created);
+    setAuditEvents(await getAuditEvents());
+  }
+
+  async function handleUpdate(value: HouseholdInput) {
+    const updated = await updateHousehold(value);
+    setProfile(updated);
+    setAuditEvents(await getAuditEvents());
+    setEditing(false);
+  }
+
+  return (
+    <main className="household-shell">
+      <header className="page-header">
+        <p className="eyebrow">CompoundOS · Sprint 002 Slice 1</p>
+        <h1>Household profile</h1>
+        <p className="lede">Record the household context that you provide, with an immutable audit trail.</p>
+      </header>
+
+      <aside className="notice notice-warning" aria-label="Local-only limitation">
+        <strong>Local-only limitation</strong>
+        <p>{LOCAL_ONLY_NOTICE}</p>
+      </aside>
+      <aside className="notice" aria-label="Non-advisory notice">
+        <strong>Recordkeeping only</strong>
+        <p>{NON_ADVISORY_NOTICE}</p>
+      </aside>
+
+      {loading ? <p role="status">Loading household profile…</p> : null}
+      {loadError ? (
+        <div className="error-panel" role="alert">
+          <p>{loadError}</p>
+          <button onClick={() => void reload()} type="button">Try again</button>
+        </div>
+      ) : null}
+
+      {!loading && !loadError && !profile ? (
+        <section className="panel" aria-labelledby="create-heading">
+          <div className="section-heading">
+            <p className="eyebrow">Empty household workspace</p>
+            <h2 id="create-heading">Create the household profile</h2>
+          </div>
+          <HouseholdForm initialValue={EMPTY_FORM} onSubmit={handleCreate} submitLabel="Create profile" />
+        </section>
+      ) : null}
+
+      {!loading && !loadError && profile ? (
+        <>
+          <section className="panel" aria-labelledby="summary-heading">
+            <div className="section-heading section-heading-row">
+              <div>
+                <p className="eyebrow">Current profile</p>
+                <h2 id="summary-heading">{profile.household_name}</h2>
+              </div>
+              {!editing ? <button onClick={() => setEditing(true)} type="button">Edit profile</button> : null}
+            </div>
+            {editing ? (
+              <HouseholdForm
+                initialValue={profile}
+                onCancel={() => setEditing(false)}
+                onSubmit={handleUpdate}
+                submitLabel="Save changes"
+              />
+            ) : (
+              <HouseholdSummary profile={profile} />
+            )}
+          </section>
+          <AuditTimeline events={auditEvents} />
+        </>
+      ) : null}
+    </main>
+  );
+}
+
+================================================================================
+FILE: frontend/app/household/page.test.tsx
+================================================================================
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { HouseholdClient } from "./household-client";
+
+const profile = {
+  id: "household-1",
+  household_name: "Wang Household",
+  base_currency: "USD",
+  investment_horizon: "Long term",
+  liquidity_needs: "Flexible",
+  risk_statement: "User-authored statement",
+  notes: "Private notes",
+  created_at: "2026-07-13T00:00:00Z",
+  updated_at: "2026-07-13T00:00:00Z",
+};
+
+const auditEvent = {
+  id: "event-1",
+  household_id: profile.id,
+  actor: "local-owner",
+  action: "household.created",
+  entity_type: "HouseholdProfile",
+  entity_id: profile.id,
+  occurred_at: "2026-07-13T00:00:00Z",
+  metadata: { changed_fields: ["household_name"] },
+};
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+describe("HouseholdClient", () => {
+  it("shows the empty state and both required limitations", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ detail: "Not found" }, 404)));
+    render(<HouseholdClient />);
+
+    expect(await screen.findByRole("heading", { name: "Create the household profile" })).toBeTruthy();
+    expect(screen.getByText(/local, single-user development only/)).toBeTruthy();
+    expect(screen.getByText(/do not constitute investment, tax, or legal advice/)).toBeTruthy();
+  });
+
+  it("validates the create form before sending a request", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ detail: "Not found" }, 404));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<HouseholdClient />);
+    await screen.findByRole("heading", { name: "Create the household profile" });
+
+    await userEvent.clear(screen.getByLabelText("Household name"));
+    await userEvent.click(screen.getByRole("button", { name: "Create profile" }));
+    expect(screen.getByRole("alert").textContent).toContain("Household name is required");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("creates a profile and renders the summary and audit timeline", async () => {
+    let created = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        if (init?.method === "POST") {
+          created = true;
+          return jsonResponse(profile, 201);
+        }
+        if (url.endsWith("/audit-events")) return jsonResponse(created ? [auditEvent] : [], created ? 200 : 404);
+        return created ? jsonResponse(profile) : jsonResponse({ detail: "Not found" }, 404);
+      }),
+    );
+    render(<HouseholdClient />);
+    await screen.findByRole("heading", { name: "Create the household profile" });
+
+    await userEvent.type(screen.getByLabelText("Household name"), profile.household_name);
+    await userEvent.click(screen.getByRole("button", { name: "Create profile" }));
+
+    expect(await screen.findByRole("heading", { name: profile.household_name })).toBeTruthy();
+    expect(screen.getByText("Profile created")).toBeTruthy();
+    expect(screen.getByText("Actor: local-owner")).toBeTruthy();
+  });
+
+  it("loads an existing profile and saves edits", async () => {
+    let current = profile;
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === "PATCH") {
+        current = { ...profile, household_name: "Updated Household" };
+        return jsonResponse(current);
+      }
+      if (url.endsWith("/audit-events")) return jsonResponse([auditEvent]);
+      return jsonResponse(current);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<HouseholdClient />);
+    await screen.findByRole("heading", { name: profile.household_name });
+
+    await userEvent.click(screen.getByRole("button", { name: "Edit profile" }));
+    const nameInput = screen.getByLabelText("Household name");
+    await userEvent.clear(nameInput);
+    await userEvent.type(nameInput, "Updated Household");
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByRole("heading", { name: "Updated Household" })).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringMatching(/\/api\/households\/current$/),
+      expect.objectContaining({ method: "PATCH" }),
+    );
+  });
+
+  it("shows a singleton conflict returned by the API", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+        if (init?.method === "POST") {
+          return jsonResponse({ detail: "A household profile already exists" }, 409);
+        }
+        return jsonResponse({ detail: "Not found" }, 404);
+      }),
+    );
+    render(<HouseholdClient />);
+    await screen.findByRole("heading", { name: "Create the household profile" });
+    await userEvent.type(screen.getByLabelText("Household name"), "Another Household");
+    await userEvent.click(screen.getByRole("button", { name: "Create profile" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toContain("already exists");
+    });
+  });
+
+  it("does not render prohibited product surfaces", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) =>
+        String(input).endsWith("/audit-events") ? jsonResponse([]) : jsonResponse(profile),
+      ),
+    );
+    render(<HouseholdClient />);
+    await screen.findByRole("heading", { name: profile.household_name });
+
+    expect(screen.queryByText(/score/i)).toBeNull();
+    expect(screen.queryByText(/guardian/i)).toBeNull();
+    expect(screen.queryByText(/trading/i)).toBeNull();
+    expect(screen.queryByText(/target allocation/i)).toBeNull();
+  });
+});
+
+================================================================================
+FILE: frontend/app/layout.tsx
+================================================================================
+import type { Metadata } from "next";
+import type { ReactNode } from "react";
+
+import "./globals.css";
+
+export const metadata: Metadata = {
+  title: "CompoundOS",
+  description: "Local household discipline workspace for CompoundOS",
+};
+
+export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
+  return (
+    <html lang="en">
+      <body>{children}</body>
+    </html>
+  );
+}
+
+================================================================================
+FILE: frontend/app/page.tsx
+================================================================================
+import Link from "next/link";
+
+export default function HomePage() {
+  return (
+    <main className="shell">
+      <h1>CompoundOS</h1>
+      <p>Local household discipline workspace.</p>
+      <Link className="primary-link" href="/household">
+        Open household profile
+      </Link>
+    </main>
+  );
+}
+
+================================================================================
+FILE: frontend/app/globals.css
+================================================================================
+:root {
+  color-scheme: light;
+  --ink: #17211b;
+  --muted: #5e6c63;
+  --line: #d7ded9;
+  --paper: #f7f8f4;
+  --panel: #ffffff;
+  --accent: #1f5b43;
+  --accent-soft: #e8f0eb;
+  --warning: #7a4a13;
+  --warning-soft: #fff4df;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+button, input, textarea { font: inherit; }
+
+button, .primary-link {
+  border: 1px solid var(--line);
+  border-radius: 0.45rem;
+  background: var(--panel);
+  color: var(--ink);
+  cursor: pointer;
+  padding: 0.65rem 0.9rem;
+  text-decoration: none;
+}
+
+button:focus-visible, input:focus-visible, textarea:focus-visible, a:focus-visible {
+  outline: 3px solid #86ad99;
+  outline-offset: 2px;
+}
+
+button:disabled { cursor: wait; opacity: 0.65; }
+
+.primary-button, .primary-link {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+.shell, .household-shell {
+  margin: 0 auto;
+  max-width: 58rem;
+  padding: 3rem 1.25rem 5rem;
+}
+
+.shell { min-height: 100vh; }
+.shell p { color: var(--muted); margin-bottom: 2rem; }
+
+.page-header { margin-bottom: 2rem; }
+.page-header h1 { font-size: clamp(2.3rem, 6vw, 4rem); margin: 0.3rem 0 0.8rem; }
+.lede { color: var(--muted); font-size: 1.12rem; line-height: 1.6; max-width: 46rem; }
+.eyebrow { color: var(--accent); font-size: 0.76rem; font-weight: 700; letter-spacing: 0.11em; margin: 0; text-transform: uppercase; }
+
+.notice, .panel, .error-panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 0.7rem;
+  margin-bottom: 1rem;
+  padding: 1.15rem 1.25rem;
+}
+
+.notice p { color: var(--muted); line-height: 1.55; margin: 0.4rem 0 0; }
+.notice-warning { background: var(--warning-soft); border-color: #e6c99c; color: var(--warning); }
+.panel { margin-top: 1.5rem; padding: clamp(1.25rem, 4vw, 2rem); }
+.section-heading { margin-bottom: 1.4rem; }
+.section-heading h2 { margin: 0.35rem 0 0; }
+.section-heading-row { align-items: center; display: flex; justify-content: space-between; gap: 1rem; }
+
+.household-form { display: grid; gap: 1rem; }
+.household-form label { display: grid; font-weight: 650; gap: 0.4rem; }
+.household-form input, .household-form textarea {
+  background: white;
+  border: 1px solid #aeb9b1;
+  border-radius: 0.4rem;
+  color: var(--ink);
+  padding: 0.7rem 0.75rem;
+}
+.household-form textarea { min-height: 6rem; resize: vertical; }
+.hint { color: var(--muted); font-size: 0.82rem; font-weight: 400; line-height: 1.4; }
+.actions { display: flex; gap: 0.7rem; margin-top: 0.4rem; }
+.error { color: #a42c25; margin: 0; }
+.error-panel { border-color: #db938e; color: #8f221c; }
+
+.summary-grid { display: grid; gap: 0; margin: 0; }
+.summary-grid div { border-top: 1px solid var(--line); display: grid; gap: 1rem; grid-template-columns: minmax(9rem, 0.35fr) 1fr; padding: 0.9rem 0; }
+.summary-grid dt { color: var(--muted); font-weight: 650; }
+.summary-grid dd { margin: 0; white-space: pre-wrap; }
+
+.timeline { display: grid; gap: 0.8rem; list-style: none; margin: 0; padding: 0; }
+.timeline li { background: var(--accent-soft); border-left: 3px solid var(--accent); display: grid; gap: 0.25rem; padding: 0.9rem 1rem; }
+.timeline span { color: var(--muted); font-size: 0.86rem; }
+
+@media (max-width: 640px) {
+  .section-heading-row { align-items: flex-start; flex-direction: column; }
+  .summary-grid div { gap: 0.35rem; grid-template-columns: 1fr; }
+}
+
+================================================================================
+FILE: README.md
+================================================================================
+# CompoundOS
+
+CompoundOS is a long-term AI Family Office and Wealth Operating System. Sprint
+002 Slice 1 adds a local-only household recordkeeping workflow to the validated
+Sprint 001 foundation.
+
+> **Local-only security boundary:** This Sprint 002 build is for local,
+> single-user development only. It has no authentication and must not be exposed
+> to the public internet.
+
+## Current Scope
+
+- Create, read, and update the sole `HouseholdProfile`.
+- Persist the profile and append-only `AuditEvent` records in PostgreSQL.
+- Show the household summary and read-only audit timeline at `/household`.
+- Keep all policy, allocation, journal, AI, Guardian, broker, trading, and
+  authentication behavior out of Slice 1.
+
+## Repository Layout
+
+- apps/api: FastAPI backend service
+- frontend: Next.js frontend application shell
+- migrations: explicit Alembic database migrations
+- docs: product, architecture, and governance documentation
+- tests: backend health, API, validation, migration, and PostgreSQL integration tests
+
+## Local Development
+
+### Prerequisites
+
+- Node.js 22.x
+- npm 10.x (the repository standard; use the committed `package-lock.json`)
+- Python 3.9 or newer
+- PostgreSQL 16 for local database-backed API work, or Docker with Compose
+
+Sprint 001.1 uses Next.js 16.2.10 with TypeScript. See
+`docs/ADR/0001-frontend-framework-and-package-manager.md` for the accepted version
+and package-manager decision.
+
+### Backend
+
+1. Create a virtual environment: `python3 -m venv .venv`
+2. Activate it: `source .venv/bin/activate`
+3. Install dependencies: `python -m pip install -r requirements.txt`
+4. Copy `.env.example` to `.env`, then export it for the current shell with
+   `set -a; source .env; set +a`.
+5. Apply the explicit migration: `alembic upgrade head`
+6. Check the migration revision: `alembic current`
+7. Start the API: `python -m uvicorn apps.api.main:app --reload`
+
+The backend is available at `http://localhost:8000`; its health endpoint is
+`GET /api/health`.
+
+The application never creates tables implicitly at startup. Migration to Alembic
+head is a required, separate step.
+
+### Household API
+
+FastAPI publishes interactive local API documentation at `http://127.0.0.1:8000/docs`.
+Slice 1 exposes only:
+
+- `POST /api/households` — create the sole profile; a later create returns 409
+- `GET /api/households/current` — read the profile; returns 404 when absent
+- `PATCH /api/households/current` — update approved fields; empty/no-op returns 400
+- `GET /api/households/current/audit-events` — read the stable audit timeline
+
+Request bodies reject undeclared fields. Responses use explicit schemas and do
+not expose ORM-only singleton state.
+
+### Frontend
+
+1. Change directories: `cd frontend`
+2. Install dependencies: `npm ci`
+3. Start the development server: `npm run dev`
+
+The frontend is available at `http://127.0.0.1:3000`; its health endpoint is
+`GET /api/health`, and the approved Slice 1 flow is at `/household`.
+
+### Validation
+
+- Database migration: `alembic upgrade head && alembic current`
+- Backend lint: `ruff check apps tests`
+- Backend tests: `TEST_DATABASE_URL="$DATABASE_URL" pytest -q`
+- Frontend lint: `npm --prefix frontend run lint`
+- Frontend type check: `npm --prefix frontend run type-check`
+- Frontend tests: `npm --prefix frontend test`
+- Frontend production build: `npm --prefix frontend run build`
+
+## Environment Variables
+
+Copy `.env.example` to `.env` and adjust values if needed. The example contains
+development-only placeholders and no real secrets.
+
+## Local Infrastructure
+
+The containerized local stack includes the Next.js frontend, FastAPI backend,
+PostgreSQL, and Redis:
+
+1. Copy `.env.example` to `.env` if local overrides are needed.
+2. Validate the configuration: `docker compose config`
+3. Build and start the stack: `docker compose up --build -d`
+4. Check service state: `docker compose ps`
+5. Verify `http://localhost:3000/api/health` and
+   `http://localhost:8000/health`.
+6. Stop the stack: `docker compose down`
+
+Compose binds web, API, PostgreSQL, and Redis host ports to `127.0.0.1`. A
+one-shot `migrate` service applies Alembic before the API starts. Redis remains
+in the development stack but carries no Slice 1 product logic.
+
+## Monorepo Convention
+
+The current validated layout keeps the API in `apps/api/` and the web application
+in `frontend/`. A possible migration from `frontend/` to `apps/web/` is deferred
+to a separately approved sprint; Sprint 001.1 does not restructure working code.
+
+## Notes
+
+This slice intentionally does not implement investment policy, target allocation,
+decision journals, trading, broker integrations, authentication, Guardian logic,
+or autonomous agents. Sprint 002 is not complete, and Slice 2 is not authorized.
+
+================================================================================
+FILE: docs/ADR/0002-postgresql-persistence-and-transactions.md
+================================================================================
+# ADR 0002: PostgreSQL Persistence and Transactions
+
+- Date: 2026-07-13
+- Status: Accepted for Sprint 002 Slice 1
+
+## Context
+
+HouseholdProfile and its AuditEvent must persist across refreshes, enforce one
+total household under concurrent creation, and commit business and audit writes
+atomically. The existing FastAPI service has no persistence layer.
+
+## Decision
+
+- Use PostgreSQL as the only formal Slice 1 product store.
+- Use synchronous SQLAlchemy 2.x sessions with the psycopg 3 driver. Do not mix
+  synchronous and asynchronous database access.
+- Keep one request-scoped session and place each create or actual update plus its
+  AuditEvent in one short service-level transaction.
+- Keep SQLAlchemy queries and record construction in small repository functions;
+  keep commit/rollback ownership in the service transaction boundary.
+- Use explicit Alembic migrations. The application must not create tables
+  implicitly at startup. Compose uses a one-shot migration service before API start.
+- Store only changed field names in AuditEvent metadata, never the full household
+  values. The actor is the documented local-only constant `local-owner`.
+- Enforce at most one HouseholdProfile with a database check and unique singleton
+  sentinel. Convert a duplicate integrity failure to HTTP 409.
+- Keep Redis in the development stack but use it for no Slice 1 product behavior.
+- Run migration, repository, constraint, API, and transaction rollback tests
+  against real PostgreSQL. SQLite and mocks cannot replace those tests.
+
+## Consequences
+
+- Database-backed requests are synchronous and intentionally small; no external
+  calls occur inside their transactions.
+- Both the HouseholdProfile write and AuditEvent write roll back if either fails.
+- Alembic must reach head before the API can serve household requests.
+- The initial migration supports a development downgrade, but no production-grade
+  downgrade guarantee is made in this slice.
+- psycopg binary packages are used for reproducible local and CI installation;
+  production packaging remains outside this local-only slice.
+- Changing the database driver, sync/async model, session boundary, migration
+  strategy, singleton mechanism, or atomic-audit guarantee requires a new ADR.
+
+================================================================================
+FILE: docs/ARCHITECTURE.md
+================================================================================
+# Architecture
+
+## Overview
+
+CompoundOS will use a modular monorepo with a Next.js frontend, a FastAPI backend, PostgreSQL, Redis, Docker-based local development, and future decision-support services.
+
+## Sprint 002 Slice 1 Architecture
+
+- Frontend: Next.js 16.2.10 App Router application with TypeScript in `frontend/`
+- Backend: FastAPI routers, Pydantic contracts, a small service transaction layer,
+  and SQLAlchemy repositories in `apps/api/`
+- Data: PostgreSQL through synchronous SQLAlchemy 2.x and psycopg 3; Redis carries
+  no Slice 1 product logic
+- Local infrastructure: `compose.yaml` defines the web, API, PostgreSQL, and Redis
+  services using Dockerfiles aligned with the current repository paths; runtime
+  verification remains pending in a Docker-enabled environment
+- Migration: explicit Alembic revisions in `migrations/`; application startup never
+  calls `create_all`
+- Validation: real PostgreSQL integration tests plus pytest and Ruff for the
+  backend; Vitest, ESLint, TypeScript, and the Next.js production build for the
+  frontend
+
+## Module Boundaries
+
+- `routers/households.py`: four approved HTTP contracts and status mapping
+- `schemas.py`: strict request/response contracts and technical field limits
+- `services/households.py`: create/update transaction boundaries and domain errors
+- `repositories/households.py`: SQLAlchemy queries and minimal AuditEvent writes
+- `models.py`: only `household_profiles` and `audit_events`
+- `frontend/app/household/`: local-only create/read/update/audit workflow
+- `frontend/lib/household-api.ts`: typed browser-to-API boundary
+
+No Policy, Allocation, Journal, User, Account, AI, Guardian, Broker, or trading
+module is created in Slice 1.
+
+## Transaction Flow
+
+1. FastAPI validates and sanitizes the request contract.
+2. A request-scoped synchronous SQLAlchemy session enters one short transaction.
+3. The service inserts or updates HouseholdProfile and flushes it.
+4. The repository inserts an AuditEvent containing changed field names only.
+5. Both writes commit together; any failure rolls both back.
+
+The database singleton uses a required boolean sentinel constrained to true and
+unique across `household_profiles`. It prevents concurrent requests from storing
+two profiles; the API maps the resulting integrity conflict to HTTP 409.
+
+## Migration and CI
+
+Alembic revision `0001_household_persistence` upgrades an empty database and
+creates only the two approved product tables. The initial downgrade is provided
+for development, without promising a production downgrade strategy. CI starts an
+isolated PostgreSQL 16 service, runs `alembic upgrade head` and `alembic current`,
+then runs repository/API/rollback tests against that real database. SQLite and
+mocks do not replace these integration tests.
+
+## Local Network Boundary
+
+Browser requests use `NEXT_PUBLIC_API_URL` to reach FastAPI. CORS permits only the
+two local web origins. Compose publishes all four host ports on `127.0.0.1`; an
+automated expanded-config check rejects broader default bindings. Containers may
+listen on `0.0.0.0` internally. This is not authentication and is not suitable for
+public deployment.
+
+## Repository Layout Decision
+
+The mixed `apps/api/` and `frontend/` layout is intentional for Sprint 001.1
+because it is functional, small, and already validated. A future migration to
+`apps/web/` and `apps/api/` would improve naming symmetry, but it is not required
+for correctness and would add unnecessary review risk to this hardening sprint.
+Any migration requires approval in a later sprint.
+
+Frontend dependencies are installed reproducibly with npm and the committed
+`frontend/package-lock.json`. Node.js 22.x and npm 10.x are the documented local
+and CI toolchain.
+
+## Principles
+
+- Keep the initial architecture simple and reviewable.
+- Favor explicit contracts and documentable boundaries.
+- Avoid speculative service logic and future-slice abstractions.
+
+## Deferred
+
+- Complete full Docker application runtime verification in a Docker-enabled environment.
+- Decide whether to migrate `frontend/` to `apps/web/` in a later approved sprint.
+- Any later persistence, authentication, policy, journal, Guardian, AI, or broker
+  architecture requires separate approval.
+
+================================================================================
+FILE: docs/PRD.md
+================================================================================
+# Product Requirements Document
+
+## Status
+
+Approved for Sprint 002 Implementation Slice 1 only. Sprint 002 remains In
+Progress, and Slice 2 is not authorized.
+
+## Summary
+
+Slice 1 provides a local, single-user HouseholdProfile record with PostgreSQL
+persistence and an append-only AuditEvent timeline. It records user-entered
+context without interpreting it or providing investment advice.
+
+## User Stories
+
+- As the local owner, I can create the sole HouseholdProfile.
+- As the local owner, I can refresh and retrieve the persisted profile.
+- As the local owner, I can update approved profile fields.
+- As the local owner, I can inspect a read-only, stably ordered audit timeline.
+- As the local owner, I receive a 409 if any later create is attempted.
+
+## Approved Fields and Technical Limits
+
+- `household_name`: required, trimmed, 1–200 characters
+- `base_currency`: required, exactly three uppercase ASCII letters
+- `investment_horizon`: optional free text, at most 2,000 characters
+- `liquidity_needs`: optional free text, at most 4,000 characters
+- `risk_statement`: optional free text, at most 4,000 characters
+- `notes`: optional free text, at most 8,000 characters
+
+These are input-safety limits, not investment rules. `base_currency` is stored as
+context only; no conversion occurs. `risk_statement` is never interpreted.
+
+## Lifecycle and Audit Boundary
+
+- The database permits at most one HouseholdProfile in total.
+- The first create succeeds; every later create returns HTTP 409.
+- Clients cannot supply identifiers, actors, or timestamps.
+- Slice 1 has no household active, inactive, archived, deleted, or replacement
+  state and no product delete endpoint.
+- Create and actual update append an AuditEvent in the same transaction.
+- Empty and no-op PATCH requests return HTTP 400 and do not create AuditEvents.
+- Audit metadata lists changed field names only; it does not copy sensitive text.
+
+## Local-Only Requirements
+
+- No authentication or authorization is implemented.
+- The application is limited to local, single-user development.
+- Web, API, PostgreSQL, and Redis host ports bind to `127.0.0.1` by default.
+- Public internet exposure is prohibited.
+- The approved non-advisory notice appears on first entry to the household flow.
+
+## Acceptance Criteria
+
+- Create returns 201, persists through refresh, and emits an atomic AuditEvent.
+- Current GET returns the profile or a clear 404.
+- Approved PATCH fields persist and emit an atomic AuditEvent.
+- Undeclared fields and client-controlled server fields are rejected without
+  echoing sensitive values.
+- Database constraints prevent a second profile, including concurrent attempts.
+- Audit events are read-only, stably ordered, attributed to `local-owner`, and
+  contain no full sensitive field values.
+- Alembic upgrades an empty PostgreSQL database to head, and integration tests use
+  real PostgreSQL.
+- Household UI covers loading, empty, create, summary, edit, 409, error, and audit
+  states with the required local-only and non-advisory notices.
+- Existing health, lint, type-check, test, build, audit, Compose, and CI checks pass.
+
+## Explicit Non-Goals for Slice 1
+
+- Investment Policy, target asset allocation, policy lifecycle, Decision Journal,
+  or DecisionCorrection
+- AI, AI Investment Committee, Guardian logic, thresholds, alerts, or notifications
+- Broker integrations, market data, recommendations, suitability, eligibility,
+  scores, rankings, or trading
+- Authentication, authorization, household members, multiple households, or tenancy
+- Accounts, holdings, amounts, balances, quantities, prices, costs, returns, or trades
+- Export, product hard delete, Redis product logic, public deployment, or Slice 2
+
+================================================================================
+FILE: docs/MASTER_PLAN.md
+================================================================================
+# Master Plan
+
+## Long-term Goal
+
+Build CompoundOS as a trustworthy, explainable operating system for family office and wealth management workflows, beginning with a documented and testable foundation.
+
+## Milestones
+
+- Milestone 1: Foundation and governance scaffold
+- Milestone 2: Core platform services and health monitoring
+- Milestone 3: Decision support workflows and review interfaces
+
+## Current Sprint
+
+- Sprint 001: Project Foundation
+- Status: Done
+- Scope: final foundation verification, frontend health test, and Docker-based
+  local development configuration
+- Sprint 002: In Progress
+- Current approved work: Implementation Slice 1 — Household and Persistence
+  Foundation
+- Slice 2: Not approved
+
+## Planning
+
+- Sprint 002 selected direction: Household Investment Policy + Decision Journal.
+- Planning pull request #4 completed independent planning review and is approved
+  for merge.
+- Planning is complete. Sprint 002 Slice 1 implementation is authorized; later
+  implementation slices remain unauthorized.
+
+## Backlog
+
+- Complete Docker runtime verification in a Docker-enabled environment
+- Decide whether to migrate `frontend/` to `apps/web/`
+- Add backend domain modules
+- Introduce data persistence and orchestration
+- Add Guardian monitoring workflows
+- Add AI Investment Committee workflows
+- Add notification escalation capabilities
+
+## In Progress
+
+- Sprint 002 Slice 1: HouseholdProfile, PostgreSQL persistence, AuditEvent, and
+  the local-only household UI
+
+## Review
+
+- Planning PR #4 initial review requested documentation changes.
+- Required planning changes were addressed.
+- Final planning review conclusion: APPROVE.
+- Planning PR #4 approved for merge.
+- Sprint 002 Slice 1 requires independent review before it can be accepted.
+- Sprint 002 remains In Progress; Slice 2 is not authorized.
+
+## Done
+
+- Sprint 001: Project Foundation
+- Sprint 001.1: Repository Hardening
+- Repository structure created
+- Basic health endpoints implemented
+- Initial documentation scaffold added
+- Backend and frontend validation commands added
+- Production frontend dependency audit completed with no known vulnerabilities
+- CompoundOS repository isolated from unrelated parent-directory files
+- npm, Node.js, TypeScript, and Next.js version decisions documented
+- ADR 0001 accepted for the frontend framework and package manager
+- Sprint 001 Git identity corrected using the approved repository-local identity
+- Intended empty GitHub repository verified
+- Pull request #1 squash-merged into `main` as
+  `b3801c64fa09856d491317b0ebda45007c210ae0`
+- GitHub Actions backend and frontend checks passed for push and pull request events
+- Frontend health endpoint automated test added and included in CI
+- Docker Compose and Dockerfiles added with static YAML, context, path, and command
+  consistency validation
+- Pull request #3 squash-merged into `main` as
+  `e117a4d936872342dee2baa7012c76816a708d81`
+
+## Decision Log
+
+- 2026-07-11: Use a minimal monorepo with FastAPI and Next.js placeholders for Sprint 001.
+- 2026-07-11: Avoid implementing investment logic, trading, brokers, or autonomous agents in this sprint.
+- 2026-07-11: Defer Docker Compose until it can be validated in a Docker-enabled environment.
+- 2026-07-12: Isolate CompoundOS in a dedicated repository directory while preserving Sprint 001 history.
+- 2026-07-12: Standardize on Node.js 22, npm 10, TypeScript, and Next.js 16.2.10.
+- 2026-07-12: Retain `frontend/` alongside `apps/api/` for Sprint 001.1; evaluate `apps/web/` later.
+- 2026-07-12: Complete Sprint 001.1 after local validation and GitHub Actions passed.
+- 2026-07-12: Finalize Sprint 001 and Sprint 001.1 through pull request #1 using a
+  squash merge (`b3801c64fa09856d491317b0ebda45007c210ae0`).
+- 2026-07-12: Keep Sprint 002 Not Started; the next approved action is planning only.
+- 2026-07-12: Reopen Sprint 001 in Review to add the approved Docker development
+  configuration and frontend health test without beginning Sprint 002.
+- 2026-07-12: Record Docker runtime verification as pending; do not claim container
+  validation until Docker is available.
+- 2026-07-12: Sprint 001 independent code review passed with the conclusion
+  APPROVE WITH NON-BLOCKING FOLLOW-UP.
+- 2026-07-12: Treat Docker runtime verification as a non-blocking follow-up and
+  retain it in the Backlog.
+- 2026-07-12: Approve pull request #3 for merge; Sprint 002 remains Not Started.
+- 2026-07-13: Sprint 002 planning authorized.
+- 2026-07-13: Planning does not authorize Sprint 002 implementation.
+- 2026-07-13: Selected Sprint 002 candidate A, Household Investment Policy +
+  Decision Journal.
+- 2026-07-13: Approved the single-household, local-only, no-authentication boundary.
+- 2026-07-13: Approved user-entered target allocation percentages while prohibiting
+  actual holdings, accounts, and monetary data.
+- 2026-07-13: Confirmed no AI, Guardian, broker integration, recommendations, or
+  trading in Sprint 002.
+- 2026-07-13: Planning approval does not yet authorize implementation.
+- 2026-07-13: Standardized policy lifecycle as Draft → Published → Superseded.
+- 2026-07-13: Standardized journal lifecycle as Draft → Confirmed → Archived with
+  appended DecisionCorrection records outside the lifecycle state machine.
+- 2026-07-13: Required a database-enforced or transaction-safe constraint allowing
+  at most one total HouseholdProfile.
+- 2026-07-13: Required localhost-only host port bindings for the local MVP.
+- 2026-07-13: Required real PostgreSQL integration and transaction rollback tests.
+- 2026-07-13: Approved provisional local-MVP non-advisory copy.
+- 2026-07-13: Approved the temporary local-MVP retention and reset boundary.
+- 2026-07-13: Confirmed production compliance, authentication, export, backup, and
+  encryption remain deferred.
+- 2026-07-13: Planning PR #4 must merge before any separate Sprint 002
+  implementation approval; Sprint 002 remains Not Started.
+- 2026-07-13: Corrected the policy publish contract to publish an
+  InvestmentPolicyDraft.
+- 2026-07-13: Confirmed DecisionCorrection is an append-only correction record,
+  not a journal lifecycle state.
+- 2026-07-13: Confirmed Sprint 002 permits at most one total HouseholdProfile and
+  defines no household archive or inactive lifecycle.
+- 2026-07-13: Planning PR #4 final independent review passed.
+- 2026-07-13: Planning PR #4 approved for merge.
+- 2026-07-13: Planning merge does not authorize Sprint 002 implementation.
+- 2026-07-13: Sprint 002 Slice 1 implementation authorized.
+- 2026-07-13: Slice 1 scope is limited to HouseholdProfile, PostgreSQL,
+  AuditEvent, and the household UI.
+- 2026-07-13: Later Sprint 002 slices remain unauthorized.
+
+================================================================================
+FILE: docs/CHANGELOG.md
+================================================================================
+# Changelog
+
+## [Unreleased] - Sprint 002 Slice 1 In Progress
+
+### Added
+
+- PostgreSQL-backed sole HouseholdProfile create, current-read, and update APIs
+- Atomic append-only AuditEvent creation and read-only timeline API
+- Explicit Alembic migration for `household_profiles` and `audit_events`
+- Local-only Household page with create, summary, edit, validation, error, and audit states
+- Real PostgreSQL CI service, migration, singleton, and transaction rollback checks
+- ADR 0002 for synchronous PostgreSQL persistence and transaction boundaries
+
+### Boundaries
+
+- All host ports default to `127.0.0.1`; no authentication or public deployment
+- No Policy, Allocation, Journal, AI, Guardian, Broker, recommendation, trading,
+  actual holdings, accounts, or monetary data
+- Sprint 002 is not complete, and Slice 2 is not authorized
+
+### Validation Status
+
+- Local Ruff, backend tests available without PostgreSQL, frontend lint,
+  type-check, tests, production build, dependency audit, Alembic offline SQL,
+  YAML parsing, localhost binding inspection, and secret scan pass
+- Real PostgreSQL and Compose checks run in GitHub CI
+- Docker CLI is unavailable in the local implementation environment, so full
+  local application runtime verification remains pending
+
+## [Unreleased] - Sprint 001 Complete
+
+### Added
+
+- Frontend health endpoint test using the Node.js test runner
+- CI execution of the frontend health test
+- CI validation of the Docker Compose configuration
+- Dockerfiles for the existing `frontend/` and `apps/api/` applications
+- `compose.yaml` for the web, API, PostgreSQL, and Redis local stack
+- Docker build-context ignore files
+
+### Validation
+
+- Frontend lint, type-check, health test, production build, and production
+  dependency audit pass locally
+- Backend Ruff and pytest checks pass locally
+- Compose YAML, CI YAML, build contexts, dependency paths, and container commands
+  pass static consistency checks
+- Docker runtime verification was not completed because Docker is unavailable in
+  the current environment
+
+### Status
+
+- Sprint 001: Done and approved for merge after independent code review
+- Review conclusion: APPROVE WITH NON-BLOCKING FOLLOW-UP
+- Docker runtime verification remains an explicitly disclosed non-blocking
+  follow-up
+- Sprint 002: Not Started
+- This entry records foundation completion and is not a product feature release
+
+## [0.1.1] - 2026-07-12
+
+### Changed
+
+- Isolated CompoundOS in a dedicated Git repository directory without changing
+  unrelated parent-directory files
+- Standardized the frontend on Node.js 22, npm 10, TypeScript, and pinned
+  Next.js 16.2.10
+- Documented the current `frontend/` plus `apps/api/` monorepo layout
+- Added ADR 0001 for the frontend framework and package-manager decision
+
+### Delivery
+
+- Corrected the Sprint 001 commit to use the approved repository-local Git identity
+- Verified the intended GitHub repository is empty before initial push
+- Finalized Sprint 001 and Sprint 001.1 through pull request #1
+- Squash-merged the reviewed foundation into `main` as
+  `b3801c64fa09856d491317b0ebda45007c210ae0`
+- Confirmed GitHub Actions backend and frontend checks pass for push and pull
+  request events
+
+### Status
+
+- Sprint 001: Done
+- Sprint 001.1: Done
+- Sprint 002: Not Started
+
+## [0.1.0] - 2026-07-11
+
+### Added
+
+- Initial monorepo structure for frontend and backend
+- Documentation foundation for vision, roadmap, architecture, and governance
+- Minimal FastAPI health endpoints
+- Automated health tests and linting configuration
+- CI workflow for backend and frontend validation
+- Minimal Next.js application shell and web health endpoint
+
+### Deferred
+
+- Docker Compose configuration, pending validation in a Docker-enabled environment

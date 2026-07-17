@@ -9,8 +9,16 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from apps.api.database import get_session
-from apps.api.main import app
+# If TEST_DATABASE_URL is set, ensure DATABASE_URL also points there
+# so SessionLocal (in apps.api.database) uses the test database
+# for independent-session assertions. Must happen BEFORE importing
+# apps.api.database, which creates its engine at import time.
+_test_url = os.environ.get("TEST_DATABASE_URL", "").strip()
+if _test_url:
+    os.environ.setdefault("DATABASE_URL", _test_url)
+
+from apps.api.database import get_session  # noqa: E402
+from apps.api.main import app  # noqa: E402
 
 
 def postgres_test_database_url() -> str:

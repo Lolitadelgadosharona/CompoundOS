@@ -1,0 +1,2402 @@
+diff --git a/README.md b/README.md
+index 31f47fc..19200ba 100644
+--- a/README.md
++++ b/README.md
+@@ -1,8 +1,8 @@
+ # CompoundOS
+ 
+ CompoundOS is a long-term AI Family Office and Wealth Operating System. Sprint
+-002 now includes the local-only Household workflow and the Slice 2B Investment
+-Policy backend API on top of the validated foundation.
++002 now includes the local-only Household workflow and the Slice 2C Investment
++Policy frontend workflow on top of the validated backend foundation.
+ 
+ > **Local-only security boundary:** This Sprint 002 build is for local,
+ > single-user development only. It has no authentication and must not be exposed
+@@ -15,8 +15,11 @@ Policy backend API on top of the validated foundation.
+ - Show the household summary and read-only audit timeline at `/household`.
+ - Record user-authored Investment Policy Draft text and target percentages through
+   the backend API, then publish immutable Version snapshots.
+-- Keep Policy frontend, journal, AI, Guardian, broker, trading, recommendation,
+-  and authentication behavior outside the current implementation.
++- Use `/policy` to create and edit the sole Policy Draft, explicitly save text and
++  allocations, review and publish immutable Versions, inspect history and audit
++  events, and start a blank or current-Published-derived Draft.
++- Keep Decision Journal, AI, Guardian, broker, trading, recommendation, and
++  authentication behavior outside the current implementation.
+ 
+ ## Repository Layout
+ 
+@@ -78,7 +81,7 @@ and a Policy-filtered audit timeline under `/api/policies`.
+ 
+ Percentages are JSON decimal strings such as `"12.50"`. These endpoints record
+ only user-entered policy information; they do not evaluate, recommend, score, or
+-execute anything. No Policy frontend is included in Slice 2B.
++execute anything.
+ 
+ ### Frontend
+ 
+@@ -87,7 +90,8 @@ execute anything. No Policy frontend is included in Slice 2B.
+ 3. Start the development server: `npm run dev`
+ 
+ The frontend is available at `http://127.0.0.1:3000`; its health endpoint is
+-`GET /api/health`, and the approved Slice 1 flow is at `/household`.
++`GET /api/health`, the Household flow is at `/household`, and the local-only
++Investment Policy workflow is at `/policy`.
+ 
+ ### Validation
+ 
+@@ -137,7 +141,8 @@ to a separately approved sprint; Sprint 001.1 does not restructure working code.
+ 
+ ## Notes
+ 
+-This slice intentionally does not implement a Policy frontend, decision journals,
+-trading, broker integrations, authentication, Guardian logic, recommendations,
+-or autonomous agents. Sprint 002 is not complete; Slice 2C and Slice 3 are not
+-authorized.
++Slice 2C implements only the local, user-authored Investment Policy frontend. It
++does not implement decision journals, trading, broker integrations,
++authentication, Guardian logic, recommendations, or autonomous agents. Sprint
++002 is not complete; Slice 2C is in Review and Slice 3 is not authorized or
++started.
+diff --git a/docs/ARCHITECTURE.md b/docs/ARCHITECTURE.md
+index 19b0aea..1c37cbd 100644
+--- a/docs/ARCHITECTURE.md
++++ b/docs/ARCHITECTURE.md
+@@ -75,6 +75,36 @@ Slice 2A schema:
+ No frontend, authentication, recommendation, Guardian, AI, Broker, trading, or
+ Decision Journal module is introduced in Slice 2B.
+ 
++## Sprint 002 Slice 2C Architecture
++
++Slice 2C adds the approved browser workflow without changing the Slice 2B API or
++Slice 2A persistence design:
++
++- `frontend/app/policy/page.tsx` defines the App Router boundary and delegates all
++  interactive behavior to a client component.
++- `frontend/app/policy/policy-client.tsx` keeps the saved server snapshot separate
++  from local Draft text and allocation edits, with independent loading, mutation,
++  history, and audit states.
++- `frontend/lib/policy-api.ts` is the typed browser boundary for the approved
++  Policy endpoints. Reads may be aborted to prevent stale responses from replacing
++  newer state; mutations are never automatically retried.
++- Initial Household and Policy reads run in parallel. Draft, current Published,
++  history, and audit reads run in parallel after Policy presence is known.
++- Target percentages stay as decimal strings at the browser/API boundary. Display
++  totals use strict parsing into integer hundredths and integer addition, with no
++  `Number`, `parseFloat`, rounding, recommendation, or evaluation step.
++- Explicit saves send only changed Draft text fields or the full ordered allocation
++  collection with the current expected revision. Successful responses become the
++  new saved snapshot; failed mutations retain local edits.
++- Publication is a read-only review of the saved Draft snapshot followed by an
++  explicit confirmation. The server remains authoritative for completeness,
++  revision, and publication success.
++- Version history is read-only and cursor-paginated newest first. Audit events are
++  rendered in server-returned sequence order and use an independent GET-only retry.
++
++Slice 2C adds no backend module, database change, authentication, recommendation,
++Guardian, AI, Broker, trading, actual-holdings, or Decision Journal behavior.
++
+ ## Module Boundaries
+ 
+ - `routers/households.py`: four approved HTTP contracts and status mapping
+@@ -84,6 +114,10 @@ Decision Journal module is introduced in Slice 2B.
+ - `models.py`: only `household_profiles` and `audit_events`
+ - `frontend/app/household/`: local-only create/read/update/audit workflow
+ - `frontend/lib/household-api.ts`: typed browser-to-API boundary
++- `frontend/app/policy/`: local-only Policy Draft, publication, immutable history,
++  and audit workflow
++- `frontend/lib/policy-api.ts`: typed browser-to-Policy-API boundary and exact
++  integer-hundredths display helpers
+ 
+ No Policy, Allocation, Journal, User, Account, AI, Guardian, Broker, or trading
+ module is created in Slice 1.
+@@ -149,5 +183,5 @@ and CI toolchain.
+ - Decide whether to migrate `frontend/` to `apps/web/` in a later approved sprint.
+ - Any later persistence, authentication, policy, journal, Guardian, AI, or broker
+   architecture requires separate approval.
+-- A Policy frontend remains outside Slice 2B and requires separate Slice 2C
+-  authorization. Decision Journal work remains outside Slice 2 and unauthorized.
++- Full Docker runtime and browser-path validation remains pending.
++- Decision Journal work remains outside Slice 2 and unauthorized as Slice 3.
+diff --git a/docs/CHANGELOG.md b/docs/CHANGELOG.md
+index f4a375e..eb789e0 100644
+--- a/docs/CHANGELOG.md
++++ b/docs/CHANGELOG.md
+@@ -1,5 +1,41 @@
+ # Changelog
+ 
++## [Unreleased] - Sprint 002 Slice 2C Review
++
++### Added
++
++- Local-only `/policy` workflow covering initial loading, missing Household,
++  empty Policy, Draft editing, publication review, immutable Published Version,
++  version history, Policy audit, and confirmed Draft discard states
++- Typed browser API client for the approved Policy backend contracts with distinct
++  404, 409, and 422 handling, abortable reads, and no mutation retries
++- Explicit Draft text and whole-allocation saves with optimistic revisions,
++  client-side semantic no-op detection, and local edit preservation on failures
++- Exact target-allocation display totals calculated from decimal strings as integer
++  hundredths without binary floating-point arithmetic or silent rounding
++- Accessible mechanical publication checks and explicit confirmation using the
++  approved non-advisory and local-only boundary
++- Frontend component and API-client coverage for state transitions, conflicts,
++  decimal handling, immutable history, audit recovery, safety copy, and request cleanup
++
++### Boundaries
++
++- Slice 2C records and displays only user-entered Policy information; it does not
++  evaluate suitability or provide advice, recommendations, trade instructions,
++  scores, eligibility, rebalancing, or automated decisions.
++- No backend behavior, migration, Python or frontend dependency, Compose, CI,
++  authentication, Decision Journal, Guardian, AI, Broker, market, holding, or
++  trading behavior is added.
++- Full Docker runtime and end-to-end browser-path validation remain pending.
++- Slice 3 remains unauthorized and Not Started.
++
++### Status
++
++- Slice 2A and Slice 2B remain Done.
++- Slice 2C implementation is complete and is in Review; this is not a
++  production-readiness claim or completion of Sprint 002.
++- Sprint 002 remains In Progress.
++
+ ## [Unreleased] - Sprint 002 Slice 2B Complete
+ 
+ ### Added
+diff --git a/docs/MASTER_PLAN.md b/docs/MASTER_PLAN.md
+index 61ed310..05757d4 100644
+--- a/docs/MASTER_PLAN.md
++++ b/docs/MASTER_PLAN.md
+@@ -21,10 +21,10 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+ - Completed work: Implementation Slice 2A — Investment Policy Persistence and
+   Immutability Foundation
+ - Slice 2 Technical Design: Approved
+-- Current implementation authorization: no further Slice is authorized
++- Current implementation authorization: Slice 2C — Investment Policy Frontend Workflow
+ - Slice 2A: Done
+ - Slice 2B: Investment Policy Backend Workflow and API / Done
+-- Slice 2C: Not authorized / Not Started
++- Slice 2C: Implementation complete / Review
+ - Slice 3: Not authorized / Not Started
+ 
+ ## Planning
+@@ -37,7 +37,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+ - Sprint 002 Slice 2 technical design is authorized for planning and review only.
+ - Slice 2A implementation was separately authorized on 2026-07-14.
+ - Slice 2B implementation was separately authorized on 2026-07-14.
+-- Slice 2C and Slice 3 remain unauthorized.
++- Slice 2C implementation was separately authorized on 2026-07-14.
++- Slice 3 remains unauthorized.
+ 
+ ## Backlog
+ 
+@@ -65,7 +66,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+ - Sprint 002 remains In Progress.
+ - Slice 2A is Done after independent review and approval for merge.
+ - Slice 2B is Done after independent review and approval for merge.
+-- Slice 2C and Slice 3 remain unauthorized and Not Started.
++- Slice 2C implementation is complete and is in Review.
++- Slice 3 remains unauthorized and Not Started.
+ 
+ ## Review
+ 
+@@ -129,6 +131,20 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+ - Pull request #8 approved for merge.
+ - Slice 2B completes the Policy backend workflow and API only; it does not include
+   the Policy frontend or a complete Policy user experience.
++- Sprint 002 Slice 2C Investment Policy frontend implementation is in Review.
++- Slice 2C provides the local-only `/policy` workflow for the sole Household and
++  Policy: explicit Draft text and allocation saves, mechanical publication review,
++  immutable Published and history reads, Policy audit reads, Draft creation, and
++  confirmed Draft discard.
++- The frontend preserves decimal percentage strings and computes displayed totals
++  by parsing them into integer hundredths; it provides no recommendation,
++  suitability, score, rebalancing, or automated decision behavior.
++- Policy mutation success and audit refresh failure remain separate outcomes;
++  audit retry performs only the audit GET and never replays a mutation.
++- Slice 2C adds no backend behavior, migration, dependency, authentication,
++  Decision Journal, Guardian, AI, Broker, market, holding, recommendation, or
++  trading behavior.
++- Slice 3 remains unauthorized and Not Started.
+ 
+ ## Done
+ 
+@@ -308,3 +324,11 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+   remains accepted as a LOW non-blocking follow-up.
+ - 2026-07-14: Pull request #8 is approved for merge. Slice 2B is Done while Sprint
+   002 remains In Progress; Slice 2C and Slice 3 remain unauthorized and Not Started.
++- 2026-07-14: Sprint 002 Slice 2C implementation authorized for the local-only
++  Investment Policy frontend workflow only; Slice 3 remains unauthorized.
++- 2026-07-14: Slice 2C implements `/policy`, a typed Policy API client, explicit
++  Draft text and allocation saves, mechanical publication confirmation, immutable
++  Published/history views, Policy audit reads, and confirmed Draft discard without
++  changing the approved backend contract.
++- 2026-07-14: Slice 2C enters Review. Sprint 002 remains In Progress; Slice 3
++  remains unauthorized and Not Started.
+diff --git a/docs/PRD.md b/docs/PRD.md
+index 67e0d8d..1d5278e 100644
+--- a/docs/PRD.md
++++ b/docs/PRD.md
+@@ -2,9 +2,9 @@
+ 
+ ## Status
+ 
+-Approved behavior includes the Slice 1 Household workflow and the Slice 2B
+-local-only Investment Policy backend API. Slice 2A is Done. Slice 2B is in Review;
+-Slice 2C and Slice 3 are not authorized.
++Approved behavior includes the Slice 1 Household workflow, the Slice 2B local-only
++Investment Policy backend API, and the Slice 2C local-only Policy frontend. Slice
++2A and Slice 2B are Done. Slice 2C is in Review; Slice 3 is not authorized.
+ 
+ ## Summary
+ 
+@@ -16,6 +16,11 @@ Slice 2B records user-authored Investment Policy Draft text and target allocatio
+ percentages, publishes immutable Version snapshots, and exposes version and audit
+ reads. It provides no frontend and never evaluates the recorded information.
+ 
++Slice 2C provides the `/policy` user interface for those approved contracts. It
++supports explicit user-authored Draft saves, mechanical publication review,
++immutable Version reads, and a Policy-filtered audit timeline without interpreting
++the content or providing investment advice.
++
+ ## Slice 2B Backend Requirements
+ 
+ - The sole Household owns at most one stable Policy and one editable Draft.
+@@ -39,6 +44,64 @@ reads. It provides no frontend and never evaluates the recorded information.
+ - Decision Journal, Guardian, AI, Broker, market, holdings, accounts, authentication,
+   multiple households/users, export, or hard-delete workflows
+ 
++## Slice 2C Frontend Requirements
++
++- Initial Household and Policy reads are parallel, abortable, and protected from
++  stale-response replacement.
++- A missing Household links to `/household` and cannot create a Policy. An empty
++  Policy state can create the sole blank Draft without sending explicit JSON `null`.
++- The Draft editor exposes the ten approved user-input fields with explicit saves,
++  Unicode character limits, changed-field-only PATCH requests, expected revisions,
++  neutral conflict/validation feedback, and no suggested text or autosave.
++- The allocation editor supports local add, remove, and accessible reordering, then
++  explicitly replaces the complete ordered collection. It supplies no default asset
++  classes or target percentages.
++- Allocation inputs remain decimal strings. The displayed total uses integer
++  hundredths and reports only mechanical equality with `100.00`; it never scores or
++  evaluates the allocation.
++- Publication shows a read-only saved Draft snapshot, required-field presence,
++  exact total, and current revision. It requires explicit confirmation and sends
++  `confirmation: true`; the server remains authoritative.
++- Published and historical Versions are immutable and read-only. New Drafts may be
++  blank or copied only from the current Published Version; historical restore/copy,
++  Published editing, and product deletion are absent.
++- The audit timeline preserves the server-returned sequence order and discloses the
++  latest-window/no-cursor boundary. Audit refresh errors are independent from
++  successful mutations, and retry performs only the audit GET.
++- Draft discard requires explicit confirmation and an expected revision; it never
++  deletes the Policy or immutable Versions.
++- The page visibly states its local-only, non-production, no-authentication, and
++  non-advisory boundary.
++
++## Slice 2C Acceptance Criteria
++
++- Loading, missing Household, empty Policy, Draft, publish review, current
++  Published, history, audit, and discard states are accessible at `/policy`.
++- Duplicate mutation submissions are prevented; mutations are not automatically
++  retried, and 409 conflicts offer an explicit server reload without overwriting
++  local input.
++- Text and allocation no-ops issue no mutation. Successful saves adopt the complete
++  server snapshot and revision; failures retain local edits.
++- Exact decimal-string examples such as `0.10 + 0.20`, `99.99`, `100.00`, and
++  `100.01` display without binary floating-point artifacts or silent rounding.
++- Publication requires the three approved fields, exactly `100.00`, and explicit
++  confirmation while remaining subject to server validation.
++- Version history paginates newest first without duplicate entries, remains
++  immutable, and offers no restore or historical-copy action.
++- Policy audit failures never recast a completed Policy mutation as failed, and
++  the retry cannot replay that mutation.
++- UI and API-client tests cover the approved flows, error classes, request payloads,
++  cleanup, non-advisory copy, and prohibited action boundaries.
++
++## Slice 2C Explicit Non-Goals
++
++- Advice, recommendations, suitability, eligibility, scoring, rankings, asset-class
++  defaults, rebalancing or drift calculations, and automated decisions
++- Decision Journal, Guardian thresholds or alerts, AI, Broker or market integration,
++  actual holdings, accounts, monetary amounts, authentication, or public deployment
++- Backend contract or behavior changes, database changes, new dependencies, product
++  deletion, historical restore/copy, Published editing, or Slice 3
++
+ ## User Stories
+ 
+ - As the local owner, I can create the sole HouseholdProfile.
+diff --git a/frontend/app/globals.css b/frontend/app/globals.css
+index 92e235a..9302d49 100644
+--- a/frontend/app/globals.css
++++ b/frontend/app/globals.css
+@@ -45,7 +45,7 @@ button:disabled { cursor: wait; opacity: 0.65; }
+   color: white;
+ }
+ 
+-.shell, .household-shell {
++.shell, .household-shell, .policy-shell {
+   margin: 0 auto;
+   max-width: 58rem;
+   padding: 3rem 1.25rem 5rem;
+@@ -53,6 +53,8 @@ button:disabled { cursor: wait; opacity: 0.65; }
+ 
+ .shell { min-height: 100vh; }
+ .shell p { color: var(--muted); margin-bottom: 2rem; }
++.home-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 0.8rem; }
++.home-actions a:not(.primary-link) { color: var(--accent); font-weight: 700; }
+ 
+ .page-header { margin-bottom: 2rem; }
+ .page-header h1 { font-size: clamp(2.3rem, 6vw, 4rem); margin: 0.3rem 0 0.8rem; }
+@@ -74,20 +76,22 @@ button:disabled { cursor: wait; opacity: 0.65; }
+ .section-heading h2 { margin: 0.35rem 0 0; }
+ .section-heading-row { align-items: center; display: flex; justify-content: space-between; gap: 1rem; }
+ 
+-.household-form { display: grid; gap: 1rem; }
+-.household-form label { display: grid; font-weight: 650; gap: 0.4rem; }
+-.household-form input, .household-form textarea {
++.household-form, .policy-form { display: grid; gap: 1rem; }
++.household-form label, .policy-form label { display: grid; font-weight: 650; gap: 0.4rem; }
++.household-form input, .household-form textarea, .policy-form textarea,
++.allocation-editor input {
+   background: white;
+   border: 1px solid #aeb9b1;
+   border-radius: 0.4rem;
+   color: var(--ink);
+   padding: 0.7rem 0.75rem;
+ }
+-.household-form textarea { min-height: 6rem; resize: vertical; }
++.household-form textarea, .policy-form textarea { min-height: 6rem; resize: vertical; }
+ .hint { color: var(--muted); font-size: 0.82rem; font-weight: 400; line-height: 1.4; }
+-.actions { display: flex; gap: 0.7rem; margin-top: 0.4rem; }
++.actions, .row-actions { display: flex; flex-wrap: wrap; gap: 0.7rem; margin-top: 0.4rem; }
+ .error { color: #a42c25; margin: 0; }
+ .error-panel { border-color: #db938e; color: #8f221c; }
++.success-message { background: var(--accent-soft); border-left: 3px solid var(--accent); padding: 0.8rem 1rem; }
+ 
+ .summary-grid { display: grid; gap: 0; margin: 0; }
+ .summary-grid div { border-top: 1px solid var(--line); display: grid; gap: 1rem; grid-template-columns: minmax(9rem, 0.35fr) 1fr; padding: 0.9rem 0; }
+@@ -98,7 +102,65 @@ button:disabled { cursor: wait; opacity: 0.65; }
+ .timeline li { background: var(--accent-soft); border-left: 3px solid var(--accent); display: grid; gap: 0.25rem; padding: 0.9rem 1rem; }
+ .timeline span { color: var(--muted); font-size: 0.86rem; }
+ 
++.workspace-status {
++  align-items: center;
++  background: var(--accent-soft);
++  border: 1px solid #bdd1c4;
++  border-radius: 0.7rem;
++  display: flex;
++  justify-content: space-between;
++  margin: 1.5rem 0;
++  padding: 0.9rem 1.1rem;
++}
++.label-row { align-items: center; display: flex; gap: 0.75rem; justify-content: space-between; }
++.field-badge { color: var(--muted); font-size: 0.76rem; font-weight: 500; }
++.allocation-editor, .allocation-readonly, .version-list, .mechanical-checks {
++  display: grid;
++  gap: 0.8rem;
++  list-style: none;
++  margin: 1rem 0;
++  padding: 0;
++}
++.allocation-editor li {
++  background: var(--paper);
++  border: 1px solid var(--line);
++  border-radius: 0.55rem;
++  display: grid;
++  gap: 0.8rem;
++  grid-template-columns: minmax(12rem, 1fr) minmax(9rem, 0.35fr);
++  padding: 1rem;
++}
++.allocation-editor label { display: grid; font-weight: 650; gap: 0.35rem; }
++.allocation-editor .row-actions { grid-column: 1 / -1; }
++.total-panel {
++  background: var(--accent-soft);
++  border-radius: 0.55rem;
++  display: grid;
++  gap: 0.35rem;
++  margin: 1rem 0;
++  padding: 1rem;
++}
++.total-panel span { color: var(--muted); }
++.publish-review { display: grid; gap: 1rem; }
++.mechanical-checks li { border-left: 3px solid var(--accent); padding-left: 0.8rem; }
++.confirmation-row { align-items: flex-start; display: flex; gap: 0.65rem; font-weight: 650; }
++.confirmation-row input { margin-top: 0.2rem; }
++.allocation-readonly li, .version-list li {
++  align-items: center;
++  border-top: 1px solid var(--line);
++  display: flex;
++  gap: 1rem;
++  justify-content: space-between;
++  padding: 0.8rem 0;
++}
++.version-list li div { display: grid; gap: 0.2rem; }
++.version-list span { color: var(--muted); font-size: 0.86rem; }
++.policy-summary { margin-bottom: 1.2rem; }
++.confirmation-panel { background: var(--warning-soft); border-radius: 0.55rem; padding: 1rem; }
++
+ @media (max-width: 640px) {
+   .section-heading-row { align-items: flex-start; flex-direction: column; }
+   .summary-grid div { gap: 0.35rem; grid-template-columns: 1fr; }
++  .allocation-editor li { grid-template-columns: 1fr; }
++  .workspace-status, .allocation-readonly li, .version-list li { align-items: flex-start; flex-direction: column; }
+ }
+diff --git a/frontend/app/page.tsx b/frontend/app/page.tsx
+index 0c07dcb..4328ded 100644
+--- a/frontend/app/page.tsx
++++ b/frontend/app/page.tsx
+@@ -5,9 +5,12 @@ export default function HomePage() {
+     <main className="shell">
+       <h1>CompoundOS</h1>
+       <p>Local household discipline workspace.</p>
+-      <Link className="primary-link" href="/household">
+-        Open household profile
+-      </Link>
++      <nav className="home-actions" aria-label="CompoundOS workspaces">
++        <Link className="primary-link" href="/household">
++          Open household profile
++        </Link>
++        <Link href="/policy">Open Investment Policy</Link>
++      </nav>
+     </main>
+   );
+ }
+diff --git a/frontend/app/policy/page.test.tsx b/frontend/app/policy/page.test.tsx
+new file mode 100644
+index 0000000..55e47df
+--- /dev/null
++++ b/frontend/app/policy/page.test.tsx
+@@ -0,0 +1,543 @@
++import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
++import userEvent from "@testing-library/user-event";
++import { afterEach, describe, expect, it, vi } from "vitest";
++
++import { PolicyClient } from "./policy-client";
++
++const emptyText = {
++  objectives: "",
++  time_horizon: "",
++  liquidity: "",
++  diversification: "",
++  contribution_policy: "",
++  rebalancing_policy: "",
++  prohibited_assets: "",
++  leverage_policy: "",
++  decision_process: "",
++  notes: "",
++};
++
++const policy = {
++  id: "policy-1",
++  household_id: "household-1",
++  created_at: "2026-07-14T00:00:00Z",
++  updated_at: "2026-07-14T00:00:00Z",
++};
++
++const draft = {
++  ...emptyText,
++  id: "draft-1",
++  policy_id: policy.id,
++  source_version_id: null,
++  revision: 3,
++  created_at: "2026-07-14T00:00:00Z",
++  updated_at: "2026-07-14T00:00:00Z",
++  allocations: [
++    { id: "allocation-1", asset_class_name: "First user class", target_percentage: "60.00", sort_order: 0 },
++    { id: "allocation-2", asset_class_name: "Second user class", target_percentage: "40.00", sort_order: 1 },
++  ],
++};
++
++const version = {
++  ...emptyText,
++  objectives: "Owner objective",
++  time_horizon: "Owner horizon",
++  decision_process: "Owner process",
++  id: "version-id-2",
++  policy_id: policy.id,
++  version_number: 2,
++  status: "published" as const,
++  published_at: "2026-07-14T02:00:00Z",
++  superseded_at: null,
++  allocations: draft.allocations,
++};
++
++const auditEvents = [
++  {
++    id: "audit-10",
++    household_id: "household-1",
++    actor: "local-owner",
++    action: "policy.created",
++    entity_type: "InvestmentPolicy",
++    entity_id: policy.id,
++    occurred_at: "2026-07-14T03:00:00Z",
++    sequence_number: 10,
++    metadata: {},
++  },
++  {
++    id: "audit-11",
++    household_id: "household-1",
++    actor: "local-owner",
++    action: "policy.draft.updated",
++    entity_type: "InvestmentPolicy",
++    entity_id: policy.id,
++    occurred_at: "2026-07-14T01:00:00Z",
++    sequence_number: 11,
++    metadata: { draft_revision: 3 },
++  },
++];
++
++type ServerState = {
++  household: boolean;
++  policy: typeof policy | null;
++  draft: typeof draft | null;
++  published: typeof version | null;
++  history: Array<{
++    id: string;
++    version_number: number;
++    status: "published" | "superseded";
++    published_at: string;
++    superseded_at: string | null;
++  }>;
++  nextCursor: number | null;
++  audit: typeof auditEvents;
++};
++
++function jsonResponse(body: unknown, status = 200) {
++  return new Response(status === 204 ? null : JSON.stringify(body), {
++    status,
++    headers: { "Content-Type": "application/json" },
++  });
++}
++
++function defaultState(overrides: Partial<ServerState> = {}): ServerState {
++  return {
++    household: true,
++    policy,
++    draft,
++    published: null,
++    history: [],
++    nextCursor: null,
++    audit: auditEvents,
++    ...overrides,
++  };
++}
++
++function serverFetch(
++  state: ServerState,
++  intercept?: (
++    url: string,
++    method: string,
++    init?: RequestInit,
++  ) => Response | Promise<Response> | undefined,
++) {
++  return vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
++    const url = String(input);
++    const method = init?.method ?? "GET";
++    const intercepted = intercept?.(url, method, init);
++    if (intercepted) return await intercepted;
++
++    if (url.endsWith("/api/households/current")) {
++      return state.household ? jsonResponse({ id: "household-1" }) : jsonResponse({}, 404);
++    }
++    if (url.endsWith("/api/policies/current") && method === "GET") {
++      return state.policy ? jsonResponse(state.policy) : jsonResponse({}, 404);
++    }
++    if (url.endsWith("/api/policies/current/draft") && method === "GET") {
++      return state.draft ? jsonResponse(state.draft) : jsonResponse({}, 404);
++    }
++    if (url.endsWith("/api/policies/current/published")) {
++      return state.published ? jsonResponse(state.published) : jsonResponse({}, 404);
++    }
++    if (url.includes("/api/policies/current/versions/") && method === "GET") {
++      return jsonResponse(state.published ?? version);
++    }
++    if (url.includes("/api/policies/current/versions") && method === "GET") {
++      return jsonResponse({ items: state.history, next_before_version_number: state.nextCursor });
++    }
++    if (url.endsWith("/api/policies/current/audit-events")) return jsonResponse(state.audit);
++    if (url.endsWith("/api/policies") && method === "POST") {
++      state.policy = policy;
++      state.draft = draft;
++      return jsonResponse({ policy, draft }, 201);
++    }
++    if (url.endsWith("/api/policies/current/draft") && method === "PATCH") {
++      const payload = JSON.parse(String(init?.body));
++      state.draft = { ...draft, ...payload, revision: payload.expected_revision + 1 };
++      return jsonResponse(state.draft);
++    }
++    if (url.endsWith("/api/policies/current/draft/allocations") && method === "PUT") {
++      const payload = JSON.parse(String(init?.body));
++      state.draft = {
++        ...draft,
++        revision: payload.expected_revision + 1,
++        allocations: payload.items.map((item: { asset_class_name: string; target_percentage: string }, index: number) => ({
++          ...item,
++          id: `saved-${index}`,
++          sort_order: index,
++        })),
++      };
++      return jsonResponse(state.draft);
++    }
++    if (url.endsWith("/api/policies/current/draft/publish") && method === "POST") {
++      state.draft = null;
++      state.published = version;
++      return jsonResponse(version, 201);
++    }
++    if (url.endsWith("/api/policies/current/draft/discard") && method === "POST") {
++      state.draft = null;
++      return jsonResponse(null, 204);
++    }
++    if (url.endsWith("/api/policies/current/draft") && method === "POST") {
++      state.draft = { ...draft, source_version_id: JSON.parse(String(init?.body)).source_version_id ?? null };
++      return jsonResponse(state.draft, 201);
++    }
++    return jsonResponse({ detail: "Unhandled test request" }, 500);
++  });
++}
++
++afterEach(() => {
++  cleanup();
++  vi.unstubAllGlobals();
++});
++
++describe("PolicyClient", () => {
++  it("shows accessible loading then the missing-Household prerequisite without creating Policy", async () => {
++    const state = defaultState({ household: false, policy: null, draft: null, audit: [] });
++    const fetchMock = serverFetch(state);
++    vi.stubGlobal("fetch", fetchMock);
++    render(<PolicyClient />);
++
++    expect(screen.getByRole("status").textContent).toContain("Loading Household and Policy");
++    expect(await screen.findByRole("heading", { name: "Create the Household profile first" })).toBeTruthy();
++    expect(screen.getByRole("link", { name: "Open Household profile" }).getAttribute("href")).toBe("/household");
++    expect(fetchMock.mock.calls.some(([url, init]) => String(url).endsWith("/api/policies") && init?.method === "POST")).toBe(false);
++  });
++
++  it("creates an empty Policy once and adopts its server Draft", async () => {
++    const state = defaultState({ policy: null, draft: null, audit: [] });
++    const fetchMock = serverFetch(state);
++    vi.stubGlobal("fetch", fetchMock);
++    render(<PolicyClient />);
++
++    await userEvent.dblClick(await screen.findByRole("button", { name: "Create policy draft" }));
++    expect(await screen.findByText("Server revision 3")).toBeTruthy();
++    expect(fetchMock.mock.calls.filter(([url, init]) => String(url).endsWith("/api/policies") && init?.method === "POST")).toHaveLength(1);
++    const createInit = fetchMock.mock.calls.find(([url, init]) => String(url).endsWith("/api/policies") && init?.method === "POST")?.[1];
++    expect(createInit?.body).toBeUndefined();
++  });
++
++  it("reloads server state after a create conflict", async () => {
++    const state = defaultState({ policy: null, draft: null });
++    let conflict = true;
++    const fetchMock = serverFetch(state, (url, method) => {
++      if (url.endsWith("/api/policies") && method === "POST" && conflict) {
++        conflict = false;
++        state.policy = policy;
++        state.draft = draft;
++        return jsonResponse({}, 409);
++      }
++    });
++    vi.stubGlobal("fetch", fetchMock);
++    render(<PolicyClient />);
++
++    await userEvent.click(await screen.findByRole("button", { name: "Create policy draft" }));
++    expect(await screen.findByText("Server revision 3")).toBeTruthy();
++    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/api/policies/current")).length).toBeGreaterThan(1);
++  });
++
++  it("renders ten neutral fields with three required and seven optional publication markers", async () => {
++    vi.stubGlobal("fetch", serverFetch(defaultState()));
++    render(<PolicyClient />);
++
++    await screen.findByRole("heading", { name: "Policy text" });
++    expect(screen.getAllByRole("textbox")).toHaveLength(10 + 4);
++    expect(screen.getAllByText("Required to publish")).toHaveLength(3);
++    expect(screen.getAllByText("Optional")).toHaveLength(7);
++    expect(screen.getByLabelText("Objectives").getAttribute("placeholder")).toBeNull();
++  });
++
++  it("does not send a no-op and sends only changed text with expected revision", async () => {
++    const state = defaultState();
++    const fetchMock = serverFetch(state);
++    vi.stubGlobal("fetch", fetchMock);
++    render(<PolicyClient />);
++    await screen.findByRole("heading", { name: "Policy text" });
++
++    await userEvent.click(screen.getByRole("button", { name: "Save policy text" }));
++    expect(screen.getByRole("alert").textContent).toContain("no text changes");
++    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(0);
++
++    await userEvent.type(screen.getByLabelText("Notes"), "Owner note");
++    await userEvent.click(screen.getByRole("button", { name: "Save policy text" }));
++    expect(await screen.findByText("Server revision 4")).toBeTruthy();
++    const patchCall = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH");
++    expect(JSON.parse(String(patchCall?.[1]?.body))).toEqual({
++      expected_revision: 3,
++      notes: "Owner note",
++    });
++  });
++
++  it("keeps local text on 409 and offers a server reload", async () => {
++    const state = defaultState();
++    const fetchMock = serverFetch(state, (url, method) =>
++      url.endsWith("/api/policies/current/draft") && method === "PATCH"
++        ? jsonResponse({ detail: "secret-marker" }, 409)
++        : undefined,
++    );
++    vi.stubGlobal("fetch", fetchMock);
++    render(<PolicyClient />);
++    await screen.findByRole("heading", { name: "Policy text" });
++
++    await userEvent.type(screen.getByLabelText("Objectives"), "Local owner input");
++    await userEvent.click(screen.getByRole("button", { name: "Save policy text" }));
++    expect(await screen.findByRole("button", { name: "Reload server data" })).toBeTruthy();
++    expect((screen.getByLabelText("Objectives") as HTMLTextAreaElement).value).toBe("Local owner input");
++    expect(screen.getByRole("alert").textContent).not.toContain("secret-marker");
++  });
++
++  it("keeps unsaved allocation edits when policy text is saved", async () => {
++    const state = defaultState();
++    vi.stubGlobal("fetch", serverFetch(state));
++    render(<PolicyClient />);
++    await screen.findByRole("heading", { name: "Policy text" });
++
++    const allocationName = screen.getAllByLabelText("Asset-class name")[0];
++    await userEvent.clear(allocationName);
++    await userEvent.type(allocationName, "Unsaved allocation edit");
++    await userEvent.type(screen.getByLabelText("Notes"), "Saved text edit");
++    await userEvent.click(screen.getByRole("button", { name: "Save policy text" }));
++
++    expect(await screen.findByText("Server revision 4")).toBeTruthy();
++    expect((screen.getAllByLabelText("Asset-class name")[0] as HTMLInputElement).value).toBe(
++      "Unsaved allocation edit",
++    );
++  });
++
++  it("adds, reorders, removes, and saves the complete string-backed allocation collection", async () => {
++    const state = defaultState();
++    const fetchMock = serverFetch(state);
++    vi.stubGlobal("fetch", fetchMock);
++    render(<PolicyClient />);
++    await screen.findByRole("heading", { name: "Draft allocation" });
++
++    await userEvent.click(screen.getByRole("button", { name: "Save allocations" }));
++    expect(screen.getByRole("alert").textContent).toContain("no allocation changes");
++
++    await userEvent.click(screen.getByRole("button", { name: "Add allocation row" }));
++    const names = screen.getAllByLabelText("Asset-class name");
++    const percentages = screen.getAllByLabelText("Target percentage");
++    await userEvent.type(names[2], "Third user class");
++    await userEvent.type(percentages[2], "0.25");
++    expect(screen.getByText("Draft allocation total: 100.25%")).toBeTruthy();
++    await userEvent.click(screen.getAllByRole("button", { name: "Move up" })[2]);
++    await userEvent.click(screen.getAllByRole("button", { name: "Remove" })[0]);
++    await userEvent.click(screen.getByRole("button", { name: "Save allocations" }));
++
++    await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(1));
++    expect(await screen.findByText("Server revision 4")).toBeTruthy();
++    const payload = JSON.parse(String(fetchMock.mock.calls.find(([, init]) => init?.method === "PUT")?.[1]?.body));
++    expect(payload.expected_revision).toBe(3);
++    expect(payload.items).toEqual([
++      { asset_class_name: "Third user class", target_percentage: "0.25" },
++      { asset_class_name: "Second user class", target_percentage: "40.00" },
++    ]);
++  });
++
++  it("retains allocation input and shows a neutral duplicate-name 422", async () => {
++    const state = defaultState();
++    const fetchMock = serverFetch(state, (url, method) =>
++      url.endsWith("/allocations") && method === "PUT"
++        ? jsonResponse({ detail: [{ msg: "secret-marker duplicate" }] }, 422)
++        : undefined,
++    );
++    vi.stubGlobal("fetch", fetchMock);
++    render(<PolicyClient />);
++    await screen.findByRole("heading", { name: "Draft allocation" });
++
++    const firstName = screen.getAllByLabelText("Asset-class name")[0];
++    await userEvent.clear(firstName);
++    await userEvent.type(firstName, "SECOND USER CLASS");
++    await userEvent.click(screen.getByRole("button", { name: "Save allocations" }));
++    expect(await screen.findByText(/duplicate asset-class names/)).toBeTruthy();
++    expect((firstName as HTMLInputElement).value).toBe("SECOND USER CLASS");
++    expect(screen.getByRole("alert").textContent).not.toContain("secret-marker");
++  });
++
++  it("requires explicit publication confirmation and sends the exact saved revision once", async () => {
++    const readyDraft = {
++      ...draft,
++      objectives: "Owner objective",
++      time_horizon: "Owner horizon",
++      decision_process: "Owner process",
++    };
++    const state = defaultState({ draft: readyDraft });
++    const fetchMock = serverFetch(state);
++    vi.stubGlobal("fetch", fetchMock);
++    render(<PolicyClient />);
++
++    await userEvent.click(await screen.findByRole("button", { name: "Review for publication" }));
++    expect(screen.getAllByText(/do not constitute investment, tax, or legal advice/)).toHaveLength(2);
++    const publishButton = screen.getByRole("button", { name: "Publish immutable Version" });
++    expect((publishButton as HTMLButtonElement).disabled).toBe(true);
++    await userEvent.click(screen.getByRole("checkbox"));
++    await userEvent.dblClick(publishButton);
++
++    expect(await screen.findByRole("heading", { name: /Current Published Version · Version 2/ })).toBeTruthy();
++    const publishCalls = fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/publish"));
++    expect(publishCalls).toHaveLength(1);
++    expect(JSON.parse(String(publishCalls[0][1]?.body))).toEqual({ expected_revision: 3, confirmation: true });
++    expect(screen.getByText("Published versions cannot be edited.", { exact: false })).toBeTruthy();
++  });
++
++  it.each([
++    [400, /mechanically incomplete/],
++    [409, /Reload server data/],
++  ])("handles publish HTTP %s without retrying", async (status, expected) => {
++    const readyDraft = {
++      ...draft,
++      objectives: "Owner objective",
++      time_horizon: "Owner horizon",
++      decision_process: "Owner process",
++    };
++    const state = defaultState({ draft: readyDraft });
++    const fetchMock = serverFetch(state, (url, method) =>
++      url.endsWith("/publish") && method === "POST"
++        ? jsonResponse({ detail: "secret-marker" }, status)
++        : undefined,
++    );
++    vi.stubGlobal("fetch", fetchMock);
++    render(<PolicyClient />);
++
++    await userEvent.click(await screen.findByRole("button", { name: "Review for publication" }));
++    await userEvent.click(screen.getByRole("checkbox"));
++    await userEvent.click(screen.getByRole("button", { name: "Publish immutable Version" }));
++    expect(await screen.findByText(expected)).toBeTruthy();
++    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/publish"))).toHaveLength(1);
++    expect(screen.queryByText("secret-marker")).toBeNull();
++  });
++
++  it("creates only blank or current-Published Drafts and exposes no historical restore", async () => {
++    const state = defaultState({ draft: null, published: version, history: [version] });
++    const fetchMock = serverFetch(state);
++    vi.stubGlobal("fetch", fetchMock);
++    render(<PolicyClient />);
++    await screen.findByRole("heading", { name: /Current Published Version/ });
++
++    expect(screen.getByRole("button", { name: "Start blank" })).toBeTruthy();
++    await userEvent.click(screen.getByRole("button", { name: "Copy current Published" }));
++    const draftCreate = fetchMock.mock.calls.find(
++      ([url, init]) => String(url).endsWith("/api/policies/current/draft") && init?.method === "POST",
++    );
++    expect(JSON.parse(String(draftCreate?.[1]?.body))).toEqual({ source_version_id: version.id });
++    expect(screen.queryByRole("button", { name: /restore/i })).toBeNull();
++    expect(screen.queryByRole("button", { name: /delete published/i })).toBeNull();
++  });
++
++  it("paginates newest-first history without duplicates and reads immutable detail", async () => {
++    const version3 = { ...version, id: "version-3", version_number: 3, status: "published" as const };
++    const version2 = { ...version, id: "version-2", version_number: 2, status: "superseded" as const, superseded_at: "2026-07-14T03:00:00Z" };
++    const version1 = { ...version, id: "version-1", version_number: 1, status: "superseded" as const, superseded_at: "2026-07-14T02:00:00Z" };
++    const state = defaultState({ draft: null, published: version3, history: [version3, version2], nextCursor: 2 });
++    let moreLoaded = false;
++    const fetchMock = serverFetch(state, (url, method) => {
++      if (url.includes("before_version_number=2") && method === "GET") {
++        moreLoaded = true;
++        return jsonResponse({ items: [version2, version1], next_before_version_number: null });
++      }
++      if (url.endsWith("/versions/1")) return jsonResponse(version1);
++    });
++    vi.stubGlobal("fetch", fetchMock);
++    render(<PolicyClient />);
++    const historySection = await screen.findByRole("heading", { name: "Version history" });
++    const historyPanel = historySection.closest("section") as HTMLElement;
++    expect(within(historyPanel).getAllByText(/Version [23]/).map((node) => node.textContent)).toEqual(["Version 3", "Version 2"]);
++
++    await userEvent.click(screen.getByRole("button", { name: "Load more Versions" }));
++    await waitFor(() => expect(moreLoaded).toBe(true));
++    expect(within(historyPanel).getAllByText("Version 2")).toHaveLength(1);
++    expect(within(historyPanel).getByText("Version 1")).toBeTruthy();
++    await userEvent.click(within(historyPanel).getAllByRole("button", { name: "View immutable detail" })[2]);
++    expect(await within(historyPanel).findByRole("heading", { name: /Historical Version · Version 1/ })).toBeTruthy();
++    expect(within(historyPanel).queryByRole("button", { name: /restore/i })).toBeNull();
++  });
++
++  it("keeps server sequence order and retries only audit GET after a successful mutation", async () => {
++    const state = defaultState();
++    let auditRequests = 0;
++    const fetchMock = serverFetch(state, (url, method) => {
++      if (url.endsWith("/audit-events")) {
++        auditRequests += 1;
++        if (auditRequests === 2) return jsonResponse({}, 503);
++      }
++      if (url.endsWith("/api/policies/current/draft") && method === "PATCH") {
++        const saved = { ...draft, notes: "Saved note", revision: 4 };
++        state.draft = saved;
++        return jsonResponse(saved);
++      }
++    });
++    vi.stubGlobal("fetch", fetchMock);
++    render(<PolicyClient />);
++    const auditHeading = await screen.findByRole("heading", { name: "Policy audit timeline" });
++    const auditPanel = auditHeading.closest("section") as HTMLElement;
++    expect(within(auditPanel).getAllByRole("listitem").map((node) => within(node).getByText(/policy\./).textContent)).toEqual([
++      "policy.created",
++      "policy.draft.updated",
++    ]);
++
++    await userEvent.type(screen.getByLabelText("Notes"), "Saved note");
++    await userEvent.click(screen.getByRole("button", { name: "Save policy text" }));
++    expect(await screen.findByText("Policy text saved.")).toBeTruthy();
++    expect(await within(auditPanel).findByText(/mutation succeeded, but the audit timeline/)).toBeTruthy();
++    await userEvent.click(within(auditPanel).getByRole("button", { name: "Retry audit timeline" }));
++    await waitFor(() => expect(auditRequests).toBe(3));
++    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(1);
++  });
++
++  it("requires discard confirmation, sends the revision, and prevents repeat submission", async () => {
++    const state = defaultState();
++    const fetchMock = serverFetch(state);
++    vi.stubGlobal("fetch", fetchMock);
++    render(<PolicyClient />);
++    await screen.findByRole("heading", { name: "Discard Draft" });
++
++    await userEvent.click(screen.getByRole("button", { name: "Discard Draft…" }));
++    const confirm = screen.getByRole("button", { name: "Confirm discard Draft" });
++    await userEvent.dblClick(confirm);
++    await screen.findByRole("heading", { name: "No Draft is open" });
++    const calls = fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/discard"));
++    expect(calls).toHaveLength(1);
++    expect(JSON.parse(String(calls[0][1]?.body))).toEqual({ expected_revision: 3 });
++  });
++
++  it("keeps the Draft and offers Reload after a discard conflict", async () => {
++    const state = defaultState();
++    const fetchMock = serverFetch(state, (url, method) =>
++      url.endsWith("/discard") && method === "POST" ? jsonResponse({}, 409) : undefined,
++    );
++    vi.stubGlobal("fetch", fetchMock);
++    render(<PolicyClient />);
++    await screen.findByRole("heading", { name: "Discard Draft" });
++
++    await userEvent.click(screen.getByRole("button", { name: "Discard Draft…" }));
++    await userEvent.click(screen.getByRole("button", { name: "Confirm discard Draft" }));
++    expect(await screen.findByRole("button", { name: "Reload server data" })).toBeTruthy();
++    expect(screen.getByText("Server revision 3")).toBeTruthy();
++  });
++
++  it("shows safety boundaries and no prohibited product operations", async () => {
++    vi.stubGlobal("fetch", serverFetch(defaultState()));
++    render(<PolicyClient />);
++    await screen.findByRole("heading", { name: "Policy text" });
++
++    expect(screen.getByText(/local-only and non-production/)).toBeTruthy();
++    expect(screen.getByText(/no authentication/)).toBeTruthy();
++    expect(screen.getByText(/does not evaluate whether an investment policy/)).toBeTruthy();
++    expect(screen.queryByRole("button", { name: /AI|Guardian|Broker|trade|recommend/i })).toBeNull();
++  });
++
++  it("aborts outstanding initial requests when unmounted", async () => {
++    const signals: AbortSignal[] = [];
++    vi.stubGlobal(
++      "fetch",
++      vi.fn((_input: string | URL | Request, init?: RequestInit) => {
++        if (init?.signal) signals.push(init.signal);
++        return new Promise<Response>(() => undefined);
++      }),
++    );
++    const view = render(<PolicyClient />);
++    await waitFor(() => expect(signals.length).toBe(2));
++    view.unmount();
++    expect(signals.every((signal) => signal.aborted)).toBe(true);
++  });
++});
+diff --git a/frontend/app/policy/page.tsx b/frontend/app/policy/page.tsx
+new file mode 100644
+index 0000000..2bb0a99
+--- /dev/null
++++ b/frontend/app/policy/page.tsx
+@@ -0,0 +1,5 @@
++import { PolicyClient } from "./policy-client";
++
++export default function PolicyPage() {
++  return <PolicyClient />;
++}
+diff --git a/frontend/app/policy/policy-client.tsx b/frontend/app/policy/policy-client.tsx
+new file mode 100644
+index 0000000..22c0ebe
+--- /dev/null
++++ b/frontend/app/policy/policy-client.tsx
+@@ -0,0 +1,931 @@
++"use client";
++
++import Link from "next/link";
++import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
++
++import {
++  AllocationInput,
++  allocationTotal,
++  allocationsEqual,
++  createDraft,
++  createPolicy,
++  discardDraft,
++  getCurrentDraft,
++  getCurrentPolicy,
++  getCurrentPublished,
++  getPolicyAuditEvents,
++  getVersion,
++  getVersionHistory,
++  hasCurrentHousehold,
++  POLICY_TEXT_FIELDS,
++  POLICY_TEXT_LIMITS,
++  Policy,
++  PolicyApiError,
++  PolicyAuditEvent,
++  PolicyDraft,
++  PolicyText,
++  PolicyTextField,
++  PolicyVersion,
++  PolicyVersionSummary,
++  publishDraft,
++  replaceDraftAllocations,
++  REQUIRED_PUBLISH_FIELDS,
++  updateDraftText,
++} from "../../lib/policy-api";
++
++const LOCAL_ONLY_NOTICE =
++  "This Sprint 002 build is local-only and non-production. It has no authentication and must not be publicly exposed.";
++
++const NON_ADVISORY_NOTICE =
++  "CompoundOS records information you enter. It does not evaluate whether an investment policy or decision is suitable, appropriate, or likely to succeed. Policy links and validations are for recordkeeping only and do not constitute investment, tax, or legal advice.";
++
++const FIELD_LABELS: Record<PolicyTextField, string> = {
++  objectives: "Objectives",
++  time_horizon: "Time horizon",
++  liquidity: "Liquidity",
++  diversification: "Diversification",
++  contribution_policy: "Contribution policy",
++  rebalancing_policy: "Rebalancing policy",
++  prohibited_assets: "Prohibited assets",
++  leverage_policy: "Leverage policy",
++  decision_process: "Decision process",
++  notes: "Notes",
++};
++
++function isAbort(error: unknown): boolean {
++  return error instanceof DOMException && error.name === "AbortError";
++}
++
++function conflictMessage(error: unknown): string | null {
++  return error instanceof PolicyApiError && error.status === 409 ? error.message : null;
++}
++
++function neutralMessage(error: unknown): string {
++  return error instanceof PolicyApiError
++    ? error.message
++    : "The Policy request could not be completed.";
++}
++
++function textFromDraft(draft: PolicyDraft): PolicyText {
++  return Object.fromEntries(POLICY_TEXT_FIELDS.map((field) => [field, draft[field]])) as PolicyText;
++}
++
++function allocationInputs(draft: PolicyDraft): AllocationInput[] {
++  return draft.allocations.map(({ asset_class_name, target_percentage }) => ({
++    asset_class_name,
++    target_percentage,
++  }));
++}
++
++function unicodeLength(value: string): number {
++  return Array.from(value).length;
++}
++
++type DraftMutationResult = (draft: PolicyDraft, message: string) => void;
++
++function ConflictPanel({ message, onReload }: { message: string; onReload: () => void }) {
++  return (
++    <div className="error-panel" role="alert">
++      <p>{message}</p>
++      <button onClick={onReload} type="button">Reload server data</button>
++    </div>
++  );
++}
++
++function DraftTextEditor({
++  draft,
++  onReload,
++  onSaved,
++}: {
++  draft: PolicyDraft;
++  onReload: () => void;
++  onSaved: DraftMutationResult;
++}) {
++  const [form, setForm] = useState<PolicyText>(() => textFromDraft(draft));
++  const [submitting, setSubmitting] = useState(false);
++  const [error, setError] = useState<string | null>(null);
++  const [conflict, setConflict] = useState<string | null>(null);
++
++  async function save(event: FormEvent<HTMLFormElement>) {
++    event.preventDefault();
++    if (submitting) return;
++    const tooLong = POLICY_TEXT_FIELDS.find(
++      (field) => unicodeLength(form[field].trim()) > POLICY_TEXT_LIMITS[field],
++    );
++    if (tooLong) {
++      setError(`${FIELD_LABELS[tooLong]} exceeds its character limit.`);
++      return;
++    }
++
++    const changed = Object.fromEntries(
++      POLICY_TEXT_FIELDS.flatMap((field) => {
++        const value = form[field].trim();
++        return value === draft[field] ? [] : [[field, value]];
++      }),
++    ) as Partial<PolicyText>;
++    if (Object.keys(changed).length === 0) {
++      setError("There are no text changes to save.");
++      return;
++    }
++
++    setSubmitting(true);
++    setError(null);
++    setConflict(null);
++    try {
++      const saved = await updateDraftText(draft.revision, changed);
++      setForm(textFromDraft(saved));
++      onSaved(saved, "Policy text saved.");
++    } catch (caught) {
++      const message = conflictMessage(caught);
++      if (message) setConflict(message);
++      else setError(neutralMessage(caught));
++    } finally {
++      setSubmitting(false);
++    }
++  }
++
++  return (
++    <section className="panel" aria-labelledby="policy-text-heading">
++      <div className="section-heading">
++        <p className="eyebrow">User-entered record</p>
++        <h2 id="policy-text-heading">Policy text</h2>
++        <p className="hint">Fields are saved only when you choose Save policy text.</p>
++      </div>
++      <form className="policy-form" onSubmit={save} noValidate>
++        {POLICY_TEXT_FIELDS.map((field) => {
++          const required = REQUIRED_PUBLISH_FIELDS.includes(
++            field as (typeof REQUIRED_PUBLISH_FIELDS)[number],
++          );
++          const length = unicodeLength(form[field]);
++          return (
++            <label key={field}>
++              <span className="label-row">
++                <span>{FIELD_LABELS[field]}</span>
++                <span className="field-badge">
++                  {required ? "Required to publish" : "Optional"}
++                </span>
++              </span>
++              <textarea
++                aria-label={FIELD_LABELS[field]}
++                aria-describedby={`${field}-hint`}
++                onChange={(event) =>
++                  setForm((current) => ({ ...current, [field]: event.target.value }))
++                }
++                value={form[field]}
++              />
++              <span className="hint" id={`${field}-hint`}>
++                {length.toLocaleString()} / {POLICY_TEXT_LIMITS[field].toLocaleString()} characters.
++                {required ? " Publication checks presence only." : " Optional for publication."}
++              </span>
++            </label>
++          );
++        })}
++        {error ? <p className="error" role="alert">{error}</p> : null}
++        {conflict ? <ConflictPanel message={conflict} onReload={onReload} /> : null}
++        <div className="actions">
++          <button className="primary-button" disabled={submitting} type="submit">
++            {submitting ? "Saving policy text…" : "Save policy text"}
++          </button>
++        </div>
++      </form>
++    </section>
++  );
++}
++
++type EditableAllocation = AllocationInput & { localId: string };
++
++function editableAllocations(draft: PolicyDraft): EditableAllocation[] {
++  return draft.allocations.map((item) => ({
++    localId: item.id,
++    asset_class_name: item.asset_class_name,
++    target_percentage: item.target_percentage,
++  }));
++}
++
++function AllocationEditor({
++  draft,
++  onReload,
++  onSaved,
++}: {
++  draft: PolicyDraft;
++  onReload: () => void;
++  onSaved: DraftMutationResult;
++}) {
++  const nextId = useRef(0);
++  const [rows, setRows] = useState<EditableAllocation[]>(() => editableAllocations(draft));
++  const [submitting, setSubmitting] = useState(false);
++  const [error, setError] = useState<string | null>(null);
++  const [conflict, setConflict] = useState<string | null>(null);
++
++  const inputs = useMemo<AllocationInput[]>(
++    () => rows.map(({ asset_class_name, target_percentage }) => ({ asset_class_name, target_percentage })),
++    [rows],
++  );
++  const total = allocationTotal(inputs);
++
++  function updateRow(index: number, field: keyof AllocationInput, value: string) {
++    setRows((current) =>
++      current.map((row, rowIndex) => (rowIndex === index ? { ...row, [field]: value } : row)),
++    );
++  }
++
++  function move(index: number, direction: -1 | 1) {
++    setRows((current) => {
++      const target = index + direction;
++      if (target < 0 || target >= current.length) return current;
++      const next = [...current];
++      [next[index], next[target]] = [next[target], next[index]];
++      return next;
++    });
++  }
++
++  async function save() {
++    if (submitting) return;
++    if (inputs.some((item) => !item.asset_class_name.trim())) {
++      setError("Each allocation row needs an asset-class name before saving.");
++      return;
++    }
++    if (total.hundredths === null && inputs.length > 0) {
++      setError("Percentages must be integers or decimal strings with at most two places, greater than 0 and no more than 100.");
++      return;
++    }
++    if (allocationsEqual(draft.allocations, inputs)) {
++      setError("There are no allocation changes to save.");
++      return;
++    }
++
++    setSubmitting(true);
++    setError(null);
++    setConflict(null);
++    try {
++      const saved = await replaceDraftAllocations(draft.revision, inputs);
++      setRows(editableAllocations(saved));
++      onSaved(saved, "Draft allocations saved.");
++    } catch (caught) {
++      const message = conflictMessage(caught);
++      if (message) setConflict(message);
++      else setError(neutralMessage(caught));
++    } finally {
++      setSubmitting(false);
++    }
++  }
++
++  return (
++    <section className="panel" aria-labelledby="allocation-heading">
++      <div className="section-heading section-heading-row">
++        <div>
++          <p className="eyebrow">User-entered target record</p>
++          <h2 id="allocation-heading">Draft allocation</h2>
++          <p className="hint">Integer or at most two decimal places. No value is rounded.</p>
++        </div>
++        <button
++          onClick={() => {
++            nextId.current += 1;
++            setRows((current) => [
++              ...current,
++              { localId: `new-${nextId.current}`, asset_class_name: "", target_percentage: "" },
++            ]);
++          }}
++          type="button"
++        >
++          Add allocation row
++        </button>
++      </div>
++
++      {rows.length === 0 ? <p>No allocation rows in this Draft.</p> : null}
++      <ol className="allocation-editor">
++        {rows.map((row, index) => (
++          <li key={row.localId}>
++            <label>
++              Asset-class name
++              <input
++                maxLength={200}
++                onChange={(event) => updateRow(index, "asset_class_name", event.target.value)}
++                value={row.asset_class_name}
++              />
++            </label>
++            <label>
++              Target percentage
++              <input
++                inputMode="decimal"
++                onChange={(event) => updateRow(index, "target_percentage", event.target.value)}
++                value={row.target_percentage}
++              />
++            </label>
++            <div className="row-actions" aria-label={`Reorder allocation row ${index + 1}`}>
++              <button disabled={index === 0} onClick={() => move(index, -1)} type="button">Move up</button>
++              <button disabled={index === rows.length - 1} onClick={() => move(index, 1)} type="button">Move down</button>
++              <button
++                onClick={() => setRows((current) => current.filter((_, rowIndex) => rowIndex !== index))}
++                type="button"
++              >
++                Remove
++              </button>
++            </div>
++          </li>
++        ))}
++      </ol>
++
++      <div className="total-panel" role="status">
++        <strong>Draft allocation total: {total.display}%</strong>
++        <span>
++          {total.hundredths === 10000
++            ? "Mechanically complete at exactly 100.00%. This is not system approval."
++            : "A Draft may remain incomplete; publication requires exactly 100.00%."}
++        </span>
++      </div>
++      {error ? <p className="error" role="alert">{error}</p> : null}
++      {conflict ? <ConflictPanel message={conflict} onReload={onReload} /> : null}
++      <div className="actions">
++        <button className="primary-button" disabled={submitting} onClick={() => void save()} type="button">
++          {submitting ? "Saving allocations…" : "Save allocations"}
++        </button>
++      </div>
++    </section>
++  );
++}
++
++function PolicyTextReadOnly({ value }: { value: PolicyText }) {
++  return (
++    <dl className="summary-grid policy-summary">
++      {POLICY_TEXT_FIELDS.map((field) => (
++        <div key={field}>
++          <dt>{FIELD_LABELS[field]}</dt>
++          <dd>{value[field] || "Not provided"}</dd>
++        </div>
++      ))}
++    </dl>
++  );
++}
++
++function AllocationReadOnly({ items }: { items: AllocationInput[] }) {
++  const total = allocationTotal(items);
++  return (
++    <div>
++      <ul className="allocation-readonly">
++        {items.map((item, index) => (
++          <li key={`${item.asset_class_name}-${index}`}>
++            <span>{item.asset_class_name}</span>
++            <strong>{item.target_percentage}%</strong>
++          </li>
++        ))}
++      </ul>
++      <p><strong>Exact total: {total.display}%</strong></p>
++    </div>
++  );
++}
++
++function PublishReview({
++  draft,
++  onPublished,
++  onReload,
++}: {
++  draft: PolicyDraft;
++  onPublished: (version: PolicyVersion) => void;
++  onReload: () => void;
++}) {
++  const [reviewing, setReviewing] = useState(false);
++  const [confirmed, setConfirmed] = useState(false);
++  const [submitting, setSubmitting] = useState(false);
++  const [error, setError] = useState<string | null>(null);
++  const [conflict, setConflict] = useState<string | null>(null);
++  const total = allocationTotal(allocationInputs(draft));
++
++  async function publish() {
++    if (!confirmed || submitting) return;
++    setSubmitting(true);
++    setError(null);
++    setConflict(null);
++    try {
++      onPublished(await publishDraft(draft.revision));
++    } catch (caught) {
++      const message = conflictMessage(caught);
++      if (message) setConflict(message);
++      else setError(neutralMessage(caught));
++    } finally {
++      setSubmitting(false);
++    }
++  }
++
++  return (
++    <section className="panel" aria-labelledby="publish-heading">
++      <div className="section-heading section-heading-row">
++        <div>
++          <p className="eyebrow">Explicit confirmation</p>
++          <h2 id="publish-heading">Publish review</h2>
++        </div>
++        {!reviewing ? <button onClick={() => setReviewing(true)} type="button">Review for publication</button> : null}
++      </div>
++      {!reviewing ? <p>Review the saved server snapshot before creating an immutable Version.</p> : null}
++      {reviewing ? (
++        <div className="publish-review">
++          <p>Current saved revision: {draft.revision}</p>
++          <ul className="mechanical-checks">
++            {REQUIRED_PUBLISH_FIELDS.map((field) => (
++              <li key={field}>{FIELD_LABELS[field]}: {draft[field].trim() ? "Present" : "Missing"}</li>
++            ))}
++            <li>Allocation total: {total.display}%</li>
++          </ul>
++          <PolicyTextReadOnly value={draft} />
++          <AllocationReadOnly items={allocationInputs(draft)} />
++          <aside className="notice" aria-label="Publication non-advisory notice">
++            <strong>Recordkeeping only</strong>
++            <p>{NON_ADVISORY_NOTICE}</p>
++          </aside>
++          <label className="confirmation-row">
++            <input
++              checked={confirmed}
++              onChange={(event) => setConfirmed(event.target.checked)}
++              type="checkbox"
++            />
++            I confirm that I want to publish this saved Draft as an immutable Version.
++          </label>
++          {error ? <p className="error" role="alert">{error}</p> : null}
++          {conflict ? <ConflictPanel message={conflict} onReload={onReload} /> : null}
++          <div className="actions">
++            <button
++              className="primary-button"
++              disabled={!confirmed || submitting}
++              onClick={() => void publish()}
++              type="button"
++            >
++              {submitting ? "Publishing…" : "Publish immutable Version"}
++            </button>
++            <button disabled={submitting} onClick={() => setReviewing(false)} type="button">Close review</button>
++          </div>
++        </div>
++      ) : null}
++    </section>
++  );
++}
++
++function VersionView({ version, heading = "Current Published Version" }: { version: PolicyVersion; heading?: string }) {
++  return (
++    <section className="panel" aria-labelledby={`version-${version.version_number}-heading`}>
++      <div className="section-heading">
++        <p className="eyebrow">Immutable · {version.status === "published" ? "Published" : "Superseded"}</p>
++        <h2 id={`version-${version.version_number}-heading`}>{heading} · Version {version.version_number}</h2>
++        <p className="hint">Published {new Date(version.published_at).toLocaleString()}</p>
++      </div>
++      <p><strong>Published versions cannot be edited.</strong> Changes require a new Draft and publication.</p>
++      <PolicyTextReadOnly value={version} />
++      <AllocationReadOnly items={version.allocations} />
++    </section>
++  );
++}
++
++function VersionHistory({
++  items,
++  loading,
++  error,
++  nextCursor,
++  onLoadMore,
++}: {
++  items: PolicyVersionSummary[];
++  loading: boolean;
++  error: string | null;
++  nextCursor: number | null;
++  onLoadMore: () => void;
++}) {
++  const detailController = useRef<AbortController | null>(null);
++  const [detail, setDetail] = useState<PolicyVersion | null>(null);
++  const [detailLoading, setDetailLoading] = useState(false);
++  const [detailError, setDetailError] = useState<string | null>(null);
++
++  useEffect(() => () => detailController.current?.abort(), []);
++
++  async function selectVersion(versionNumber: number) {
++    detailController.current?.abort();
++    const controller = new AbortController();
++    detailController.current = controller;
++    setDetailLoading(true);
++    setDetailError(null);
++    try {
++      setDetail(await getVersion(versionNumber, controller.signal));
++    } catch (caught) {
++      if (!isAbort(caught)) setDetailError(neutralMessage(caught));
++    } finally {
++      if (!controller.signal.aborted) setDetailLoading(false);
++    }
++  }
++
++  return (
++    <section className="panel" aria-labelledby="history-heading">
++      <div className="section-heading">
++        <p className="eyebrow">Newest first · Read-only</p>
++        <h2 id="history-heading">Version history</h2>
++      </div>
++      {error ? <p className="error" role="alert">{error}</p> : null}
++      {items.length === 0 && !loading ? <p>No published Versions yet.</p> : null}
++      <ol className="version-list">
++        {items.map((item) => (
++          <li key={item.id}>
++            <div>
++              <strong>Version {item.version_number}</strong>
++              <span>{item.status === "published" ? "Published" : "Superseded"}</span>
++              <span>{new Date(item.published_at).toLocaleString()}</span>
++            </div>
++            <button onClick={() => void selectVersion(item.version_number)} type="button">View immutable detail</button>
++          </li>
++        ))}
++      </ol>
++      {nextCursor !== null ? (
++        <button disabled={loading} onClick={onLoadMore} type="button">
++          {loading ? "Loading more Versions…" : "Load more Versions"}
++        </button>
++      ) : null}
++      {detailLoading ? <p role="status">Loading Version detail…</p> : null}
++      {detailError ? <p className="error" role="alert">{detailError}</p> : null}
++      {detail ? <VersionView heading="Historical Version" version={detail} /> : null}
++    </section>
++  );
++}
++
++function AuditTimeline({
++  events,
++  loading,
++  error,
++  onRetry,
++}: {
++  events: PolicyAuditEvent[];
++  loading: boolean;
++  error: string | null;
++  onRetry: () => void;
++}) {
++  return (
++    <section className="panel" aria-labelledby="policy-audit-heading">
++      <div className="section-heading">
++        <p className="eyebrow">Latest server window · Read-only</p>
++        <h2 id="policy-audit-heading">Policy audit timeline</h2>
++        <p className="hint">
++          Events are shown in the server-provided sequence order. This Slice exposes only the latest window and has no cursor for earlier events.
++        </p>
++      </div>
++      {error ? (
++        <div className="error-panel" role="alert">
++          <p>{error}</p>
++          <button disabled={loading} onClick={onRetry} type="button">
++            {loading ? "Retrying audit timeline…" : "Retry audit timeline"}
++          </button>
++        </div>
++      ) : null}
++      {loading && !error ? <p role="status">Loading Policy audit timeline…</p> : null}
++      {!loading && events.length === 0 ? <p>No Policy audit events yet.</p> : null}
++      {!loading && events.length > 0 ? (
++        <ol className="timeline">
++          {events.map((event) => (
++            <li key={event.id}>
++              <strong>{event.action}</strong>
++              <span>{new Date(event.occurred_at).toLocaleString()}</span>
++              <span>Actor: {event.actor}</span>
++              <span>Sequence: {event.sequence_number}</span>
++              {Object.entries(event.metadata).map(([key, value]) => (
++                <span key={key}>{key}: {Array.isArray(value) ? value.join(", ") : value}</span>
++              ))}
++            </li>
++          ))}
++        </ol>
++      ) : null}
++    </section>
++  );
++}
++
++export function PolicyClient() {
++  const loadController = useRef<AbortController | null>(null);
++  const auditController = useRef<AbortController | null>(null);
++  const loadSequence = useRef(0);
++  const [initialLoading, setInitialLoading] = useState(true);
++  const [loadError, setLoadError] = useState<string | null>(null);
++  const [hasHousehold, setHasHousehold] = useState<boolean | null>(null);
++  const [policy, setPolicy] = useState<Policy | null>(null);
++  const [draft, setDraft] = useState<PolicyDraft | null>(null);
++  const [published, setPublished] = useState<PolicyVersion | null>(null);
++  const [history, setHistory] = useState<PolicyVersionSummary[]>([]);
++  const [nextHistoryCursor, setNextHistoryCursor] = useState<number | null>(null);
++  const [historyLoading, setHistoryLoading] = useState(false);
++  const [historyError, setHistoryError] = useState<string | null>(null);
++  const [auditEvents, setAuditEvents] = useState<PolicyAuditEvent[]>([]);
++  const [auditLoading, setAuditLoading] = useState(false);
++  const [auditError, setAuditError] = useState<string | null>(null);
++  const [mutation, setMutation] = useState<string | null>(null);
++  const [mutationError, setMutationError] = useState<string | null>(null);
++  const [savedMessage, setSavedMessage] = useState<string | null>(null);
++  const [discardConfirmation, setDiscardConfirmation] = useState(false);
++  const [workspaceEpoch, setWorkspaceEpoch] = useState(0);
++
++  const loadWorkspace = useCallback(async () => {
++    loadController.current?.abort();
++    const controller = new AbortController();
++    loadController.current = controller;
++    loadSequence.current += 1;
++    const sequence = loadSequence.current;
++    setInitialLoading(true);
++    setLoadError(null);
++    setMutationError(null);
++    try {
++      const [householdExists, currentPolicy] = await Promise.all([
++        hasCurrentHousehold(controller.signal),
++        getCurrentPolicy(controller.signal),
++      ]);
++      if (controller.signal.aborted || sequence !== loadSequence.current) return;
++      setHasHousehold(householdExists);
++      setPolicy(currentPolicy);
++
++      if (!householdExists || !currentPolicy) {
++        setDraft(null);
++        setPublished(null);
++        setHistory([]);
++        setNextHistoryCursor(null);
++        setAuditEvents([]);
++        setAuditError(null);
++        return;
++      }
++
++      const [draftResult, publishedResult, historyResult, auditResult] = await Promise.all([
++        getCurrentDraft(controller.signal),
++        getCurrentPublished(controller.signal),
++        getVersionHistory(undefined, controller.signal),
++        getPolicyAuditEvents(controller.signal).then(
++          (events) => ({ ok: true as const, events }),
++          (error: unknown) => ({ ok: false as const, error }),
++        ),
++      ]);
++      if (controller.signal.aborted || sequence !== loadSequence.current) return;
++      setDraft(draftResult);
++      setPublished(publishedResult);
++      setHistory(historyResult.items);
++      setNextHistoryCursor(historyResult.next_before_version_number);
++      setWorkspaceEpoch((current) => current + 1);
++      if (auditResult.ok) {
++        setAuditEvents(auditResult.events);
++        setAuditError(null);
++      } else if (!isAbort(auditResult.error)) {
++        setAuditError("Policy data is available, but the audit timeline could not be loaded.");
++      }
++    } catch (caught) {
++      if (!isAbort(caught)) setLoadError(neutralMessage(caught));
++    } finally {
++      if (!controller.signal.aborted && sequence === loadSequence.current) {
++        setInitialLoading(false);
++        setAuditLoading(false);
++      }
++    }
++  }, []);
++
++  const refreshAudit = useCallback(async (afterMutation = false) => {
++    auditController.current?.abort();
++    const controller = new AbortController();
++    auditController.current = controller;
++    setAuditLoading(true);
++    setAuditError(null);
++    try {
++      setAuditEvents(await getPolicyAuditEvents(controller.signal));
++    } catch (caught) {
++      if (!isAbort(caught)) {
++        setAuditError(
++          afterMutation
++            ? "The Policy mutation succeeded, but the audit timeline could not be refreshed."
++            : "The Policy audit timeline could not be loaded.",
++        );
++      }
++    } finally {
++      if (!controller.signal.aborted) setAuditLoading(false);
++    }
++  }, []);
++
++  useEffect(() => {
++    const timer = window.setTimeout(() => void loadWorkspace(), 0);
++    return () => {
++      window.clearTimeout(timer);
++      loadController.current?.abort();
++      auditController.current?.abort();
++    };
++  }, [loadWorkspace]);
++
++  function acceptDraft(saved: PolicyDraft, message: string) {
++    setDraft(saved);
++    setSavedMessage(message);
++    setMutationError(null);
++    void refreshAudit(true);
++  }
++
++  async function handleCreatePolicy() {
++    if (mutation) return;
++    setMutation("create-policy");
++    setMutationError(null);
++    setSavedMessage(null);
++    try {
++      const created = await createPolicy();
++      setPolicy(created.policy);
++      setDraft(created.draft);
++      setPublished(null);
++      setHistory([]);
++      setNextHistoryCursor(null);
++      setSavedMessage("Investment Policy and initial Draft created.");
++      void refreshAudit(true);
++    } catch (caught) {
++      if (caught instanceof PolicyApiError && caught.status === 409) await loadWorkspace();
++      else setMutationError(neutralMessage(caught));
++    } finally {
++      setMutation(null);
++    }
++  }
++
++  async function handleCreateDraft(sourceVersionId?: string) {
++    if (mutation) return;
++    setMutation(sourceVersionId ? "copy-draft" : "blank-draft");
++    setMutationError(null);
++    try {
++      const created = await createDraft(sourceVersionId);
++      setDraft(created);
++      setSavedMessage(sourceVersionId ? "Draft copied from the current Published Version." : "Blank Draft created.");
++      void refreshAudit(true);
++    } catch (caught) {
++      if (caught instanceof PolicyApiError && caught.status === 409) await loadWorkspace();
++      else setMutationError(neutralMessage(caught));
++    } finally {
++      setMutation(null);
++    }
++  }
++
++  async function handleDiscard() {
++    if (!draft || mutation) return;
++    setMutation("discard");
++    setMutationError(null);
++    try {
++      await discardDraft(draft.revision);
++      setSavedMessage("Draft discarded. Published Versions were not changed.");
++      setDiscardConfirmation(false);
++      await loadWorkspace();
++    } catch (caught) {
++      setMutationError(neutralMessage(caught));
++    } finally {
++      setMutation(null);
++    }
++  }
++
++  async function loadMoreHistory() {
++    if (nextHistoryCursor === null || historyLoading) return;
++    setHistoryLoading(true);
++    setHistoryError(null);
++    try {
++      const page = await getVersionHistory(nextHistoryCursor);
++      setHistory((current) => {
++        const byNumber = new Map(current.map((item) => [item.version_number, item]));
++        page.items.forEach((item) => byNumber.set(item.version_number, item));
++        return [...byNumber.values()].sort((left, right) => right.version_number - left.version_number);
++      });
++      setNextHistoryCursor(page.next_before_version_number);
++    } catch (caught) {
++      setHistoryError(neutralMessage(caught));
++    } finally {
++      setHistoryLoading(false);
++    }
++  }
++
++  async function handlePublished(version: PolicyVersion) {
++    setPublished(version);
++    setDraft(null);
++    setSavedMessage(`Version ${version.version_number} published.`);
++    setHistoryLoading(true);
++    try {
++      const refreshed = await getVersionHistory();
++      setHistory(refreshed.items);
++      setNextHistoryCursor(refreshed.next_before_version_number);
++      setHistoryError(null);
++    } catch (caught) {
++      setHistoryError(neutralMessage(caught));
++    } finally {
++      setHistoryLoading(false);
++    }
++    void refreshAudit(true);
++  }
++
++  return (
++    <main className="policy-shell">
++      <header className="page-header">
++        <p className="eyebrow">CompoundOS · Sprint 002 Slice 2C</p>
++        <h1>Investment Policy</h1>
++        <p className="lede">Record user-authored Policy text and target percentages through explicit, reviewable saves.</p>
++      </header>
++
++      <aside className="notice notice-warning" aria-label="Local-only limitation">
++        <strong>Local-only, non-production limitation</strong>
++        <p>{LOCAL_ONLY_NOTICE}</p>
++      </aside>
++      <aside className="notice" aria-label="Non-advisory notice">
++        <strong>Recordkeeping only</strong>
++        <p>{NON_ADVISORY_NOTICE}</p>
++        <p>CompoundOS does not provide investment advice, recommendations, or trade instructions.</p>
++      </aside>
++
++      {initialLoading ? <p role="status">Loading Household and Policy state…</p> : null}
++      {loadError ? (
++        <div className="error-panel" role="alert">
++          <p>{loadError}</p>
++          <button onClick={() => void loadWorkspace()} type="button">Try again</button>
++        </div>
++      ) : null}
++      {savedMessage ? <p className="success-message" role="status">{savedMessage}</p> : null}
++      {mutationError ? <ConflictPanel message={mutationError} onReload={() => void loadWorkspace()} /> : null}
++
++      {!initialLoading && !loadError && hasHousehold === false ? (
++        <section className="panel" aria-labelledby="missing-household-heading">
++          <p className="eyebrow">Household prerequisite</p>
++          <h2 id="missing-household-heading">Create the Household profile first</h2>
++          <p>The sole HouseholdProfile must exist before an Investment Policy record can be created.</p>
++          <Link className="primary-link" href="/household">Open Household profile</Link>
++        </section>
++      ) : null}
++
++      {!initialLoading && !loadError && hasHousehold && !policy ? (
++        <section className="panel" aria-labelledby="empty-policy-heading">
++          <p className="eyebrow">Empty Policy workspace</p>
++          <h2 id="empty-policy-heading">No Investment Policy record yet</h2>
++          <p>Create the stable Policy and an empty Draft. CompoundOS will not add text, asset classes, or percentages for you.</p>
++          <button
++            className="primary-button"
++            disabled={mutation !== null}
++            onClick={() => void handleCreatePolicy()}
++            type="button"
++          >
++            {mutation === "create-policy" ? "Creating policy draft…" : "Create policy draft"}
++          </button>
++        </section>
++      ) : null}
++
++      {!initialLoading && !loadError && policy && draft ? (
++        <>
++          <section className="workspace-status" aria-label="Draft status">
++            <span>Editable Draft</span>
++            <strong>Server revision {draft.revision}</strong>
++          </section>
++          <DraftTextEditor key={`text-${draft.id}-${workspaceEpoch}`} draft={draft} onReload={() => void loadWorkspace()} onSaved={acceptDraft} />
++          <AllocationEditor key={`allocations-${draft.id}-${workspaceEpoch}`} draft={draft} onReload={() => void loadWorkspace()} onSaved={acceptDraft} />
++          <PublishReview draft={draft} onPublished={(version) => void handlePublished(version)} onReload={() => void loadWorkspace()} />
++          <section className="panel" aria-labelledby="discard-heading">
++            <p className="eyebrow">Draft lifecycle</p>
++            <h2 id="discard-heading">Discard Draft</h2>
++            <p>Discarding removes only this editable Draft. It does not delete the Policy or any Published Version.</p>
++            {!discardConfirmation ? (
++              <button onClick={() => setDiscardConfirmation(true)} type="button">Discard Draft…</button>
++            ) : (
++              <div className="confirmation-panel">
++                <p><strong>Confirm Draft discard?</strong></p>
++                <div className="actions">
++                  <button disabled={mutation !== null} onClick={() => void handleDiscard()} type="button">
++                    {mutation === "discard" ? "Discarding Draft…" : "Confirm discard Draft"}
++                  </button>
++                  <button disabled={mutation !== null} onClick={() => setDiscardConfirmation(false)} type="button">Cancel</button>
++                </div>
++              </div>
++            )}
++          </section>
++        </>
++      ) : null}
++
++      {!initialLoading && !loadError && policy && !draft ? (
++        <>
++          {published ? <VersionView version={published} /> : (
++            <section className="panel">
++              <h2>No Draft is open</h2>
++              <p>The stable Policy exists, but it has no editable Draft or Published Version.</p>
++            </section>
++          )}
++          <section className="panel" aria-labelledby="new-draft-heading">
++            <p className="eyebrow">Explicit new work</p>
++            <h2 id="new-draft-heading">Create a new Draft</h2>
++            <div className="actions">
++              <button disabled={mutation !== null} onClick={() => void handleCreateDraft()} type="button">
++                {mutation === "blank-draft" ? "Creating blank Draft…" : "Start blank"}
++              </button>
++              {published ? (
++                <button disabled={mutation !== null} onClick={() => void handleCreateDraft(published.id)} type="button">
++                  {mutation === "copy-draft" ? "Copying current Published…" : "Copy current Published"}
++                </button>
++              ) : null}
++            </div>
++          </section>
++        </>
++      ) : null}
++
++      {!initialLoading && !loadError && policy ? (
++        <>
++          <VersionHistory
++            error={historyError}
++            items={history}
++            loading={historyLoading}
++            nextCursor={nextHistoryCursor}
++            onLoadMore={() => void loadMoreHistory()}
++          />
++          <AuditTimeline
++            error={auditError}
++            events={auditEvents}
++            loading={auditLoading}
++            onRetry={() => void refreshAudit()}
++          />
++        </>
++      ) : null}
++    </main>
++  );
++}
+diff --git a/frontend/lib/policy-api.test.ts b/frontend/lib/policy-api.test.ts
+new file mode 100644
+index 0000000..2033c2e
+--- /dev/null
++++ b/frontend/lib/policy-api.test.ts
+@@ -0,0 +1,125 @@
++import { afterEach, describe, expect, it, vi } from "vitest";
++
++import {
++  allocationTotal,
++  createDraft,
++  createPolicy,
++  getPolicyAuditEvents,
++  getVersionHistory,
++  percentageToHundredths,
++  PolicyApiError,
++  publishDraft,
++  replaceDraftAllocations,
++  updateDraftText,
++} from "./policy-api";
++
++function jsonResponse(body: unknown, status = 200) {
++  return new Response(status === 204 ? null : JSON.stringify(body), {
++    status,
++    headers: { "Content-Type": "application/json" },
++  });
++}
++
++afterEach(() => {
++  vi.unstubAllGlobals();
++});
++
++describe("Policy API client", () => {
++  it("creates a Policy without sending a JSON null or request body", async () => {
++    const fetchMock = vi.fn<
++      (input: string | URL | Request, init?: RequestInit) => Promise<Response>
++    >(
++      async () => jsonResponse({ policy: {}, draft: {} }, 201),
++    );
++    vi.stubGlobal("fetch", fetchMock);
++
++    await createPolicy();
++
++    expect(fetchMock).toHaveBeenCalledOnce();
++    const [url, init] = fetchMock.mock.calls[0];
++    expect(String(url)).toMatch(/\/api\/policies$/);
++    expect(init).toEqual(expect.objectContaining({ method: "POST" }));
++    expect(init?.body).toBeUndefined();
++    expect(init?.headers).toBeUndefined();
++  });
++
++  it("uses the approved endpoints, methods, revisions, and decimal strings", async () => {
++    const fetchMock = vi.fn<
++      (input: string | URL | Request, init?: RequestInit) => Promise<Response>
++    >(async () => jsonResponse({}));
++    vi.stubGlobal("fetch", fetchMock);
++
++    await updateDraftText(7, { objectives: "Owner text" });
++    await replaceDraftAllocations(8, [
++      { asset_class_name: "User entered", target_percentage: "12.50" },
++    ]);
++    await publishDraft(9);
++    await createDraft("version-id");
++    await getVersionHistory(3);
++
++    expect(fetchMock.mock.calls.map(([url, init]) => [String(url), init?.method])).toEqual([
++      [expect.stringMatching(/\/api\/policies\/current\/draft$/), "PATCH"],
++      [expect.stringMatching(/\/api\/policies\/current\/draft\/allocations$/), "PUT"],
++      [expect.stringMatching(/\/api\/policies\/current\/draft\/publish$/), "POST"],
++      [expect.stringMatching(/\/api\/policies\/current\/draft$/), "POST"],
++      [expect.stringMatching(/\/api\/policies\/current\/versions\?before_version_number=3$/), undefined],
++    ]);
++    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
++      expected_revision: 8,
++      items: [{ asset_class_name: "User entered", target_percentage: "12.50" }],
++    });
++    expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body))).toEqual({
++      expected_revision: 9,
++      confirmation: true,
++    });
++    expect(JSON.parse(String(fetchMock.mock.calls[3][1]?.body))).toEqual({
++      source_version_id: "version-id",
++    });
++  });
++
++  it.each([404, 409, 422])("preserves HTTP %s as a typed neutral error", async (status) => {
++    vi.stubGlobal(
++      "fetch",
++      vi.fn(async () => jsonResponse({ detail: "secret-marker owner payload" }, status)),
++    );
++
++    const error = await getPolicyAuditEvents().catch((caught: unknown) => caught);
++
++    expect(error).toBeInstanceOf(PolicyApiError);
++    expect((error as PolicyApiError).status).toBe(status);
++    expect((error as Error).message).not.toContain("secret-marker");
++  });
++
++  it("does not retry a failed mutation", async () => {
++    const fetchMock = vi.fn(async () => jsonResponse({ detail: "Conflict" }, 409));
++    vi.stubGlobal("fetch", fetchMock);
++
++    await expect(updateDraftText(1, { notes: "Private text" })).rejects.toBeInstanceOf(
++      PolicyApiError,
++    );
++    expect(fetchMock).toHaveBeenCalledOnce();
++  });
++
++  it("parses and sums exact integer hundredths without floating-point artifacts", () => {
++    expect(percentageToHundredths("0.1")).toBe(10);
++    expect(percentageToHundredths("0.2")).toBe(20);
++    expect(allocationTotal([
++      { asset_class_name: "One", target_percentage: "0.1" },
++      { asset_class_name: "Two", target_percentage: "0.2" },
++    ])).toEqual({ hundredths: 30, display: "0.30" });
++    expect(allocationTotal([{ asset_class_name: "One", target_percentage: "99.99" }]).display).toBe("99.99");
++    expect(allocationTotal([{ asset_class_name: "One", target_percentage: "100" }]).display).toBe("100.00");
++    expect(allocationTotal([
++      { asset_class_name: "One", target_percentage: "99.99" },
++      { asset_class_name: "Two", target_percentage: "0.02" },
++    ]).display).toBe("100.01");
++  });
++
++  it("rejects excess scale and never rounds it", () => {
++    expect(percentageToHundredths("12.345")).toBeNull();
++    expect(allocationTotal([{ asset_class_name: "One", target_percentage: "12.345" }])).toEqual({
++      hundredths: null,
++      display: "Invalid input",
++    });
++  });
++});
+diff --git a/frontend/lib/policy-api.ts b/frontend/lib/policy-api.ts
+new file mode 100644
+index 0000000..5505157
+--- /dev/null
++++ b/frontend/lib/policy-api.ts
+@@ -0,0 +1,301 @@
++export const POLICY_TEXT_FIELDS = [
++  "objectives",
++  "time_horizon",
++  "liquidity",
++  "diversification",
++  "contribution_policy",
++  "rebalancing_policy",
++  "prohibited_assets",
++  "leverage_policy",
++  "decision_process",
++  "notes",
++] as const;
++
++export type PolicyTextField = (typeof POLICY_TEXT_FIELDS)[number];
++
++export const POLICY_TEXT_LIMITS: Record<PolicyTextField, number> = {
++  objectives: 4000,
++  time_horizon: 2000,
++  liquidity: 4000,
++  diversification: 4000,
++  contribution_policy: 4000,
++  rebalancing_policy: 4000,
++  prohibited_assets: 4000,
++  leverage_policy: 4000,
++  decision_process: 4000,
++  notes: 8000,
++};
++
++export const REQUIRED_PUBLISH_FIELDS = [
++  "objectives",
++  "time_horizon",
++  "decision_process",
++] as const satisfies readonly PolicyTextField[];
++
++export type PolicyText = Record<PolicyTextField, string>;
++
++export type Policy = {
++  id: string;
++  household_id: string;
++  created_at: string;
++  updated_at: string;
++};
++
++export type Allocation = {
++  id: string;
++  asset_class_name: string;
++  target_percentage: string;
++  sort_order: number;
++};
++
++export type PolicyDraft = PolicyText & {
++  id: string;
++  policy_id: string;
++  source_version_id: string | null;
++  revision: number;
++  created_at: string;
++  updated_at: string;
++  allocations: Allocation[];
++};
++
++export type PolicyVersionSummary = {
++  id: string;
++  version_number: number;
++  status: "published" | "superseded";
++  published_at: string;
++  superseded_at: string | null;
++};
++
++export type PolicyVersion = PolicyText & PolicyVersionSummary & {
++  policy_id: string;
++  allocations: Allocation[];
++};
++
++export type PolicyVersionHistory = {
++  items: PolicyVersionSummary[];
++  next_before_version_number: number | null;
++};
++
++export type PolicyAuditEvent = {
++  id: string;
++  household_id: string;
++  actor: string;
++  action: string;
++  entity_type: string;
++  entity_id: string;
++  occurred_at: string;
++  sequence_number: number;
++  metadata: Record<string, string | number | string[]>;
++};
++
++export type AllocationInput = {
++  asset_class_name: string;
++  target_percentage: string;
++};
++
++const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
++
++export class PolicyApiError extends Error {
++  constructor(
++    message: string,
++    readonly status: number,
++  ) {
++    super(message);
++    this.name = "PolicyApiError";
++  }
++}
++
++function neutralErrorMessage(status: number): string {
++  if (status === 400) {
++    return "The request could not be completed because the record is mechanically incomplete or unchanged.";
++  }
++  if (status === 404) return "The requested Policy record was not found.";
++  if (status === 409) {
++    return "The Policy data changed in another operation. Reload before trying again.";
++  }
++  if (status === 422) {
++    return "The request was not accepted. Check field formats, limits, and duplicate asset-class names.";
++  }
++  return "The Policy request could not be completed.";
++}
++
++async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
++  const response = await fetch(`${API_BASE_URL}${path}`, init);
++  if (!response.ok) throw new PolicyApiError(neutralErrorMessage(response.status), response.status);
++  if (response.status === 204) return undefined as T;
++  return (await response.json()) as T;
++}
++
++function jsonRequest(method: string, payload: unknown, signal?: AbortSignal): RequestInit {
++  return {
++    method,
++    headers: { "Content-Type": "application/json" },
++    body: JSON.stringify(payload),
++    signal,
++  };
++}
++
++export async function hasCurrentHousehold(signal?: AbortSignal): Promise<boolean> {
++  const response = await fetch(`${API_BASE_URL}/api/households/current`, {
++    cache: "no-store",
++    signal,
++  });
++  if (response.status === 404) return false;
++  if (!response.ok) throw new PolicyApiError(neutralErrorMessage(response.status), response.status);
++  return true;
++}
++
++export async function getCurrentPolicy(signal?: AbortSignal): Promise<Policy | null> {
++  const response = await fetch(`${API_BASE_URL}/api/policies/current`, {
++    cache: "no-store",
++    signal,
++  });
++  if (response.status === 404) return null;
++  if (!response.ok) throw new PolicyApiError(neutralErrorMessage(response.status), response.status);
++  return (await response.json()) as Policy;
++}
++
++export function createPolicy(signal?: AbortSignal): Promise<{ policy: Policy; draft: PolicyDraft }> {
++  return request("/api/policies", { method: "POST", signal });
++}
++
++export function getCurrentDraft(signal?: AbortSignal): Promise<PolicyDraft | null> {
++  return request<PolicyDraft>("/api/policies/current/draft", {
++    cache: "no-store",
++    signal,
++  }).catch((error: unknown) => {
++    if (error instanceof PolicyApiError && error.status === 404) return null;
++    throw error;
++  });
++}
++
++export function updateDraftText(
++  expectedRevision: number,
++  changedFields: Partial<PolicyText>,
++): Promise<PolicyDraft> {
++  return request(
++    "/api/policies/current/draft",
++    jsonRequest("PATCH", { expected_revision: expectedRevision, ...changedFields }),
++  );
++}
++
++export function replaceDraftAllocations(
++  expectedRevision: number,
++  items: AllocationInput[],
++): Promise<PolicyDraft> {
++  return request(
++    "/api/policies/current/draft/allocations",
++    jsonRequest("PUT", { expected_revision: expectedRevision, items }),
++  );
++}
++
++export function discardDraft(expectedRevision: number): Promise<void> {
++  return request(
++    "/api/policies/current/draft/discard",
++    jsonRequest("POST", { expected_revision: expectedRevision }),
++  );
++}
++
++export function createDraft(sourceVersionId?: string): Promise<PolicyDraft> {
++  const payload = sourceVersionId ? { source_version_id: sourceVersionId } : {};
++  return request("/api/policies/current/draft", jsonRequest("POST", payload));
++}
++
++export function publishDraft(expectedRevision: number): Promise<PolicyVersion> {
++  return request(
++    "/api/policies/current/draft/publish",
++    jsonRequest("POST", { expected_revision: expectedRevision, confirmation: true }),
++  );
++}
++
++export function getCurrentPublished(signal?: AbortSignal): Promise<PolicyVersion | null> {
++  return request<PolicyVersion>("/api/policies/current/published", {
++    cache: "no-store",
++    signal,
++  }).catch((error: unknown) => {
++    if (error instanceof PolicyApiError && error.status === 404) return null;
++    throw error;
++  });
++}
++
++export function getVersionHistory(
++  beforeVersionNumber?: number,
++  signal?: AbortSignal,
++): Promise<PolicyVersionHistory> {
++  const query = beforeVersionNumber
++    ? `?before_version_number=${beforeVersionNumber}`
++    : "";
++  return request(`/api/policies/current/versions${query}`, { cache: "no-store", signal });
++}
++
++export function getVersion(versionNumber: number, signal?: AbortSignal): Promise<PolicyVersion> {
++  return request(`/api/policies/current/versions/${versionNumber}`, {
++    cache: "no-store",
++    signal,
++  });
++}
++
++export function getPolicyAuditEvents(signal?: AbortSignal): Promise<PolicyAuditEvent[]> {
++  return request("/api/policies/current/audit-events", { cache: "no-store", signal });
++}
++
++function parseDigits(value: string): number | null {
++  if (!value) return null;
++  let result = 0;
++  for (const character of value) {
++    const digit = character.charCodeAt(0) - 48;
++    if (digit < 0 || digit > 9) return null;
++    result = result * 10 + digit;
++  }
++  return result;
++}
++
++export function percentageToHundredths(value: string): number | null {
++  if (!/^\d+(?:\.\d{1,2})?$/.test(value)) return null;
++  const [wholeText, fractionText = ""] = value.split(".");
++  const whole = parseDigits(wholeText);
++  const fraction = parseDigits(fractionText.padEnd(2, "0"));
++  if (whole === null || fraction === null) return null;
++  const hundredths = whole * 100 + fraction;
++  if (hundredths <= 0 || hundredths > 10000) return null;
++  return hundredths;
++}
++
++export function formatHundredths(value: number): string {
++  const whole = Math.floor(value / 100);
++  const fraction = String(value % 100).padStart(2, "0");
++  return `${whole}.${fraction}`;
++}
++
++export function allocationTotal(items: AllocationInput[]): {
++  hundredths: number | null;
++  display: string;
++} {
++  let total = 0;
++  for (const item of items) {
++    const value = percentageToHundredths(item.target_percentage);
++    if (value === null) return { hundredths: null, display: "Invalid input" };
++    total += value;
++  }
++  return { hundredths: total, display: formatHundredths(total) };
++}
++
++function normalizedName(value: string): string {
++  return value.normalize("NFKC").trim().replace(/\s+/gu, " ").toLocaleLowerCase();
++}
++
++function normalizedPercentage(value: string): string | null {
++  const hundredths = percentageToHundredths(value);
++  return hundredths === null ? null : formatHundredths(hundredths);
++}
++
++export function allocationsEqual(saved: Allocation[], edited: AllocationInput[]): boolean {
++  if (saved.length !== edited.length) return false;
++  return saved.every((item, index) => {
++    const candidate = edited[index];
++    return (
++      normalizedName(item.asset_class_name) === normalizedName(candidate.asset_class_name) &&
++      item.target_percentage === normalizedPercentage(candidate.target_percentage)
++    );
++  });
++}

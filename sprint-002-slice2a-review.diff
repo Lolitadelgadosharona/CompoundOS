@@ -1,0 +1,1836 @@
+diff --git a/apps/api/models.py b/apps/api/models.py
+index 8a28cb4..562ba95 100644
+--- a/apps/api/models.py
++++ b/apps/api/models.py
+@@ -1,19 +1,25 @@
+ from __future__ import annotations
+ 
+ from datetime import datetime
+-from typing import Any
++from decimal import Decimal
++from typing import Any, Optional
+ from uuid import UUID, uuid4
+ 
+ from sqlalchemy import (
++    BigInteger,
+     Boolean,
+     CheckConstraint,
+     DateTime,
+     ForeignKey,
++    Identity,
+     Index,
++    Integer,
++    Numeric,
+     String,
+     Text,
+     UniqueConstraint,
+     func,
++    text,
+ )
+ from sqlalchemy.dialects.postgresql import JSONB
+ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+@@ -75,7 +81,8 @@ class HouseholdProfile(Base):
+ class AuditEvent(Base):
+     __tablename__ = "audit_events"
+     __table_args__ = (
+-        Index("ix_audit_events_household_order", "household_id", "occurred_at", "id"),
++        Index("ix_audit_events_household_order", "household_id", "sequence_number"),
++        UniqueConstraint("sequence_number", name="uq_audit_events_sequence_number"),
+     )
+ 
+     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+@@ -92,3 +99,261 @@ class AuditEvent(Base):
+     event_metadata: Mapped[dict[str, Any]] = mapped_column(
+         "metadata", JSONB, nullable=False, default=dict
+     )
++    sequence_number: Mapped[int] = mapped_column(
++        BigInteger, Identity(always=True), nullable=False
++    )
++
++
++POLICY_TEXT_COLUMNS: tuple[tuple[str, int], ...] = (
++    ("objectives", 4_000),
++    ("time_horizon", 2_000),
++    ("liquidity", 4_000),
++    ("diversification", 4_000),
++    ("contribution_policy", 4_000),
++    ("rebalancing_policy", 4_000),
++    ("prohibited_assets", 4_000),
++    ("leverage_policy", 4_000),
++    ("decision_process", 4_000),
++    ("notes", 8_000),
++)
++
++
++def policy_text_constraints(table_name: str) -> tuple[CheckConstraint, ...]:
++    return tuple(
++        CheckConstraint(
++            f"char_length({column_name}) <= {maximum}",
++            name=f"ck_{table_name}_{column_name}_length",
++        )
++        for column_name, maximum in POLICY_TEXT_COLUMNS
++    )
++
++
++class InvestmentPolicy(Base):
++    __tablename__ = "investment_policies"
++    __table_args__ = (
++        UniqueConstraint("household_id", name="uq_investment_policies_household_id"),
++    )
++
++    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
++    household_id: Mapped[UUID] = mapped_column(
++        ForeignKey(
++            "household_profiles.id",
++            name="fk_investment_policies_household_id_household_profiles",
++            ondelete="RESTRICT",
++        ),
++        nullable=False,
++    )
++    created_at: Mapped[datetime] = mapped_column(
++        DateTime(timezone=True), nullable=False, server_default=func.now()
++    )
++    updated_at: Mapped[datetime] = mapped_column(
++        DateTime(timezone=True), nullable=False, server_default=func.now()
++    )
++
++
++class InvestmentPolicyVersion(Base):
++    __tablename__ = "investment_policy_versions"
++    __table_args__ = (
++        CheckConstraint(
++            "version_number > 0",
++            name="ck_investment_policy_versions_version_number_positive",
++        ),
++        CheckConstraint(
++            "status IN ('published', 'superseded')",
++            name="ck_investment_policy_versions_status",
++        ),
++        CheckConstraint(
++            "(status = 'published' AND superseded_at IS NULL) "
++            "OR (status = 'superseded' AND superseded_at IS NOT NULL)",
++            name="ck_investment_policy_versions_status_timestamps",
++        ),
++        *policy_text_constraints("investment_policy_versions"),
++        UniqueConstraint(
++            "policy_id",
++            "version_number",
++            name="uq_investment_policy_versions_policy_version",
++        ),
++        Index(
++            "uq_investment_policy_versions_current_published",
++            "policy_id",
++            unique=True,
++            postgresql_where=text("status = 'published'"),
++        ),
++        Index(
++            "ix_investment_policy_versions_policy_history",
++            "policy_id",
++            text("version_number DESC"),
++        ),
++    )
++
++    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
++    policy_id: Mapped[UUID] = mapped_column(
++        ForeignKey(
++            "investment_policies.id",
++            name="fk_investment_policy_versions_policy_id_investment_policies",
++            ondelete="RESTRICT",
++        ),
++        nullable=False,
++    )
++    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
++    status: Mapped[str] = mapped_column(Text, nullable=False)
++    objectives: Mapped[str] = mapped_column(Text, nullable=False)
++    time_horizon: Mapped[str] = mapped_column(Text, nullable=False)
++    liquidity: Mapped[str] = mapped_column(Text, nullable=False)
++    diversification: Mapped[str] = mapped_column(Text, nullable=False)
++    contribution_policy: Mapped[str] = mapped_column(Text, nullable=False)
++    rebalancing_policy: Mapped[str] = mapped_column(Text, nullable=False)
++    prohibited_assets: Mapped[str] = mapped_column(Text, nullable=False)
++    leverage_policy: Mapped[str] = mapped_column(Text, nullable=False)
++    decision_process: Mapped[str] = mapped_column(Text, nullable=False)
++    notes: Mapped[str] = mapped_column(Text, nullable=False)
++    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
++    sealed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
++    superseded_at: Mapped[Optional[datetime]] = mapped_column(
++        DateTime(timezone=True), nullable=True
++    )
++
++
++class InvestmentPolicyDraft(Base):
++    __tablename__ = "investment_policy_drafts"
++    __table_args__ = (
++        CheckConstraint(
++            "revision > 0", name="ck_investment_policy_drafts_revision_positive"
++        ),
++        *policy_text_constraints("investment_policy_drafts"),
++        UniqueConstraint("policy_id", name="uq_investment_policy_drafts_policy_id"),
++        Index("ix_investment_policy_drafts_source_version_id", "source_version_id"),
++    )
++
++    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
++    policy_id: Mapped[UUID] = mapped_column(
++        ForeignKey(
++            "investment_policies.id",
++            name="fk_investment_policy_drafts_policy_id_investment_policies",
++            ondelete="RESTRICT",
++        ),
++        nullable=False,
++    )
++    source_version_id: Mapped[Optional[UUID]] = mapped_column(
++        ForeignKey(
++            "investment_policy_versions.id",
++            name="fk_investment_policy_drafts_source_version_id_versions",
++            ondelete="RESTRICT",
++        ),
++        nullable=True,
++    )
++    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
++    objectives: Mapped[str] = mapped_column(Text, nullable=False, default="")
++    time_horizon: Mapped[str] = mapped_column(Text, nullable=False, default="")
++    liquidity: Mapped[str] = mapped_column(Text, nullable=False, default="")
++    diversification: Mapped[str] = mapped_column(Text, nullable=False, default="")
++    contribution_policy: Mapped[str] = mapped_column(Text, nullable=False, default="")
++    rebalancing_policy: Mapped[str] = mapped_column(Text, nullable=False, default="")
++    prohibited_assets: Mapped[str] = mapped_column(Text, nullable=False, default="")
++    leverage_policy: Mapped[str] = mapped_column(Text, nullable=False, default="")
++    decision_process: Mapped[str] = mapped_column(Text, nullable=False, default="")
++    notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
++    created_at: Mapped[datetime] = mapped_column(
++        DateTime(timezone=True), nullable=False, server_default=func.now()
++    )
++    updated_at: Mapped[datetime] = mapped_column(
++        DateTime(timezone=True), nullable=False, server_default=func.now()
++    )
++
++
++class InvestmentPolicyDraftAllocation(Base):
++    __tablename__ = "investment_policy_draft_allocations"
++    __table_args__ = (
++        CheckConstraint(
++            "char_length(asset_class_name) BETWEEN 1 AND 200",
++            name="ck_investment_policy_draft_allocations_name_length",
++        ),
++        CheckConstraint(
++            "char_length(normalized_asset_class_name) BETWEEN 1 AND 200",
++            name="ck_investment_policy_draft_allocations_normalized_name_length",
++        ),
++        CheckConstraint(
++            "target_percentage > 0.00 AND target_percentage <= 100.00",
++            name="ck_investment_policy_draft_allocations_percentage_range",
++        ),
++        CheckConstraint(
++            "sort_order >= 0",
++            name="ck_investment_policy_draft_allocations_sort_order_nonnegative",
++        ),
++        UniqueConstraint(
++            "draft_id",
++            "normalized_asset_class_name",
++            name="uq_investment_policy_draft_allocations_normalized_name",
++        ),
++        UniqueConstraint(
++            "draft_id",
++            "sort_order",
++            name="uq_investment_policy_draft_allocations_sort_order",
++        ),
++        Index("ix_investment_policy_draft_allocations_draft_id", "draft_id"),
++    )
++
++    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
++    draft_id: Mapped[UUID] = mapped_column(
++        ForeignKey(
++            "investment_policy_drafts.id",
++            name="fk_policy_draft_allocations_draft_id_policy_drafts",
++            ondelete="CASCADE",
++        ),
++        nullable=False,
++    )
++    asset_class_name: Mapped[str] = mapped_column(Text, nullable=False)
++    normalized_asset_class_name: Mapped[str] = mapped_column(Text, nullable=False)
++    target_percentage: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
++    sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
++
++
++class InvestmentPolicyVersionAllocation(Base):
++    __tablename__ = "investment_policy_version_allocations"
++    __table_args__ = (
++        CheckConstraint(
++            "char_length(asset_class_name) BETWEEN 1 AND 200",
++            name="ck_investment_policy_version_allocations_name_length",
++        ),
++        CheckConstraint(
++            "char_length(normalized_asset_class_name) BETWEEN 1 AND 200",
++            name="ck_investment_policy_version_allocations_normalized_name_length",
++        ),
++        CheckConstraint(
++            "target_percentage > 0.00 AND target_percentage <= 100.00",
++            name="ck_investment_policy_version_allocations_percentage_range",
++        ),
++        CheckConstraint(
++            "sort_order >= 0",
++            name="ck_investment_policy_version_allocations_sort_order_nonnegative",
++        ),
++        UniqueConstraint(
++            "version_id",
++            "normalized_asset_class_name",
++            name="uq_investment_policy_version_allocations_normalized_name",
++        ),
++        UniqueConstraint(
++            "version_id",
++            "sort_order",
++            name="uq_investment_policy_version_allocations_sort_order",
++        ),
++        Index(
++            "ix_investment_policy_version_allocations_version_order",
++            "version_id",
++            "sort_order",
++        ),
++    )
++
++    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
++    version_id: Mapped[UUID] = mapped_column(
++        ForeignKey(
++            "investment_policy_versions.id",
++            name="fk_policy_version_allocations_version_id_policy_versions",
++            ondelete="RESTRICT",
++        ),
++        nullable=False,
++    )
++    asset_class_name: Mapped[str] = mapped_column(Text, nullable=False)
++    normalized_asset_class_name: Mapped[str] = mapped_column(Text, nullable=False)
++    target_percentage: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
++    sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
+diff --git a/apps/api/repositories/households.py b/apps/api/repositories/households.py
+index 3a9d8d7..25e7951 100644
+--- a/apps/api/repositories/households.py
++++ b/apps/api/repositories/households.py
+@@ -47,6 +47,6 @@ def list_audit_events(session: Session, household_id: UUID) -> list[AuditEvent]:
+     statement = (
+         select(AuditEvent)
+         .where(AuditEvent.household_id == household_id)
+-        .order_by(AuditEvent.occurred_at, AuditEvent.id)
++        .order_by(AuditEvent.sequence_number.asc())
+     )
+     return list(session.scalars(statement))
+diff --git a/apps/api/schemas.py b/apps/api/schemas.py
+index 804def4..e19d9af 100644
+--- a/apps/api/schemas.py
++++ b/apps/api/schemas.py
+@@ -68,4 +68,5 @@ class AuditEventResponse(BaseModel):
+     entity_type: str
+     entity_id: UUID
+     occurred_at: datetime
++    sequence_number: int
+     metadata: dict[str, Any] = Field(validation_alias="event_metadata")
+diff --git a/docs/ADR/0003-immutable-investment-policy-snapshots.md b/docs/ADR/0003-immutable-investment-policy-snapshots.md
+new file mode 100644
+index 0000000..c04961a
+--- /dev/null
++++ b/docs/ADR/0003-immutable-investment-policy-snapshots.md
+@@ -0,0 +1,44 @@
++# ADR 0003: Immutable Investment Policy Snapshots
++
++- Date: 2026-07-14
++- Status: Accepted for Sprint 002 Slice 2A
++
++## Context
++
++CompoundOS must preserve user-authored Investment Policy history without allowing
++application defects or direct database writes to rewrite a published snapshot.
++Slice 2A is limited to persistence and database enforcement; Policy services,
++APIs, publication orchestration, and frontend workflows are not authorized.
++
++## Decision
++
++- Add explicit Alembic revision `0002_investment_policy_foundation` on top of
++  `0001_household_persistence`; do not amend the merged Slice 1 migration.
++- Store one stable Policy per Household and at most one editable Draft per Policy.
++- Store immutable Version snapshots separately from editable Draft state, with
++  lower-case `published` and `superseded` status values.
++- Use `NUMERIC(5,2)` for user-authored target percentages and named database
++  constraints for approved ranges, normalized names, ordering, and cardinality.
++- Use a partial unique index to permit at most one current `published` Version per Policy.
++- Use PostgreSQL triggers to allow only an otherwise unchanged sealing update and
++  an otherwise unchanged `published` to `superseded` transition.
++- Forbid every Version delete and every Version-allocation update/delete. Permit
++  allocation insertion only while its parent Version is unsealed.
++- Use a deferred constraint trigger to reject any transaction that would commit an
++  unsealed Version. Failed snapshot construction is cleaned up by transaction rollback.
++- Add `audit_events.sequence_number` as a database-generated, unique, monotonically
++  increasing insertion sequence. It may contain rollback gaps and is not a global
++  concurrent transaction commit order.
++- Keep SQLAlchemy mappings aligned with the migration and validate all guarantees
++  against real PostgreSQL.
++
++## Consequences
++
++- Immutable history is protected independently of future service/repository code.
++- Snapshot construction has an internal unsealed interval that must begin and end
++  inside one transaction; it is not a product lifecycle state.
++- Direct SQL mutation attempts fail with stable trigger error identifiers.
++- Development downgrade removes Slice 2A structures while preserving Slice 1
++  tables and their pre-Slice-2A fields and rows.
++- Policy use cases, API contracts, pagination, and frontend behavior require
++  separately authorized later slices.
+diff --git a/docs/ADR/README.md b/docs/ADR/README.md
+index c1523d4..fe3707f 100644
+--- a/docs/ADR/README.md
++++ b/docs/ADR/README.md
+@@ -13,3 +13,4 @@ This directory records significant architectural decisions for CompoundOS.
+ 
+ - [ADR 0001: Frontend Framework and Package Manager](0001-frontend-framework-and-package-manager.md) — Accepted
+ - [ADR 0002: PostgreSQL Persistence and Transactions](0002-postgresql-persistence-and-transactions.md) — Accepted
++- [ADR 0003: Immutable Investment Policy Snapshots](0003-immutable-investment-policy-snapshots.md) — Accepted for Sprint 002 Slice 2A
+diff --git a/docs/ARCHITECTURE.md b/docs/ARCHITECTURE.md
+index ba2d78b..a1017cf 100644
+--- a/docs/ARCHITECTURE.md
++++ b/docs/ARCHITECTURE.md
+@@ -22,6 +22,29 @@ CompoundOS will use a modular monorepo with a Next.js frontend, a FastAPI backen
+ - Safety constraints: Pydantic performs request validation and named PostgreSQL
+   checks independently enforce the same character limits and currency format
+ 
++## Sprint 002 Slice 2A Architecture
++
++Slice 2A extends the persistence foundation without adding a Policy use case or
++user-facing workflow:
++
++- Alembic revision `0002_investment_policy_foundation` extends `audit_events` and
++  creates the five approved Policy, Draft, allocation, and immutable Version tables.
++- `audit_events.sequence_number` is a PostgreSQL-generated identity value used for
++  deterministic insertion ordering. It may contain rollback gaps and does not
++  represent concurrent transaction commit order.
++- Named PostgreSQL checks, unique constraints, foreign keys, and indexes enforce
++  Policy/Draft cardinality, allocation bounds, normalized-name uniqueness,
++  version numbering, and at most one current `published` Version.
++- PostgreSQL trigger functions permit only the internal unsealed snapshot-build
++  interval, exact sealing, and exact `published` to `superseded` transition.
++- A deferred constraint trigger prevents committing an unsealed Version.
++- Version allocation rows are insertable only before parent sealing and are never
++  updateable or deletable.
++- SQLAlchemy models mirror the migration. No Policy repository workflow, service,
++  request schema, router, endpoint, or frontend is introduced in Slice 2A.
++- Real PostgreSQL tests cover fresh/incremental migration, downgrade/re-upgrade,
++  named constraints, trigger transitions, rollback, and AuditEvent sequencing.
++
+ ## Module Boundaries
+ 
+ - `routers/households.py`: four approved HTTP contracts and status mapping
+@@ -96,3 +119,5 @@ and CI toolchain.
+ - Decide whether to migrate `frontend/` to `apps/web/` in a later approved sprint.
+ - Any later persistence, authentication, policy, journal, Guardian, AI, or broker
+   architecture requires separate approval.
++- Policy services, APIs, and frontend workflows remain outside Slice 2A and require
++  separate Slice 2B or Slice 2C authorization.
+diff --git a/docs/CHANGELOG.md b/docs/CHANGELOG.md
+index 966610e..9d7697e 100644
+--- a/docs/CHANGELOG.md
++++ b/docs/CHANGELOG.md
+@@ -1,5 +1,36 @@
+ # Changelog
+ 
++## [Unreleased] - Sprint 002 Slice 2A Review
++
++### Added
++
++- Alembic revision `0002_investment_policy_foundation`
++- Five approved Investment Policy, Draft, allocation, and Version persistence tables
++- Database-generated unique AuditEvent insertion sequence with preserved Slice 1 data
++- Named Policy cardinality, version, allocation, normalization, and range constraints
++- PostgreSQL immutable Version and Version-allocation trigger functions
++- Deferred commit-time sealing enforcement
++- SQLAlchemy mappings aligned with the migration
++- Real PostgreSQL tests for fresh and incremental migration, downgrade/re-upgrade,
++  constraints, triggers, rollback, and insertion sequencing
++- ADR 0003 documenting immutable Policy snapshot persistence
++
++### Boundaries
++
++- Slice 2A adds no Policy repository workflow, service, API endpoint, Pydantic
++  Policy contract, or frontend `/policy` experience.
++- No recommendation, Guardian, AI, Broker, trading, authentication, Slice 2B,
++  Slice 2C, or Slice 3 behavior is included.
++- AuditEvent sequence values provide deterministic database insertion order, not
++  concurrent transaction commit order, and may contain rollback gaps.
++
++### Status
++
++- Sprint 002 remains In Progress.
++- Slice 2A is in Review and is not a production-readiness claim.
++- Slice 2B, Slice 2C, and Slice 3 remain unauthorized.
++- Docker runtime/browser validation and full AuditEvent pagination remain Backlog items.
++
+ ## [Unreleased] - Sprint 002 Slice 1 Complete
+ 
+ ### Added
+diff --git a/docs/MASTER_PLAN.md b/docs/MASTER_PLAN.md
+index 813a78a..6eb8667 100644
+--- a/docs/MASTER_PLAN.md
++++ b/docs/MASTER_PLAN.md
+@@ -18,9 +18,11 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+   local development configuration
+ - Sprint 002: In Progress
+ - Completed work: Implementation Slice 1 — Household and Persistence Foundation
+-- Current implementation authorization: none
+-- Slice 2: Technical Design / Not Started
+-- Slice 2 implementation: Not authorized
++- Slice 2 Technical Design: Approved
++- Current implementation authorization: Slice 2A only
++- Slice 2A: Investment Policy Persistence and Immutability Foundation / Review
++- Slice 2B: Not authorized
++- Slice 2C: Not authorized
+ - Slice 3: Not authorized
+ 
+ ## Planning
+@@ -31,7 +33,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+ - Sprint 002 Slice 1 planning and implementation are complete; later
+   implementation slices remain unauthorized.
+ - Sprint 002 Slice 2 technical design is authorized for planning and review only.
+-- Slice 2 technical design does not authorize implementation.
++- Slice 2A implementation was separately authorized on 2026-07-14.
++- Slice 2B, Slice 2C, and Slice 3 remain unauthorized.
+ 
+ ## Backlog
+ 
+@@ -49,7 +52,9 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+ 
+ ## In Progress
+ 
+-- Sprint 002 remains In Progress; no further implementation slice is authorized.
++- Sprint 002 remains In Progress.
++- Slice 2A implementation is complete and awaiting independent review.
++- No further implementation slice is authorized.
+ 
+ ## Review
+ 
+@@ -76,7 +81,11 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+   APPROVE.
+ - Pull request #6 approved for merge.
+ - Merging the design pull request does not authorize Slice 2 implementation.
+-- Sprint 002 remains In Progress; Slice 2 implementation is not authorized.
++- Sprint 002 Slice 2A persistence and immutability foundation is in Review.
++- Slice 2A contains migration, ORM mapping, database constraints, immutable
++  snapshot triggers, AuditEvent insertion sequencing, and real PostgreSQL tests.
++- Slice 2A adds no Policy service, repository workflow, API, or frontend.
++- Sprint 002 remains In Progress; Slice 2B, Slice 2C, and Slice 3 are not authorized.
+ 
+ ## Done
+ 
+@@ -208,3 +217,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+   conclusion is APPROVE; pull request #6 is approved for merge.
+ - 2026-07-14: Merging pull request #6 does not authorize Slice 2 implementation;
+   Slice 2 remains Not Started and Slice 3 remains unauthorized.
++- 2026-07-14: Sprint 002 Slice 2A implementation authorized for Investment Policy
++  persistence and immutable database snapshots only.
++- 2026-07-14: Slice 2A may add migration, ORM mapping, database helpers, and real
++  PostgreSQL tests, but no Policy service, API, or frontend workflow.
++- 2026-07-14: Slice 2B, Slice 2C, and Slice 3 remain unauthorized.
+diff --git a/docs/PRD.md b/docs/PRD.md
+index 93223e1..9093c9b 100644
+--- a/docs/PRD.md
++++ b/docs/PRD.md
+@@ -2,8 +2,10 @@
+ 
+ ## Status
+ 
+-Approved for Sprint 002 Implementation Slice 1 only. Sprint 002 remains In
+-Progress, and Slice 2 is not authorized.
++Approved user-facing behavior remains limited to Sprint 002 Implementation Slice
++1. Slice 2A is an authorized persistence and immutability foundation in Review;
++it adds no Policy API or user-facing behavior. Slice 2B, Slice 2C, and Slice 3 are
++not authorized.
+ 
+ ## Summary
+ 
+diff --git a/docs/sprints/SPRINT_002_SLICE_2_TECHNICAL_DESIGN.md b/docs/sprints/SPRINT_002_SLICE_2_TECHNICAL_DESIGN.md
+index e0d0ab8..5315b69 100644
+--- a/docs/sprints/SPRINT_002_SLICE_2_TECHNICAL_DESIGN.md
++++ b/docs/sprints/SPRINT_002_SLICE_2_TECHNICAL_DESIGN.md
+@@ -2,7 +2,7 @@
+ 
+ ## Status
+ 
+-**Proposed — Implementation Not Authorized**
++**Approved — Slice 2A Implemented for Review**
+ 
+ - Design date: 2026-07-14
+ - Baseline: Sprint 002 Slice 1 at merge commit
+@@ -10,9 +10,9 @@
+ - Purpose: define a reviewable Policy-only implementation specification
+ - Final independent review conclusion: APPROVE
+ - Pull request #6 is approved for merge.
+-- This document creates no schema, migration, endpoint, UI, dependency, or product
+-  behavior. Review approval and merge do not authorize implementation; separate
+-  project-owner authorization is required.
++- Project-owner authorization on 2026-07-14 permits Slice 2A persistence,
++  immutability enforcement, ORM mapping, and database tests only. Slice 2B, Slice
++  2C, and Slice 3 remain unauthorized.
+ 
+ ## 1. Scope and boundaries
+ 
+@@ -787,7 +787,6 @@ retention/export/deletion, backup, encryption, and final legal copy.
+ 
+ ## Design gate conclusion
+ 
+-Final independent technical review conclusion: **APPROVE**. Pull request #6 is
+-approved for squash merge. Review approval and merging this design do not
+-authorize implementation, do not start Slice 2, and grant no authority for Slice
+-3.
++Final independent technical design review conclusion: **APPROVE**. Pull request
++#6 was squash-merged. Slice 2A was separately authorized and is implemented for
++review; this does not authorize Slice 2B, Slice 2C, or Slice 3.
+diff --git a/migrations/versions/0002_investment_policy_foundation.py b/migrations/versions/0002_investment_policy_foundation.py
+new file mode 100644
+index 0000000..09a0125
+--- /dev/null
++++ b/migrations/versions/0002_investment_policy_foundation.py
+@@ -0,0 +1,521 @@
++"""Add Investment Policy persistence and immutable snapshot enforcement.
++
++Revision ID: 0002_investment_policy_foundation
++Revises: 0001_household_persistence
++Create Date: 2026-07-14
++"""
++
++from typing import Sequence, Union
++
++import sqlalchemy as sa
++from alembic import op
++
++revision: str = "0002_investment_policy_foundation"
++down_revision: Union[str, None] = "0001_household_persistence"
++branch_labels: Union[str, Sequence[str], None] = None
++depends_on: Union[str, Sequence[str], None] = None
++
++POLICY_TEXT_LIMITS = {
++    "objectives": 4_000,
++    "time_horizon": 2_000,
++    "liquidity": 4_000,
++    "diversification": 4_000,
++    "contribution_policy": 4_000,
++    "rebalancing_policy": 4_000,
++    "prohibited_assets": 4_000,
++    "leverage_policy": 4_000,
++    "decision_process": 4_000,
++    "notes": 8_000,
++}
++
++
++def policy_text_columns() -> list[sa.Column]:
++    return [sa.Column(column_name, sa.Text(), nullable=False) for column_name in POLICY_TEXT_LIMITS]
++
++
++def policy_text_checks(table_name: str) -> list[sa.CheckConstraint]:
++    return [
++        sa.CheckConstraint(
++            f"char_length({column_name}) <= {maximum}",
++            name=f"ck_{table_name}_{column_name}_length",
++        )
++        for column_name, maximum in POLICY_TEXT_LIMITS.items()
++    ]
++
++
++VERSION_IMMUTABILITY_FUNCTION = r"""
++CREATE FUNCTION public.fn_investment_policy_version_immutability()
++RETURNS trigger
++LANGUAGE plpgsql
++AS $$
++BEGIN
++    IF TG_OP = 'DELETE' THEN
++        RAISE EXCEPTION USING
++            ERRCODE = '55000',
++            MESSAGE = 'policy_version_delete_forbidden';
++    END IF;
++
++    IF TG_OP = 'INSERT' THEN
++        IF NEW.version_number <= 0
++           OR NEW.status <> 'published'
++           OR NEW.published_at IS NULL
++           OR NEW.sealed_at IS NOT NULL
++           OR NEW.superseded_at IS NOT NULL
++           OR NEW.objectives IS NULL
++           OR NEW.time_horizon IS NULL
++           OR NEW.liquidity IS NULL
++           OR NEW.diversification IS NULL
++           OR NEW.contribution_policy IS NULL
++           OR NEW.rebalancing_policy IS NULL
++           OR NEW.prohibited_assets IS NULL
++           OR NEW.leverage_policy IS NULL
++           OR NEW.decision_process IS NULL
++           OR NEW.notes IS NULL THEN
++            RAISE EXCEPTION USING
++                ERRCODE = '23514',
++                MESSAGE = 'policy_version_insert_invalid';
++        END IF;
++        RETURN NEW;
++    END IF;
++
++    IF OLD.sealed_at IS NULL THEN
++        IF NEW.sealed_at IS NOT NULL
++           AND ROW(
++               NEW.id, NEW.policy_id, NEW.version_number, NEW.status,
++               NEW.objectives, NEW.time_horizon, NEW.liquidity,
++               NEW.diversification, NEW.contribution_policy,
++               NEW.rebalancing_policy, NEW.prohibited_assets,
++               NEW.leverage_policy, NEW.decision_process, NEW.notes,
++               NEW.published_at, NEW.superseded_at
++           ) IS NOT DISTINCT FROM ROW(
++               OLD.id, OLD.policy_id, OLD.version_number, OLD.status,
++               OLD.objectives, OLD.time_horizon, OLD.liquidity,
++               OLD.diversification, OLD.contribution_policy,
++               OLD.rebalancing_policy, OLD.prohibited_assets,
++               OLD.leverage_policy, OLD.decision_process, OLD.notes,
++               OLD.published_at, OLD.superseded_at
++           ) THEN
++            RETURN NEW;
++        END IF;
++        RAISE EXCEPTION USING
++            ERRCODE = '55000',
++            MESSAGE = 'policy_version_unsealed_update_forbidden';
++    END IF;
++
++    IF OLD.status = 'published'
++       AND NEW.status = 'superseded'
++       AND OLD.superseded_at IS NULL
++       AND NEW.superseded_at IS NOT NULL
++       AND ROW(
++           NEW.id, NEW.policy_id, NEW.version_number,
++           NEW.objectives, NEW.time_horizon, NEW.liquidity,
++           NEW.diversification, NEW.contribution_policy,
++           NEW.rebalancing_policy, NEW.prohibited_assets,
++           NEW.leverage_policy, NEW.decision_process, NEW.notes,
++           NEW.published_at, NEW.sealed_at
++       ) IS NOT DISTINCT FROM ROW(
++           OLD.id, OLD.policy_id, OLD.version_number,
++           OLD.objectives, OLD.time_horizon, OLD.liquidity,
++           OLD.diversification, OLD.contribution_policy,
++           OLD.rebalancing_policy, OLD.prohibited_assets,
++           OLD.leverage_policy, OLD.decision_process, OLD.notes,
++           OLD.published_at, OLD.sealed_at
++       ) THEN
++        RETURN NEW;
++    END IF;
++
++    RAISE EXCEPTION USING
++        ERRCODE = '55000',
++        MESSAGE = 'policy_version_sealed_update_forbidden';
++END;
++$$
++"""
++
++VERSION_ALLOCATION_IMMUTABILITY_FUNCTION = r"""
++CREATE FUNCTION public.fn_investment_policy_version_allocation_immutability()
++RETURNS trigger
++LANGUAGE plpgsql
++AS $$
++BEGIN
++    IF TG_OP = 'UPDATE' THEN
++        RAISE EXCEPTION USING
++            ERRCODE = '55000',
++            MESSAGE = 'policy_version_allocation_update_forbidden';
++    END IF;
++
++    IF TG_OP = 'DELETE' THEN
++        RAISE EXCEPTION USING
++            ERRCODE = '55000',
++            MESSAGE = 'policy_version_allocation_delete_forbidden';
++    END IF;
++
++    PERFORM 1
++    FROM public.investment_policy_versions
++    WHERE id = NEW.version_id AND sealed_at IS NULL;
++
++    IF NOT FOUND THEN
++        RAISE EXCEPTION USING
++            ERRCODE = '55000',
++            MESSAGE = 'policy_version_allocation_parent_sealed';
++    END IF;
++
++    RETURN NEW;
++END;
++$$
++"""
++
++VERSION_SEALING_FUNCTION = r"""
++CREATE FUNCTION public.fn_investment_policy_version_require_sealed()
++RETURNS trigger
++LANGUAGE plpgsql
++AS $$
++BEGIN
++    IF EXISTS (
++        SELECT 1
++        FROM public.investment_policy_versions
++        WHERE sealed_at IS NULL
++    ) THEN
++        RAISE EXCEPTION USING
++            ERRCODE = '23514',
++            MESSAGE = 'policy_version_unsealed_at_commit';
++    END IF;
++    RETURN NULL;
++END;
++$$
++"""
++
++
++def upgrade() -> None:
++    # The approved descriptive revision identifier is longer than Alembic's
++    # default VARCHAR(32). Widen the internal version column before Alembic writes
++    # this revision at the end of the transaction. Downgrade intentionally keeps
++    # the compatible width so Alembic can first write the shorter 0001 identifier.
++    op.alter_column(
++        "alembic_version",
++        "version_num",
++        existing_type=sa.String(length=32),
++        type_=sa.String(length=64),
++        existing_nullable=False,
++    )
++
++    op.drop_index("ix_audit_events_household_order", table_name="audit_events")
++    op.add_column(
++        "audit_events",
++        sa.Column(
++            "sequence_number",
++            sa.BigInteger(),
++            sa.Identity(always=True),
++            nullable=False,
++        ),
++    )
++    op.create_unique_constraint(
++        "uq_audit_events_sequence_number", "audit_events", ["sequence_number"]
++    )
++    op.create_index(
++        "ix_audit_events_household_order",
++        "audit_events",
++        ["household_id", "sequence_number"],
++        unique=False,
++    )
++
++    op.create_table(
++        "investment_policies",
++        sa.Column("id", sa.Uuid(), nullable=False),
++        sa.Column("household_id", sa.Uuid(), nullable=False),
++        sa.Column(
++            "created_at",
++            sa.DateTime(timezone=True),
++            server_default=sa.text("now()"),
++            nullable=False,
++        ),
++        sa.Column(
++            "updated_at",
++            sa.DateTime(timezone=True),
++            server_default=sa.text("now()"),
++            nullable=False,
++        ),
++        sa.ForeignKeyConstraint(
++            ["household_id"],
++            ["household_profiles.id"],
++            name="fk_investment_policies_household_id_household_profiles",
++            ondelete="RESTRICT",
++        ),
++        sa.PrimaryKeyConstraint("id"),
++        sa.UniqueConstraint("household_id", name="uq_investment_policies_household_id"),
++    )
++
++    op.create_table(
++        "investment_policy_versions",
++        sa.Column("id", sa.Uuid(), nullable=False),
++        sa.Column("policy_id", sa.Uuid(), nullable=False),
++        sa.Column("version_number", sa.Integer(), nullable=False),
++        sa.Column("status", sa.Text(), nullable=False),
++        *policy_text_columns(),
++        sa.Column("published_at", sa.DateTime(timezone=True), nullable=False),
++        sa.Column("sealed_at", sa.DateTime(timezone=True), nullable=True),
++        sa.Column("superseded_at", sa.DateTime(timezone=True), nullable=True),
++        sa.CheckConstraint(
++            "version_number > 0",
++            name="ck_investment_policy_versions_version_number_positive",
++        ),
++        sa.CheckConstraint(
++            "status IN ('published', 'superseded')",
++            name="ck_investment_policy_versions_status",
++        ),
++        sa.CheckConstraint(
++            "(status = 'published' AND superseded_at IS NULL) "
++            "OR (status = 'superseded' AND superseded_at IS NOT NULL)",
++            name="ck_investment_policy_versions_status_timestamps",
++        ),
++        *policy_text_checks("investment_policy_versions"),
++        sa.ForeignKeyConstraint(
++            ["policy_id"],
++            ["investment_policies.id"],
++            name="fk_investment_policy_versions_policy_id_investment_policies",
++            ondelete="RESTRICT",
++        ),
++        sa.PrimaryKeyConstraint("id"),
++        sa.UniqueConstraint(
++            "policy_id",
++            "version_number",
++            name="uq_investment_policy_versions_policy_version",
++        ),
++    )
++    op.create_index(
++        "uq_investment_policy_versions_current_published",
++        "investment_policy_versions",
++        ["policy_id"],
++        unique=True,
++        postgresql_where=sa.text("status = 'published'"),
++    )
++    op.create_index(
++        "ix_investment_policy_versions_policy_history",
++        "investment_policy_versions",
++        ["policy_id", sa.text("version_number DESC")],
++        unique=False,
++    )
++
++    op.create_table(
++        "investment_policy_drafts",
++        sa.Column("id", sa.Uuid(), nullable=False),
++        sa.Column("policy_id", sa.Uuid(), nullable=False),
++        sa.Column("source_version_id", sa.Uuid(), nullable=True),
++        sa.Column("revision", sa.Integer(), server_default=sa.text("1"), nullable=False),
++        *policy_text_columns(),
++        sa.Column(
++            "created_at",
++            sa.DateTime(timezone=True),
++            server_default=sa.text("now()"),
++            nullable=False,
++        ),
++        sa.Column(
++            "updated_at",
++            sa.DateTime(timezone=True),
++            server_default=sa.text("now()"),
++            nullable=False,
++        ),
++        sa.CheckConstraint(
++            "revision > 0", name="ck_investment_policy_drafts_revision_positive"
++        ),
++        *policy_text_checks("investment_policy_drafts"),
++        sa.ForeignKeyConstraint(
++            ["policy_id"],
++            ["investment_policies.id"],
++            name="fk_investment_policy_drafts_policy_id_investment_policies",
++            ondelete="RESTRICT",
++        ),
++        sa.ForeignKeyConstraint(
++            ["source_version_id"],
++            ["investment_policy_versions.id"],
++            name="fk_investment_policy_drafts_source_version_id_versions",
++            ondelete="RESTRICT",
++        ),
++        sa.PrimaryKeyConstraint("id"),
++        sa.UniqueConstraint("policy_id", name="uq_investment_policy_drafts_policy_id"),
++    )
++    op.create_index(
++        "ix_investment_policy_drafts_source_version_id",
++        "investment_policy_drafts",
++        ["source_version_id"],
++        unique=False,
++    )
++
++    op.create_table(
++        "investment_policy_draft_allocations",
++        sa.Column("id", sa.Uuid(), nullable=False),
++        sa.Column("draft_id", sa.Uuid(), nullable=False),
++        sa.Column("asset_class_name", sa.Text(), nullable=False),
++        sa.Column("normalized_asset_class_name", sa.Text(), nullable=False),
++        sa.Column("target_percentage", sa.Numeric(5, 2), nullable=False),
++        sa.Column("sort_order", sa.Integer(), nullable=False),
++        sa.CheckConstraint(
++            "char_length(asset_class_name) BETWEEN 1 AND 200",
++            name="ck_investment_policy_draft_allocations_name_length",
++        ),
++        sa.CheckConstraint(
++            "char_length(normalized_asset_class_name) BETWEEN 1 AND 200",
++            name="ck_investment_policy_draft_allocations_normalized_name_length",
++        ),
++        sa.CheckConstraint(
++            "target_percentage > 0.00 AND target_percentage <= 100.00",
++            name="ck_investment_policy_draft_allocations_percentage_range",
++        ),
++        sa.CheckConstraint(
++            "sort_order >= 0",
++            name="ck_investment_policy_draft_allocations_sort_order_nonnegative",
++        ),
++        sa.ForeignKeyConstraint(
++            ["draft_id"],
++            ["investment_policy_drafts.id"],
++            name="fk_policy_draft_allocations_draft_id_policy_drafts",
++            ondelete="CASCADE",
++        ),
++        sa.PrimaryKeyConstraint("id"),
++        sa.UniqueConstraint(
++            "draft_id",
++            "normalized_asset_class_name",
++            name="uq_investment_policy_draft_allocations_normalized_name",
++        ),
++        sa.UniqueConstraint(
++            "draft_id",
++            "sort_order",
++            name="uq_investment_policy_draft_allocations_sort_order",
++        ),
++    )
++    op.create_index(
++        "ix_investment_policy_draft_allocations_draft_id",
++        "investment_policy_draft_allocations",
++        ["draft_id"],
++        unique=False,
++    )
++
++    op.create_table(
++        "investment_policy_version_allocations",
++        sa.Column("id", sa.Uuid(), nullable=False),
++        sa.Column("version_id", sa.Uuid(), nullable=False),
++        sa.Column("asset_class_name", sa.Text(), nullable=False),
++        sa.Column("normalized_asset_class_name", sa.Text(), nullable=False),
++        sa.Column("target_percentage", sa.Numeric(5, 2), nullable=False),
++        sa.Column("sort_order", sa.Integer(), nullable=False),
++        sa.CheckConstraint(
++            "char_length(asset_class_name) BETWEEN 1 AND 200",
++            name="ck_investment_policy_version_allocations_name_length",
++        ),
++        sa.CheckConstraint(
++            "char_length(normalized_asset_class_name) BETWEEN 1 AND 200",
++            name="ck_investment_policy_version_allocations_normalized_name_length",
++        ),
++        sa.CheckConstraint(
++            "target_percentage > 0.00 AND target_percentage <= 100.00",
++            name="ck_investment_policy_version_allocations_percentage_range",
++        ),
++        sa.CheckConstraint(
++            "sort_order >= 0",
++            name="ck_investment_policy_version_allocations_sort_order_nonnegative",
++        ),
++        sa.ForeignKeyConstraint(
++            ["version_id"],
++            ["investment_policy_versions.id"],
++            name="fk_policy_version_allocations_version_id_policy_versions",
++            ondelete="RESTRICT",
++        ),
++        sa.PrimaryKeyConstraint("id"),
++        sa.UniqueConstraint(
++            "version_id",
++            "normalized_asset_class_name",
++            name="uq_investment_policy_version_allocations_normalized_name",
++        ),
++        sa.UniqueConstraint(
++            "version_id",
++            "sort_order",
++            name="uq_investment_policy_version_allocations_sort_order",
++        ),
++    )
++    op.create_index(
++        "ix_investment_policy_version_allocations_version_order",
++        "investment_policy_version_allocations",
++        ["version_id", "sort_order"],
++        unique=False,
++    )
++
++    op.execute(VERSION_IMMUTABILITY_FUNCTION)
++    op.execute(VERSION_ALLOCATION_IMMUTABILITY_FUNCTION)
++    op.execute(VERSION_SEALING_FUNCTION)
++    op.execute(
++        """
++        CREATE TRIGGER trg_investment_policy_version_immutability
++        BEFORE INSERT OR UPDATE OR DELETE ON public.investment_policy_versions
++        FOR EACH ROW EXECUTE FUNCTION public.fn_investment_policy_version_immutability()
++        """
++    )
++    op.execute(
++        """
++        CREATE TRIGGER trg_investment_policy_version_allocation_immutability
++        BEFORE INSERT OR UPDATE OR DELETE ON public.investment_policy_version_allocations
++        FOR EACH ROW EXECUTE FUNCTION public.fn_investment_policy_version_allocation_immutability()
++        """
++    )
++    op.execute(
++        """
++        CREATE CONSTRAINT TRIGGER trg_investment_policy_version_sealed_at_commit
++        AFTER INSERT OR UPDATE ON public.investment_policy_versions
++        DEFERRABLE INITIALLY DEFERRED
++        FOR EACH ROW EXECUTE FUNCTION public.fn_investment_policy_version_require_sealed()
++        """
++    )
++
++
++def downgrade() -> None:
++    op.execute(
++        "DROP TRIGGER trg_investment_policy_version_sealed_at_commit "
++        "ON public.investment_policy_versions"
++    )
++    op.execute(
++        "DROP TRIGGER trg_investment_policy_version_allocation_immutability "
++        "ON public.investment_policy_version_allocations"
++    )
++    op.execute(
++        "DROP TRIGGER trg_investment_policy_version_immutability "
++        "ON public.investment_policy_versions"
++    )
++    op.execute("DROP FUNCTION public.fn_investment_policy_version_require_sealed()")
++    op.execute("DROP FUNCTION public.fn_investment_policy_version_allocation_immutability()")
++    op.execute("DROP FUNCTION public.fn_investment_policy_version_immutability()")
++
++    op.drop_index(
++        "ix_investment_policy_version_allocations_version_order",
++        table_name="investment_policy_version_allocations",
++    )
++    op.drop_table("investment_policy_version_allocations")
++    op.drop_index(
++        "ix_investment_policy_draft_allocations_draft_id",
++        table_name="investment_policy_draft_allocations",
++    )
++    op.drop_table("investment_policy_draft_allocations")
++    op.drop_index(
++        "ix_investment_policy_drafts_source_version_id",
++        table_name="investment_policy_drafts",
++    )
++    op.drop_table("investment_policy_drafts")
++    op.drop_index(
++        "ix_investment_policy_versions_policy_history",
++        table_name="investment_policy_versions",
++    )
++    op.drop_index(
++        "uq_investment_policy_versions_current_published",
++        table_name="investment_policy_versions",
++    )
++    op.drop_table("investment_policy_versions")
++    op.drop_table("investment_policies")
++
++    op.drop_index("ix_audit_events_household_order", table_name="audit_events")
++    op.drop_constraint(
++        "uq_audit_events_sequence_number", "audit_events", type_="unique"
++    )
++    op.drop_column("audit_events", "sequence_number")
++    op.create_index(
++        "ix_audit_events_household_order",
++        "audit_events",
++        ["household_id", "occurred_at", "id"],
++        unique=False,
++    )
+diff --git a/tests/api/test_households.py b/tests/api/test_households.py
+index 7506daf..751ac0e 100644
+--- a/tests/api/test_households.py
++++ b/tests/api/test_households.py
+@@ -59,6 +59,7 @@ def test_create_get_and_audit_household(api_client: TestClient) -> None:
+     assert audit.status_code == 200
+     events = audit.json()
+     assert len(events) == 1
++    assert events[0]["sequence_number"] > 0
+     assert events[0]["actor"] == "local-owner"
+     assert events[0]["action"] == "household.created"
+     assert events[0]["metadata"] == {"changed_fields": sorted(HOUSEHOLD_PAYLOAD)}
+@@ -106,6 +107,7 @@ def test_patch_updates_allowed_fields_and_appends_ordered_audit_event(
+ 
+     events = api_client.get("/api/households/current/audit-events").json()
+     assert [event["action"] for event in events] == ["household.created", "household.updated"]
++    assert events[0]["sequence_number"] < events[1]["sequence_number"]
+     assert events[1]["metadata"] == {"changed_fields": ["household_name", "notes"]}
+     assert "Updated private notes" not in str(events)
+ 
+@@ -246,4 +248,12 @@ def test_audit_failure_rolls_back_household_update(
+ 
+ def test_migration_contains_only_approved_product_tables(postgres_engine) -> None:
+     tables = set(inspect(postgres_engine).get_table_names())
+-    assert tables - {"alembic_version"} == {"household_profiles", "audit_events"}
++    assert tables - {"alembic_version"} == {
++        "audit_events",
++        "household_profiles",
++        "investment_policies",
++        "investment_policy_draft_allocations",
++        "investment_policy_drafts",
++        "investment_policy_version_allocations",
++        "investment_policy_versions",
++    }
+diff --git a/tests/api/test_policy_persistence.py b/tests/api/test_policy_persistence.py
+new file mode 100644
+index 0000000..66559e9
+--- /dev/null
++++ b/tests/api/test_policy_persistence.py
+@@ -0,0 +1,524 @@
++from __future__ import annotations
++
++from datetime import datetime, timezone
++from decimal import Decimal
++from uuid import UUID, uuid4
++
++import pytest
++from sqlalchemy import func, inspect, select, text
++from sqlalchemy.exc import DBAPIError, IntegrityError
++from sqlalchemy.orm import Session
++
++from apps.api.models import (
++    AuditEvent,
++    HouseholdProfile,
++    InvestmentPolicy,
++    InvestmentPolicyDraft,
++    InvestmentPolicyDraftAllocation,
++    InvestmentPolicyVersion,
++    InvestmentPolicyVersionAllocation,
++)
++
++pytestmark = pytest.mark.postgres
++
++HOUSEHOLD_VALUES = {
++    "household_name": "Persistence Test Household",
++    "base_currency": "USD",
++    "investment_horizon": "",
++    "liquidity_needs": "",
++    "risk_statement": "",
++    "notes": "",
++}
++
++POLICY_TEXT = {
++    "objectives": "Preserve the owner's stated objectives.",
++    "time_horizon": "Long term",
++    "liquidity": "",
++    "diversification": "",
++    "contribution_policy": "",
++    "rebalancing_policy": "",
++    "prohibited_assets": "",
++    "leverage_policy": "",
++    "decision_process": "Document decisions before acting.",
++    "notes": "",
++}
++
++POLICY_TABLES = {
++    "investment_policies",
++    "investment_policy_drafts",
++    "investment_policy_draft_allocations",
++    "investment_policy_versions",
++    "investment_policy_version_allocations",
++}
++
++EXPECTED_FUNCTIONS = {
++    "fn_investment_policy_version_immutability",
++    "fn_investment_policy_version_allocation_immutability",
++    "fn_investment_policy_version_require_sealed",
++}
++
++EXPECTED_TRIGGERS = {
++    "trg_investment_policy_version_immutability",
++    "trg_investment_policy_version_allocation_immutability",
++    "trg_investment_policy_version_sealed_at_commit",
++}
++
++EXPECTED_CHECKS = {
++    "investment_policy_drafts": {
++        "ck_investment_policy_drafts_revision_positive",
++        *(f"ck_investment_policy_drafts_{name}_length" for name in POLICY_TEXT),
++    },
++    "investment_policy_draft_allocations": {
++        "ck_investment_policy_draft_allocations_name_length",
++        "ck_investment_policy_draft_allocations_normalized_name_length",
++        "ck_investment_policy_draft_allocations_percentage_range",
++        "ck_investment_policy_draft_allocations_sort_order_nonnegative",
++    },
++    "investment_policy_versions": {
++        "ck_investment_policy_versions_version_number_positive",
++        "ck_investment_policy_versions_status",
++        "ck_investment_policy_versions_status_timestamps",
++        *(f"ck_investment_policy_versions_{name}_length" for name in POLICY_TEXT),
++    },
++    "investment_policy_version_allocations": {
++        "ck_investment_policy_version_allocations_name_length",
++        "ck_investment_policy_version_allocations_normalized_name_length",
++        "ck_investment_policy_version_allocations_percentage_range",
++        "ck_investment_policy_version_allocations_sort_order_nonnegative",
++    },
++}
++
++EXPECTED_FOREIGN_KEYS = {
++    "investment_policies": {
++        "fk_investment_policies_household_id_household_profiles",
++    },
++    "investment_policy_drafts": {
++        "fk_investment_policy_drafts_policy_id_investment_policies",
++        "fk_investment_policy_drafts_source_version_id_versions",
++    },
++    "investment_policy_draft_allocations": {
++        "fk_policy_draft_allocations_draft_id_policy_drafts",
++    },
++    "investment_policy_versions": {
++        "fk_investment_policy_versions_policy_id_investment_policies",
++    },
++    "investment_policy_version_allocations": {
++        "fk_policy_version_allocations_version_id_policy_versions",
++    },
++}
++
++
++def create_household_and_policy(session: Session) -> tuple[HouseholdProfile, InvestmentPolicy]:
++    household = HouseholdProfile(**HOUSEHOLD_VALUES)
++    session.add(household)
++    session.flush()
++    policy = InvestmentPolicy(household_id=household.id)
++    session.add(policy)
++    session.commit()
++    return household, policy
++
++
++def new_version(policy_id: UUID, version_number: int = 1) -> InvestmentPolicyVersion:
++    return InvestmentPolicyVersion(
++        policy_id=policy_id,
++        version_number=version_number,
++        status="published",
++        published_at=datetime.now(timezone.utc),
++        **POLICY_TEXT,
++    )
++
++
++def add_version_allocation(
++    session: Session,
++    version: InvestmentPolicyVersion,
++    *,
++    name: str = "Global Equity",
++    normalized_name: str = "global equity",
++    percentage: Decimal = Decimal("100.00"),
++    sort_order: int = 0,
++) -> InvestmentPolicyVersionAllocation:
++    allocation = InvestmentPolicyVersionAllocation(
++        version_id=version.id,
++        asset_class_name=name,
++        normalized_asset_class_name=normalized_name,
++        target_percentage=percentage,
++        sort_order=sort_order,
++    )
++    session.add(allocation)
++    session.flush()
++    return allocation
++
++
++def persist_sealed_version(
++    session: Session,
++    policy_id: UUID,
++    version_number: int = 1,
++) -> tuple[InvestmentPolicyVersion, InvestmentPolicyVersionAllocation]:
++    version = new_version(policy_id, version_number)
++    session.add(version)
++    session.flush()
++    allocation = add_version_allocation(session, version)
++    version.sealed_at = datetime.now(timezone.utc)
++    session.commit()
++    return version, allocation
++
++
++def assert_database_error(
++    session: Session,
++    expected_identifier: str,
++    operation,
++) -> None:
++    with pytest.raises(DBAPIError) as exc_info:
++        operation()
++    assert expected_identifier in str(exc_info.value.orig)
++    session.rollback()
++
++
++def test_policy_schema_installs_named_constraints_indexes_functions_and_triggers(
++    postgres_engine,
++) -> None:
++    inspector = inspect(postgres_engine)
++    assert POLICY_TABLES <= set(inspector.get_table_names())
++
++    policy_uniques = {
++        item["name"] for item in inspector.get_unique_constraints("investment_policies")
++    }
++    draft_uniques = {
++        item["name"]
++        for item in inspector.get_unique_constraints("investment_policy_drafts")
++    }
++    version_uniques = {
++        item["name"]
++        for item in inspector.get_unique_constraints("investment_policy_versions")
++    }
++    version_indexes = {
++        item["name"]: item for item in inspector.get_indexes("investment_policy_versions")
++    }
++    assert "uq_investment_policies_household_id" in policy_uniques
++    assert "uq_investment_policy_drafts_policy_id" in draft_uniques
++    assert "uq_investment_policy_versions_policy_version" in version_uniques
++    assert version_indexes["uq_investment_policy_versions_current_published"]["unique"]
++    assert "ix_investment_policy_versions_policy_history" in version_indexes
++
++    for table_name, expected_names in EXPECTED_CHECKS.items():
++        installed_names = {
++            item["name"] for item in inspector.get_check_constraints(table_name)
++        }
++        assert expected_names <= installed_names
++        assert None not in installed_names
++
++    for table_name, expected_names in EXPECTED_FOREIGN_KEYS.items():
++        installed_names = {
++            item["name"] for item in inspector.get_foreign_keys(table_name)
++        }
++        assert expected_names <= installed_names
++        assert None not in installed_names
++
++    audit_uniques = {
++        item["name"] for item in inspector.get_unique_constraints("audit_events")
++    }
++    assert "uq_audit_events_sequence_number" in audit_uniques
++
++    with postgres_engine.connect() as connection:
++        functions = set(
++            connection.scalars(
++                text(
++                    "SELECT proname FROM pg_proc "
++                    "WHERE proname = ANY(CAST(:names AS text[]))"
++                ),
++                {"names": sorted(EXPECTED_FUNCTIONS)},
++            )
++        )
++        triggers = set(
++            connection.scalars(
++                text(
++                    "SELECT tgname FROM pg_trigger "
++                    "WHERE NOT tgisinternal AND tgname = ANY(CAST(:names AS text[]))"
++                ),
++                {"names": sorted(EXPECTED_TRIGGERS)},
++            )
++        )
++    assert functions == EXPECTED_FUNCTIONS
++    assert triggers == EXPECTED_TRIGGERS
++
++
++def test_policy_and_draft_cardinality_constraints(db_session: Session) -> None:
++    household, policy = create_household_and_policy(db_session)
++
++    db_session.add(InvestmentPolicy(household_id=household.id))
++    with pytest.raises(IntegrityError) as policy_error:
++        db_session.commit()
++    assert policy_error.value.orig.diag.constraint_name == "uq_investment_policies_household_id"
++    db_session.rollback()
++
++    db_session.add(InvestmentPolicyDraft(policy_id=policy.id))
++    db_session.commit()
++    db_session.add(InvestmentPolicyDraft(policy_id=policy.id))
++    with pytest.raises(IntegrityError) as draft_error:
++        db_session.commit()
++    assert draft_error.value.orig.diag.constraint_name == "uq_investment_policy_drafts_policy_id"
++    db_session.rollback()
++
++
++def test_draft_allocation_numeric_and_normalized_name_constraints(db_session: Session) -> None:
++    _, policy = create_household_and_policy(db_session)
++    draft = InvestmentPolicyDraft(policy_id=policy.id)
++    db_session.add(draft)
++    db_session.commit()
++
++    percentage_column = next(
++        column
++        for column in inspect(db_session.get_bind()).get_columns(
++            "investment_policy_draft_allocations"
++        )
++        if column["name"] == "target_percentage"
++    )
++    assert percentage_column["type"].precision == 5
++    assert percentage_column["type"].scale == 2
++
++    for value in (Decimal("0.00"), Decimal("100.01")):
++        db_session.add(
++            InvestmentPolicyDraftAllocation(
++                draft_id=draft.id,
++                asset_class_name="Invalid",
++                normalized_asset_class_name="invalid",
++                target_percentage=value,
++                sort_order=0,
++            )
++        )
++        with pytest.raises(IntegrityError) as range_error:
++            db_session.commit()
++        assert (
++            range_error.value.orig.diag.constraint_name
++            == "ck_investment_policy_draft_allocations_percentage_range"
++        )
++        db_session.rollback()
++
++    db_session.add_all(
++        [
++            InvestmentPolicyDraftAllocation(
++                draft_id=draft.id,
++                asset_class_name="Cash",
++                normalized_asset_class_name="cash",
++                target_percentage=Decimal("50.00"),
++                sort_order=0,
++            ),
++            InvestmentPolicyDraftAllocation(
++                draft_id=draft.id,
++                asset_class_name=" CASH ",
++                normalized_asset_class_name="cash",
++                target_percentage=Decimal("50.00"),
++                sort_order=1,
++            ),
++        ]
++    )
++    with pytest.raises(IntegrityError) as duplicate_error:
++        db_session.commit()
++    assert (
++        duplicate_error.value.orig.diag.constraint_name
++        == "uq_investment_policy_draft_allocations_normalized_name"
++    )
++    db_session.rollback()
++
++
++def test_unsealed_version_allows_only_sealing_and_cannot_commit_or_delete(
++    db_session: Session,
++) -> None:
++    _, policy = create_household_and_policy(db_session)
++    version = new_version(policy.id)
++    db_session.add(version)
++    db_session.flush()
++    version.notes = "forbidden edit"
++    assert_database_error(
++        db_session,
++        "policy_version_unsealed_update_forbidden",
++        db_session.flush,
++    )
++
++    version = new_version(policy.id)
++    db_session.add(version)
++    db_session.flush()
++    db_session.delete(version)
++    assert_database_error(db_session, "policy_version_delete_forbidden", db_session.flush)
++
++    version = new_version(policy.id)
++    db_session.add(version)
++    assert_database_error(db_session, "policy_version_unsealed_at_commit", db_session.commit)
++    assert db_session.scalar(select(func.count()).select_from(InvestmentPolicyVersion)) == 0
++
++
++def test_version_insert_contract_and_atomic_failure_rollback(db_session: Session) -> None:
++    _, policy = create_household_and_policy(db_session)
++    invalid = new_version(policy.id)
++    invalid.status = "superseded"
++    invalid.superseded_at = datetime.now(timezone.utc)
++    db_session.add(invalid)
++    assert_database_error(db_session, "policy_version_insert_invalid", db_session.flush)
++
++    version = new_version(policy.id)
++    db_session.add(version)
++    db_session.flush()
++    db_session.add(
++        InvestmentPolicyVersionAllocation(
++            version_id=version.id,
++            asset_class_name="Invalid",
++            normalized_asset_class_name="invalid",
++            target_percentage=Decimal("0.00"),
++            sort_order=0,
++        )
++    )
++    with pytest.raises(IntegrityError):
++        db_session.commit()
++    db_session.rollback()
++    assert db_session.scalar(select(func.count()).select_from(InvestmentPolicyVersion)) == 0
++    assert (
++        db_session.scalar(select(func.count()).select_from(InvestmentPolicyVersionAllocation))
++        == 0
++    )
++
++
++def test_sealed_version_supersession_and_immutability(db_session: Session) -> None:
++    _, policy = create_household_and_policy(db_session)
++    version, _ = persist_sealed_version(db_session, policy.id)
++
++    version.status = "superseded"
++    version.superseded_at = datetime.now(timezone.utc)
++    db_session.commit()
++
++    version.notes = "forbidden"
++    assert_database_error(
++        db_session,
++        "policy_version_sealed_update_forbidden",
++        db_session.commit,
++    )
++
++    version = db_session.get(InvestmentPolicyVersion, version.id)
++    assert version is not None
++    version.status = "published"
++    version.superseded_at = None
++    assert_database_error(
++        db_session,
++        "policy_version_sealed_update_forbidden",
++        db_session.commit,
++    )
++
++    version = db_session.get(InvestmentPolicyVersion, version.id)
++    assert version is not None
++    db_session.delete(version)
++    assert_database_error(db_session, "policy_version_delete_forbidden", db_session.commit)
++
++
++def test_version_allocation_is_insert_only_before_sealing(db_session: Session) -> None:
++    _, policy = create_household_and_policy(db_session)
++    version, allocation = persist_sealed_version(db_session, policy.id)
++
++    allocation.asset_class_name = "Forbidden"
++    assert_database_error(
++        db_session,
++        "policy_version_allocation_update_forbidden",
++        db_session.commit,
++    )
++
++    allocation = db_session.get(InvestmentPolicyVersionAllocation, allocation.id)
++    assert allocation is not None
++    db_session.delete(allocation)
++    assert_database_error(
++        db_session,
++        "policy_version_allocation_delete_forbidden",
++        db_session.commit,
++    )
++
++    late = InvestmentPolicyVersionAllocation(
++        version_id=version.id,
++        asset_class_name="Late",
++        normalized_asset_class_name="late",
++        target_percentage=Decimal("1.00"),
++        sort_order=1,
++    )
++    db_session.add(late)
++    assert_database_error(
++        db_session,
++        "policy_version_allocation_parent_sealed",
++        db_session.commit,
++    )
++
++
++def test_version_number_and_current_published_uniqueness(db_session: Session) -> None:
++    _, policy = create_household_and_policy(db_session)
++    first, _ = persist_sealed_version(db_session, policy.id)
++
++    second = new_version(policy.id, 2)
++    db_session.add(second)
++    with pytest.raises(IntegrityError) as current_error:
++        db_session.flush()
++    assert (
++        current_error.value.orig.diag.constraint_name
++        == "uq_investment_policy_versions_current_published"
++    )
++    db_session.rollback()
++
++    first = db_session.get(InvestmentPolicyVersion, first.id)
++    assert first is not None
++    first.status = "superseded"
++    first.superseded_at = datetime.now(timezone.utc)
++    db_session.commit()
++
++    duplicate_number = new_version(policy.id, 1)
++    db_session.add(duplicate_number)
++    with pytest.raises(IntegrityError) as version_error:
++        db_session.flush()
++    assert (
++        version_error.value.orig.diag.constraint_name
++        == "uq_investment_policy_versions_policy_version"
++    )
++    db_session.rollback()
++
++
++def add_audit_event(session: Session, household_id: UUID, action: str) -> AuditEvent:
++    event = AuditEvent(
++        household_id=household_id,
++        actor="local-owner",
++        action=action,
++        entity_type="HouseholdProfile",
++        entity_id=household_id,
++        event_metadata={"changed_fields": []},
++    )
++    session.add(event)
++    session.flush()
++    return event
++
++
++def test_audit_sequence_is_database_generated_monotonic_and_may_have_gaps(
++    db_session: Session,
++) -> None:
++    household = HouseholdProfile(**HOUSEHOLD_VALUES)
++    db_session.add(household)
++    db_session.commit()
++
++    first = add_audit_event(db_session, household.id, "test.first")
++    second = add_audit_event(db_session, household.id, "test.second")
++    db_session.commit()
++    assert first.sequence_number < second.sequence_number
++
++    rolled_back = add_audit_event(db_session, household.id, "test.rolled-back")
++    rolled_back_sequence = rolled_back.sequence_number
++    db_session.rollback()
++
++    after_gap = add_audit_event(db_session, household.id, "test.after-gap")
++    db_session.commit()
++    assert second.sequence_number < rolled_back_sequence < after_gap.sequence_number
++    assert after_gap.sequence_number > second.sequence_number + 1
++
++    with pytest.raises(DBAPIError) as explicit_error:
++        db_session.execute(
++            text(
++                "INSERT INTO audit_events "
++                "(id, household_id, actor, action, entity_type, entity_id, metadata, "
++                "sequence_number) VALUES "
++                "(:id, :household_id, 'local-owner', 'test.explicit', "
++                "'HouseholdProfile', :household_id, CAST('{}' AS jsonb), 999)"
++            ),
++            {"id": uuid4(), "household_id": household.id},
++        )
++    assert "generated always" in str(explicit_error.value.orig).lower()
++    db_session.rollback()
+diff --git a/tests/test_policy_migrations.py b/tests/test_policy_migrations.py
+new file mode 100644
+index 0000000..2ecf143
+--- /dev/null
++++ b/tests/test_policy_migrations.py
+@@ -0,0 +1,158 @@
++from __future__ import annotations
++
++from pathlib import Path
++from uuid import uuid4
++
++import pytest
++from alembic import command
++from alembic.config import Config
++from alembic.runtime.migration import MigrationContext
++from sqlalchemy import create_engine, inspect, text
++from sqlalchemy.engine import Engine
++from sqlalchemy.engine.reflection import Inspector
++
++from tests.conftest import postgres_test_database_url
++
++HEAD_REVISION = "0002_investment_policy_foundation"
++SLICE_1_REVISION = "0001_household_persistence"
++
++
++def current_revision(engine: Engine) -> str | None:
++    with engine.connect() as connection:
++        return MigrationContext.configure(connection).get_current_revision()
++
++
++def column_names(inspector: Inspector, table_name: str) -> set[str]:
++    return {column["name"] for column in inspector.get_columns(table_name)}
++
++
++@pytest.mark.postgres
++def test_fresh_incremental_downgrade_and_reupgrade_preserve_slice_1_data(
++    postgres_engine: Engine,
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    database_url = postgres_test_database_url()
++    monkeypatch.setenv("DATABASE_URL", database_url)
++    alembic_config = Config("alembic.ini")
++    alembic_config.set_main_option("sqlalchemy.url", database_url)
++
++    postgres_engine.dispose()
++    migration_engine = create_engine(database_url, pool_pre_ping=True)
++    household_id = uuid4()
++    event_id = uuid4()
++
++    try:
++        command.downgrade(alembic_config, "base")
++        command.upgrade(alembic_config, "head")
++        assert current_revision(migration_engine) == HEAD_REVISION
++        version_column = next(
++            column
++            for column in inspect(migration_engine).get_columns("alembic_version")
++            if column["name"] == "version_num"
++        )
++        assert version_column["type"].length >= len(HEAD_REVISION)
++        fresh_tables = set(inspect(migration_engine).get_table_names())
++        assert {
++            "audit_events",
++            "household_profiles",
++            "investment_policies",
++            "investment_policy_drafts",
++            "investment_policy_draft_allocations",
++            "investment_policy_versions",
++            "investment_policy_version_allocations",
++        } <= fresh_tables
++
++        command.downgrade(alembic_config, SLICE_1_REVISION)
++        assert current_revision(migration_engine) == SLICE_1_REVISION
++        with migration_engine.begin() as connection:
++            connection.execute(
++                text(
++                    "INSERT INTO household_profiles "
++                    "(id, singleton_key, household_name, base_currency, investment_horizon, "
++                    "liquidity_needs, risk_statement, notes) "
++                    "VALUES (:id, true, 'Migration Household', 'USD', '', '', '', '')"
++                ),
++                {"id": household_id},
++            )
++            connection.execute(
++                text(
++                    "INSERT INTO audit_events "
++                    "(id, household_id, actor, action, entity_type, entity_id, metadata) "
++                    "VALUES (:id, :household_id, 'local-owner', 'household.created', "
++                    "'HouseholdProfile', :household_id, CAST('{}' AS jsonb))"
++                ),
++                {"id": event_id, "household_id": household_id},
++            )
++
++        command.upgrade(alembic_config, "head")
++        assert current_revision(migration_engine) == HEAD_REVISION
++        upgraded_inspector = inspect(migration_engine)
++        sequence_column = next(
++            column
++            for column in upgraded_inspector.get_columns("audit_events")
++            if column["name"] == "sequence_number"
++        )
++        assert sequence_column["nullable"] is False
++        assert sequence_column["identity"] is not None
++        with migration_engine.begin() as connection:
++            preserved = connection.execute(
++                text(
++                    "SELECT household_id, sequence_number FROM audit_events WHERE id = :id"
++                ),
++                {"id": event_id},
++            ).one()
++            assert preserved.household_id == household_id
++            assert preserved.sequence_number is not None
++            next_event_id = uuid4()
++            connection.execute(
++                text(
++                    "INSERT INTO audit_events "
++                    "(id, household_id, actor, action, entity_type, entity_id, metadata) "
++                    "VALUES (:id, :household_id, 'local-owner', 'household.updated', "
++                    "'HouseholdProfile', :household_id, CAST('{}' AS jsonb))"
++                ),
++                {"id": next_event_id, "household_id": household_id},
++            )
++            next_sequence = connection.scalar(
++                text("SELECT sequence_number FROM audit_events WHERE id = :id"),
++                {"id": next_event_id},
++            )
++            assert next_sequence is not None
++            assert next_sequence > preserved.sequence_number
++
++        command.downgrade(alembic_config, SLICE_1_REVISION)
++        assert current_revision(migration_engine) == SLICE_1_REVISION
++        slice_1_inspector = inspect(migration_engine)
++        assert "sequence_number" not in column_names(slice_1_inspector, "audit_events")
++        assert not {
++            "investment_policies",
++            "investment_policy_drafts",
++            "investment_policy_draft_allocations",
++            "investment_policy_versions",
++            "investment_policy_version_allocations",
++        } & set(slice_1_inspector.get_table_names())
++        with migration_engine.connect() as connection:
++            assert connection.scalar(
++                text("SELECT count(*) FROM household_profiles WHERE id = :id"),
++                {"id": household_id},
++            ) == 1
++            assert connection.scalar(
++                text("SELECT count(*) FROM audit_events WHERE id = :id"),
++                {"id": event_id},
++            ) == 1
++
++        command.upgrade(alembic_config, "head")
++        assert current_revision(migration_engine) == HEAD_REVISION
++    finally:
++        command.upgrade(alembic_config, "head")
++        migration_engine.dispose()
++
++
++def test_application_never_calls_create_all() -> None:
++    application_files = sorted(Path("apps").rglob("*.py"))
++    offenders = [
++        str(path)
++        for path in application_files
++        if ".create_all(" in path.read_text(encoding="utf-8")
++    ]
++    assert offenders == []

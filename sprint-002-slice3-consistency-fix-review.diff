@@ -1,0 +1,119 @@
+diff --git a/docs/MASTER_PLAN.md b/docs/MASTER_PLAN.md
+index 448cbf3..105606b 100644
+--- a/docs/MASTER_PLAN.md
++++ b/docs/MASTER_PLAN.md
+@@ -28,8 +28,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+ - Slice 3: Technical Design Owner Decisions Resolved / Implementation Not
+   Authorized
+ - Slice 3 Technical Design: Draft PR on planning branch, OD-S3-1 through
+-  OD-S3-15 all Resolved by Project Owner — 2026-07-16, design decision
+-  changes pending final consistency review
++  OD-S3-15 all Resolved by Project Owner — 2026-07-16, final consistency
++  review completed with one MEDIUM pagination fix and two LOW follow-ups
+ 
+ ## Planning
+ 
+@@ -80,7 +80,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+   `planning/sprint-002-slice-3-decision-journal` branch as a Draft PR.
+ - Slice 3 implementation remains unauthorized and Not Started.
+ - OD-S3-1 through OD-S3-15 were all Open — Owner Decision Required; all
+-  resolved by Project Owner on 2026-07-16.
++  resolved by Project Owner on 2026-07-16. Final consistency review
++  completed 2026-07-16 with one MEDIUM and two LOW documentation fixes.
+ 
+ ## Review
+ 
+@@ -194,10 +195,12 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+   data model, field rules, dates, Policy Version reference, Confirm transaction,
+   Archive/unarchive, Correction model, Audit, PostgreSQL triggers,
+   constraints/FKs, concurrency, API, UI, retention, test matrix, dependencies,
+-  Definition of Done, and implementation split. PR #10 remains Draft. Design
+-  decision changes pending final consistency review. Slice 3 Implementation
+-  remains Not Authorized. Slice 3A, 3B, 3C remain Not Started. Merging the
+-  Technical Design PR does not authorize Slice 3A. Existing Backlog preserved.
++  Definition of Done, and implementation split. Final consistency review
++  completed: one MEDIUM pagination default fix (§8.12 default 20→50), two LOW
++  follow-ups resolved (action names finality, decision_date boundary tests).
++  PR #10 remains Draft. Slice 3 Implementation remains Not Authorized.
++  Slice 3A, 3B, 3C remain Not Started. Merging the Technical Design PR does
++  not authorize Slice 3A. Existing Backlog preserved.
+ 
+ ## Done
+ 
+@@ -460,3 +463,17 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+   Implementation remains Not Authorized. Slice 3A, 3B, 3C remain Not Started.
+   Merging the Technical Design PR does not authorize Slice 3A. Existing Backlog
+   preserved.
++- 2026-07-16: Final Owner Decision Consistency Review of PR #10 concluded
++  APPROVE WITH ONE MEDIUM FINDING: 14 of 15 ODs fully consistent; 1 MEDIUM
++  (§8.12 pagination default 20 vs §5.6/OD table default 50); 2 LOW (NBF-1:
++  §5.1 AuditEvent action names pending marker; NBF-2: §11.2 missing explicit
++  decision_date boundary test).
++- 2026-07-16: All three consistency review findings revised in the technical
++  design document. M-1 fixed: §8.12 pagination default corrected to 50.
++  NBF-1 resolved: §5.1 action names marked "Accepted for Slice 3
++  implementation design" with explicit finality requirements. NBF-2 resolved:
++  §11.2 test matrix now includes decision_date boundary tests (Schema/API,
++  PostgreSQL, UI). OD-S3-1 through OD-S3-15 remain Resolved — no Owner
++  Decision changed. PR #10 remains Draft. Slice 3 Implementation remains
++  Not Authorized. Slice 3A, 3B, 3C remain Not Started. Design pending final
++  focused re-review. Existing Backlog preserved.
+diff --git a/docs/sprints/SPRINT_002_SLICE_3_TECHNICAL_DESIGN.md b/docs/sprints/SPRINT_002_SLICE_3_TECHNICAL_DESIGN.md
+index 9308a5c..6a43fdc 100644
+--- a/docs/sprints/SPRINT_002_SLICE_3_TECHNICAL_DESIGN.md
++++ b/docs/sprints/SPRINT_002_SLICE_3_TECHNICAL_DESIGN.md
+@@ -883,8 +883,14 @@ This is recorded as **OD-S3-9** — Resolved by Project Owner — 2026-07-16.
+ | `decision.unarchived` | POST unarchive | Archived → Confirmed (list) |
+ | `decision.correction.appended` | POST correction | New Correction |
+ 
+-**Status: pending technical review.** The owner must approve the final action
+-names.
++**Status: Accepted for Slice 3 implementation design.** These seven action
++names are final for the Decision Journal technical design. They follow the
++existing Policy audit pattern (`policy.created`, `policy.draft.created`,
++`policy.published`, etc.). All API transactions, audit sections, service
++layers, UI label mappings, and test matrices must use these exact strings.
++No additional action names are permitted in Slice 3. The names carry no
++recommendation, score, approval, or trade meaning. Any future rename or
++addition requires a migration and API compatibility review.
+ 
+ ### 5.2 AuditEvent Fields
+ 
+@@ -1588,7 +1594,7 @@ displays `effective_snapshot`. Both are always consistent with the API.
+ |---|---|
+ | Method | `GET` |
+ | Path | `/api/decisions/{decision_id}/audit-events` |
+-| Query | `before_sequence_number` (optional cursor), `limit` (1-100, default 20) |
++| Query | `before_sequence_number` (optional cursor), `limit` (1-100, default 50) |
+ | Response | `200` with `{ items: [...], next_before_sequence_number: int or null }` |
+ | Errors | `404` (decision not found) |
+ | Ownership | Filtered by `household_id` + `entity_type = "Decision"` + `entity_id` |
+@@ -1856,6 +1862,28 @@ Owner decisions (OD-S3-1 through OD-S3-15, 2026-07-16).
+ - **Decision-filtered audit**: verify the Decision-filtered endpoint
+   returns only events for the specified decision_id and respects
+   `household_id` ownership.
++- **decision_date boundary — Schema/API validation**:
++  verify yesterday (allowed), today (allowed), tomorrow (rejected with
++  mechanical date validation error), invalid ISO date string (422),
++  impossible calendar date such as February 30 (422).
++  For Draft: null or missing `decision_date` is permitted.
++  For Confirm: null or missing `decision_date` returns a mechanical
++  incomplete-field error.
++  For Correction: yesterday and today `decision_date` are allowed;
++  future `decision_date` is rejected.
++- **decision_date boundary — PostgreSQL enforcement**:
++  verify Confirmed snapshot and Correction rows both execute
++  `decision_date <= CURRENT_DATE` via the named CHECK constraint.
++  Direct SQL insertion of a future `decision_date` fails.
++  The named CHECK constraint exists on both `decision_confirmed_snapshots`
++  and `decision_corrections` tables.
++  Timezone does not alter DATE boundary semantics (PostgreSQL DATE type
++  is timezone-independent at the storage level).
++- **decision_date boundary — UI behavior**:
++  verify future `decision_date` displays a neutral technical error message.
++  The UI does not send a Confirm or Correction mutation when the date is
++  invalid. The date validation is not described as investment advice or
++  market timing judgment.
+ 
+ ### 11.3 Concurrency Tests
+ 

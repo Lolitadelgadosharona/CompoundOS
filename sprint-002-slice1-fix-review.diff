@@ -1,0 +1,884 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index b75a48c..f69ef65 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -60,6 +60,7 @@ jobs:
+     env:
+       DATABASE_URL: postgresql+psycopg://compoundos:ci-only-password@127.0.0.1:5432/compoundos_test
+       TEST_DATABASE_URL: postgresql+psycopg://compoundos:ci-only-password@127.0.0.1:5432/compoundos_test
++      COMPOUNDOS_REQUIRE_POSTGRES_TESTS: '1'
+     steps:
+       - uses: actions/checkout@v4
+       - uses: actions/setup-python@v5
+@@ -75,8 +76,12 @@ jobs:
+           alembic current
+       - name: Run backend lint
+         run: ruff check apps tests
+-      - name: Run backend tests
+-        run: pytest -q
++      - name: Verify PostgreSQL test gate configuration
++        run: test -n "$TEST_DATABASE_URL"
++      - name: Run backend tests without PostgreSQL marker
++        run: pytest -q -m "not postgres"
++      - name: Run real PostgreSQL tests
++        run: pytest -q -m postgres -ra
+ 
+   frontend:
+     runs-on: ubuntu-latest
+diff --git a/README.md b/README.md
+index 8af33bd..2c5fe6b 100644
+--- a/README.md
++++ b/README.md
+@@ -80,12 +80,20 @@ The frontend is available at `http://127.0.0.1:3000`; its health endpoint is
+ 
+ - Database migration: `alembic upgrade head && alembic current`
+ - Backend lint: `ruff check apps tests`
+-- Backend tests: `TEST_DATABASE_URL="$DATABASE_URL" pytest -q`
++- Backend tests without a local PostgreSQL URL: `pytest -q` (the explicitly marked
++  PostgreSQL integration suite is skipped)
++- Real PostgreSQL tests: `TEST_DATABASE_URL="$DATABASE_URL" pytest -q -m postgres -ra`
++- CI-equivalent PostgreSQL gate:
++  `COMPOUNDOS_REQUIRE_POSTGRES_TESTS=1 TEST_DATABASE_URL="$DATABASE_URL" pytest -q -m postgres -ra`
+ - Frontend lint: `npm --prefix frontend run lint`
+ - Frontend type check: `npm --prefix frontend run type-check`
+ - Frontend tests: `npm --prefix frontend test`
+ - Frontend production build: `npm --prefix frontend run build`
+ 
++The project-specific required-mode flag intentionally fails when
++`TEST_DATABASE_URL` is missing or empty. It prevents CI configuration regressions
++from turning required PostgreSQL coverage into a successful skipped test run.
++
+ ## Environment Variables
+ 
+ Copy `.env.example` to `.env` and adjust values if needed. The example contains
+diff --git a/apps/api/models.py b/apps/api/models.py
+index 06ed776..8a28cb4 100644
+--- a/apps/api/models.py
++++ b/apps/api/models.py
+@@ -27,6 +27,30 @@ class HouseholdProfile(Base):
+     __tablename__ = "household_profiles"
+     __table_args__ = (
+         CheckConstraint("singleton_key", name="ck_household_profiles_singleton_key"),
++        CheckConstraint(
++            "char_length(household_name) BETWEEN 1 AND 200",
++            name="ck_household_profiles_name_length",
++        ),
++        CheckConstraint(
++            "base_currency ~ '^[A-Z]{3}$'",
++            name="ck_household_profiles_currency_format",
++        ),
++        CheckConstraint(
++            "char_length(investment_horizon) <= 2000",
++            name="ck_household_profiles_investment_horizon_length",
++        ),
++        CheckConstraint(
++            "char_length(liquidity_needs) <= 4000",
++            name="ck_household_profiles_liquidity_needs_length",
++        ),
++        CheckConstraint(
++            "char_length(risk_statement) <= 4000",
++            name="ck_household_profiles_risk_statement_length",
++        ),
++        CheckConstraint(
++            "char_length(notes) <= 8000",
++            name="ck_household_profiles_notes_length",
++        ),
+         UniqueConstraint("singleton_key", name="uq_household_profiles_singleton_key"),
+     )
+ 
+@@ -34,8 +58,8 @@ class HouseholdProfile(Base):
+     singleton_key: Mapped[bool] = mapped_column(
+         Boolean, nullable=False, default=True, server_default="true"
+     )
+-    household_name: Mapped[str] = mapped_column(String(200), nullable=False)
+-    base_currency: Mapped[str] = mapped_column(String(3), nullable=False)
++    household_name: Mapped[str] = mapped_column(Text, nullable=False)
++    base_currency: Mapped[str] = mapped_column(Text, nullable=False)
+     investment_horizon: Mapped[str] = mapped_column(Text, nullable=False, default="")
+     liquidity_needs: Mapped[str] = mapped_column(Text, nullable=False, default="")
+     risk_statement: Mapped[str] = mapped_column(Text, nullable=False, default="")
+diff --git a/docs/ADR/0002-postgresql-persistence-and-transactions.md b/docs/ADR/0002-postgresql-persistence-and-transactions.md
+index 262f582..271bf62 100644
+--- a/docs/ADR/0002-postgresql-persistence-and-transactions.md
++++ b/docs/ADR/0002-postgresql-persistence-and-transactions.md
+@@ -24,9 +24,16 @@ atomically. The existing FastAPI service has no persistence layer.
+   values. The actor is the documented local-only constant `local-owner`.
+ - Enforce at most one HouseholdProfile with a database check and unique singleton
+   sentinel. Convert a duplicate integrity failure to HTTP 409.
++- Enforce the approved technical field lengths and uppercase three-letter currency
++  format independently in both Pydantic and named PostgreSQL check constraints.
++  PostgreSQL uses character-length semantics so valid Unicode is not measured by
++  encoded byte size. These constraints are input-safety limits, not investment rules.
+ - Keep Redis in the development stack but use it for no Slice 1 product behavior.
+ - Run migration, repository, constraint, API, and transaction rollback tests
+   against real PostgreSQL. SQLite and mocks cannot replace those tests.
++- Mark real PostgreSQL tests explicitly. Local runs may skip them when no test
++  database is configured, but `COMPOUNDOS_REQUIRE_POSTGRES_TESTS=1` makes a
++  missing `TEST_DATABASE_URL` a hard failure in CI.
+ 
+ ## Consequences
+ 
+@@ -36,6 +43,9 @@ atomically. The existing FastAPI service has no persistence layer.
+ - Alembic must reach head before the API can serve household requests.
+ - The initial migration supports a development downgrade, but no production-grade
+   downgrade guarantee is made in this slice.
++- Revision `0001_household_persistence` was amended before its PR merged because it
++  had not been released to `main`; this keeps the first schema internally complete
++  while CI continues to apply it to an empty PostgreSQL database.
+ - psycopg binary packages are used for reproducible local and CI installation;
+   production packaging remains outside this local-only slice.
+ - Changing the database driver, sync/async model, session boundary, migration
+diff --git a/docs/ARCHITECTURE.md b/docs/ARCHITECTURE.md
+index f891365..ba2d78b 100644
+--- a/docs/ARCHITECTURE.md
++++ b/docs/ARCHITECTURE.md
+@@ -19,6 +19,8 @@ CompoundOS will use a modular monorepo with a Next.js frontend, a FastAPI backen
+ - Validation: real PostgreSQL integration tests plus pytest and Ruff for the
+   backend; Vitest, ESLint, TypeScript, and the Next.js production build for the
+   frontend
++- Safety constraints: Pydantic performs request validation and named PostgreSQL
++  checks independently enforce the same character limits and currency format
+ 
+ ## Module Boundaries
+ 
+@@ -45,6 +47,11 @@ The database singleton uses a required boolean sentinel constrained to true and
+ unique across `household_profiles`. It prevents concurrent requests from storing
+ two profiles; the API maps the resulting integrity conflict to HTTP 409.
+ 
++Frontend household mutations and AuditEvent refreshes have separate outcomes. A
++successful mutation updates the profile and exits edit mode even if the following
++audit GET fails. The timeline retains prior data, shows an independent error, and
++offers a GET-only retry; mutations are never automatically replayed.
++
+ ## Migration and CI
+ 
+ Alembic revision `0001_household_persistence` upgrades an empty database and
+@@ -52,7 +59,10 @@ creates only the two approved product tables. The initial downgrade is provided
+ for development, without promising a production downgrade strategy. CI starts an
+ isolated PostgreSQL 16 service, runs `alembic upgrade head` and `alembic current`,
+ then runs repository/API/rollback tests against that real database. SQLite and
+-mocks do not replace these integration tests.
++mocks do not replace these integration tests. CI sets the project-specific
++`COMPOUNDOS_REQUIRE_POSTGRES_TESTS=1` gate and runs the `postgres`-marked suite
++explicitly. A missing test database fails in that mode; local runs without a
++configured PostgreSQL database may skip the marked integration suite.
+ 
+ ## Local Network Boundary
+ 
+diff --git a/docs/CHANGELOG.md b/docs/CHANGELOG.md
+index db33af4..5dac7a3 100644
+--- a/docs/CHANGELOG.md
++++ b/docs/CHANGELOG.md
+@@ -9,6 +9,9 @@
+ - Explicit Alembic migration for `household_profiles` and `audit_events`
+ - Local-only Household page with create, summary, edit, validation, error, and audit states
+ - Real PostgreSQL CI service, migration, singleton, and transaction rollback checks
++- A project-specific CI gate that fails if required real PostgreSQL tests cannot run
++- Named PostgreSQL checks mirroring every approved HouseholdProfile field limit
++- Independent audit loading/error state and GET-only retry after a successful mutation
+ - ADR 0002 for synchronous PostgreSQL persistence and transaction boundaries
+ 
+ ### Boundaries
+@@ -24,6 +27,10 @@
+   type-check, tests, production build, dependency audit, Alembic offline SQL,
+   YAML parsing, localhost binding inspection, and secret scan pass
+ - Real PostgreSQL and Compose checks run in GitHub CI
++- Local test runs may skip PostgreSQL-marked tests when `TEST_DATABASE_URL` is not
++  configured; the explicit CI-required mode fails instead of skipping
++- Independent review initially concluded REQUEST CHANGES for three blocking
++  findings; the scoped fixes remain in Slice 1 Review pending re-review
+ - Docker CLI is unavailable in the local implementation environment, so full
+   local application runtime verification remains pending
+ 
+diff --git a/docs/MASTER_PLAN.md b/docs/MASTER_PLAN.md
+index 8149601..887eb07 100644
+--- a/docs/MASTER_PLAN.md
++++ b/docs/MASTER_PLAN.md
+@@ -32,6 +32,10 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+ ## Backlog
+ 
+ - Complete Docker runtime verification in a Docker-enabled environment
++- Align `NEXT_PUBLIC_API_URL` with the Docker build-time public environment model
++- Split Python runtime and development dependencies before production hardening
++- Design AuditEvent pagination before introducing higher-volume event sources
++- Complete browser-path validation with the full Docker runtime stack
+ - Decide whether to migrate `frontend/` to `apps/web/`
+ - Add backend domain modules
+ - Introduce data persistence and orchestration
+@@ -51,6 +55,15 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+ - Final planning review conclusion: APPROVE.
+ - Planning PR #4 approved for merge.
+ - Sprint 002 Slice 1 requires independent review before it can be accepted.
++- Sprint 002 Slice 1 independent review conclusion: REQUEST CHANGES.
++- Review finding M-1 requires CI to fail rather than skip when real PostgreSQL
++  tests are explicitly required but `TEST_DATABASE_URL` is unavailable.
++- Review finding M-2 requires the approved technical field limits to be enforced
++  by named PostgreSQL constraints as well as Pydantic validation.
++- Review finding M-3 requires mutation success and AuditEvent refresh failure to
++  remain visibly distinct, with a GET-only audit retry.
++- The three blocking review findings are addressed on the Slice 1 branch and
++  remain in Review pending validation and independent re-review.
+ - Sprint 002 remains In Progress; Slice 2 is not authorized.
+ 
+ ## Done
+@@ -133,3 +146,12 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+ - 2026-07-13: Slice 1 scope is limited to HouseholdProfile, PostgreSQL,
+   AuditEvent, and the household UI.
+ - 2026-07-13: Later Sprint 002 slices remain unauthorized.
++- 2026-07-13: Sprint 002 Slice 1 independent review requested changes for the
++  PostgreSQL CI gate, database safety constraints, and post-mutation audit refresh UX.
++- 2026-07-13: Preserve local PostgreSQL-test skipping when no database is
++  configured, but prohibit skips when the CompoundOS CI gate is enabled.
++- 2026-07-13: Mirror approved input-safety limits in Pydantic and named PostgreSQL
++  constraints; these technical limits are not investment rules.
++- 2026-07-13: Treat a successful household mutation and a failed audit refresh as
++  separate outcomes, and retry only the audit GET.
++- 2026-07-13: Slice 1 remains in Review and Slice 2 remains unauthorized.
+diff --git a/docs/PRD.md b/docs/PRD.md
+index b291e27..93223e1 100644
+--- a/docs/PRD.md
++++ b/docs/PRD.md
+@@ -29,7 +29,9 @@ context without interpreting it or providing investment advice.
+ - `notes`: optional free text, at most 8,000 characters
+ 
+ These are input-safety limits, not investment rules. `base_currency` is stored as
+-context only; no conversion occurs. `risk_statement` is never interpreted.
++context only; no conversion occurs. `risk_statement` is never interpreted. The
++same limits are enforced in the API contract and by named PostgreSQL constraints
++using character length rather than byte length.
+ 
+ ## Lifecycle and Audit Boundary
+ 
+@@ -64,6 +66,11 @@ context only; no conversion occurs. `risk_statement` is never interpreted.
+   real PostgreSQL.
+ - Household UI covers loading, empty, create, summary, edit, 409, error, and audit
+   states with the required local-only and non-advisory notices.
++- A successful create/update remains visibly successful if the following audit
++  refresh fails; the existing timeline remains available and a retry performs only
++  the audit GET without replaying the mutation.
++- CI explicitly requires the PostgreSQL-marked suite and fails rather than skips
++  when its real database URL is unavailable.
+ - Existing health, lint, type-check, test, build, audit, Compose, and CI checks pass.
+ 
+ ## Explicit Non-Goals for Slice 1
+diff --git a/frontend/app/household/household-client.tsx b/frontend/app/household/household-client.tsx
+index 97ad344..5c8764e 100644
+--- a/frontend/app/household/household-client.tsx
++++ b/frontend/app/household/household-client.tsx
+@@ -28,14 +28,6 @@ const EMPTY_FORM: HouseholdInput = {
+   notes: "",
+ };
+ 
+-async function fetchHouseholdData() {
+-  const [profile, auditEvents] = await Promise.all([
+-    getCurrentHousehold(),
+-    getAuditEvents(),
+-  ]);
+-  return { profile, auditEvents };
+-}
+-
+ type HouseholdFormProps = {
+   initialValue: HouseholdInput;
+   submitLabel: string;
+@@ -169,27 +161,47 @@ function HouseholdSummary({ profile }: { profile: HouseholdProfile }) {
+   );
+ }
+ 
+-function AuditTimeline({ events }: { events: AuditEvent[] }) {
++type AuditTimelineProps = {
++  error: string | null;
++  events: AuditEvent[];
++  loading: boolean;
++  onRetry: () => void;
++};
++
++function AuditTimeline({ error, events, loading, onRetry }: AuditTimelineProps) {
+   return (
+     <section className="panel" aria-labelledby="audit-heading">
+       <div className="section-heading">
+         <p className="eyebrow">Read-only history</p>
+         <h2 id="audit-heading">Audit timeline</h2>
+       </div>
+-      {events.length === 0 ? (
+-        <p>No audit events yet.</p>
+-      ) : (
+-        <ol className="timeline">
+-          {events.map((event) => (
+-            <li key={event.id}>
+-              <strong>{event.action === "household.created" ? "Profile created" : "Profile updated"}</strong>
+-              <span>{new Date(event.occurred_at).toLocaleString()}</span>
+-              <span>Actor: {event.actor}</span>
+-              <span>Fields: {event.metadata.changed_fields?.join(", ") ?? "None"}</span>
+-            </li>
+-          ))}
+-        </ol>
+-      )}
++      {error ? (
++        <div className="error-panel" role="alert">
++          <p>{error}</p>
++          <button disabled={loading} onClick={onRetry} type="button">
++            {loading ? "Retrying audit timeline…" : "Retry audit timeline"}
++          </button>
++        </div>
++      ) : null}
++      {loading && !error ? <p role="status">Loading audit timeline…</p> : null}
++      {!loading ? (
++        events.length === 0 ? (
++          <p>No audit events yet.</p>
++        ) : (
++          <ol className="timeline">
++            {events.map((event) => (
++              <li key={event.id}>
++                <strong>
++                  {event.action === "household.created" ? "Profile created" : "Profile updated"}
++                </strong>
++                <span>{new Date(event.occurred_at).toLocaleString()}</span>
++                <span>Actor: {event.actor}</span>
++                <span>Fields: {event.metadata.changed_fields?.join(", ") ?? "None"}</span>
++              </li>
++            ))}
++          </ol>
++        )
++      ) : null}
+     </section>
+   );
+ }
+@@ -199,15 +211,16 @@ export function HouseholdClient() {
+   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
+   const [loading, setLoading] = useState(true);
+   const [loadError, setLoadError] = useState<string | null>(null);
++  const [auditLoading, setAuditLoading] = useState(true);
++  const [auditError, setAuditError] = useState<string | null>(null);
++  const [savedMessage, setSavedMessage] = useState<string | null>(null);
+   const [editing, setEditing] = useState(false);
+ 
+-  async function reload() {
++  async function reloadProfile() {
+     setLoading(true);
+     setLoadError(null);
+     try {
+-      const result = await fetchHouseholdData();
+-      setProfile(result.profile);
+-      setAuditEvents(result.auditEvents);
++      setProfile(await getCurrentHousehold());
+     } catch (caught) {
+       setLoadError(
+         caught instanceof HouseholdApiError ? caught.message : "Unable to load household data.",
+@@ -217,13 +230,28 @@ export function HouseholdClient() {
+     }
+   }
+ 
++  async function refreshAuditEvents(afterSuccessfulMutation = false) {
++    setAuditLoading(true);
++    setAuditError(null);
++    try {
++      setAuditEvents(await getAuditEvents());
++    } catch {
++      setAuditError(
++        afterSuccessfulMutation
++          ? "The household profile is saved, but the audit timeline could not be refreshed."
++          : "The household profile is available, but the audit timeline could not be loaded.",
++      );
++    } finally {
++      setAuditLoading(false);
++    }
++  }
++
+   useEffect(() => {
+     let active = true;
+-    void fetchHouseholdData()
++    void getCurrentHousehold()
+       .then((result) => {
+         if (!active) return;
+-        setProfile(result.profile);
+-        setAuditEvents(result.auditEvents);
++        setProfile(result);
+       })
+       .catch((caught: unknown) => {
+         if (!active) return;
+@@ -234,6 +262,22 @@ export function HouseholdClient() {
+       .finally(() => {
+         if (active) setLoading(false);
+       });
++
++    void getAuditEvents()
++      .then((events) => {
++        if (!active) return;
++        setAuditEvents(events);
++        setAuditError(null);
++      })
++      .catch(() => {
++        if (!active) return;
++        setAuditError(
++          "The household profile is available, but the audit timeline could not be loaded.",
++        );
++      })
++      .finally(() => {
++        if (active) setAuditLoading(false);
++      });
+     return () => {
+       active = false;
+     };
+@@ -242,14 +286,16 @@ export function HouseholdClient() {
+   async function handleCreate(value: HouseholdInput) {
+     const created = await createHousehold(value);
+     setProfile(created);
+-    setAuditEvents(await getAuditEvents());
++    setSavedMessage("Household profile saved.");
++    await refreshAuditEvents(true);
+   }
+ 
+   async function handleUpdate(value: HouseholdInput) {
+     const updated = await updateHousehold(value);
+     setProfile(updated);
+-    setAuditEvents(await getAuditEvents());
+     setEditing(false);
++    setSavedMessage("Household profile saved.");
++    await refreshAuditEvents(true);
+   }
+ 
+   return (
+@@ -273,10 +319,12 @@ export function HouseholdClient() {
+       {loadError ? (
+         <div className="error-panel" role="alert">
+           <p>{loadError}</p>
+-          <button onClick={() => void reload()} type="button">Try again</button>
++          <button onClick={() => void reloadProfile()} type="button">Try again</button>
+         </div>
+       ) : null}
+ 
++      {savedMessage ? <p role="status">{savedMessage}</p> : null}
++
+       {!loading && !loadError && !profile ? (
+         <section className="panel" aria-labelledby="create-heading">
+           <div className="section-heading">
+@@ -295,7 +343,17 @@ export function HouseholdClient() {
+                 <p className="eyebrow">Current profile</p>
+                 <h2 id="summary-heading">{profile.household_name}</h2>
+               </div>
+-              {!editing ? <button onClick={() => setEditing(true)} type="button">Edit profile</button> : null}
++              {!editing ? (
++                <button
++                  onClick={() => {
++                    setSavedMessage(null);
++                    setEditing(true);
++                  }}
++                  type="button"
++                >
++                  Edit profile
++                </button>
++              ) : null}
+             </div>
+             {editing ? (
+               <HouseholdForm
+@@ -308,7 +366,12 @@ export function HouseholdClient() {
+               <HouseholdSummary profile={profile} />
+             )}
+           </section>
+-          <AuditTimeline events={auditEvents} />
++          <AuditTimeline
++            error={auditError}
++            events={auditEvents}
++            loading={auditLoading}
++            onRetry={() => void refreshAuditEvents()}
++          />
+         </>
+       ) : null}
+     </main>
+diff --git a/frontend/app/household/page.test.tsx b/frontend/app/household/page.test.tsx
+index 3a9c26f..5b01577 100644
+--- a/frontend/app/household/page.test.tsx
++++ b/frontend/app/household/page.test.tsx
+@@ -27,6 +27,13 @@ const auditEvent = {
+   metadata: { changed_fields: ["household_name"] },
+ };
+ 
++const updatedAuditEvent = {
++  ...auditEvent,
++  id: "event-2",
++  action: "household.updated",
++  occurred_at: "2026-07-13T00:01:00Z",
++};
++
+ function jsonResponse(body: unknown, status = 200) {
+   return new Response(JSON.stringify(body), {
+     status,
+@@ -115,15 +122,13 @@ describe("HouseholdClient", () => {
+   });
+ 
+   it("shows a singleton conflict returned by the API", async () => {
+-    vi.stubGlobal(
+-      "fetch",
+-      vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
++    const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+         if (init?.method === "POST") {
+           return jsonResponse({ detail: "A household profile already exists" }, 409);
+         }
+         return jsonResponse({ detail: "Not found" }, 404);
+-      }),
+-    );
++      });
++    vi.stubGlobal("fetch", fetchMock);
+     render(<HouseholdClient />);
+     await screen.findByRole("heading", { name: "Create the household profile" });
+     await userEvent.type(screen.getByLabelText("Household name"), "Another Household");
+@@ -132,6 +137,121 @@ describe("HouseholdClient", () => {
+     await waitFor(() => {
+       expect(screen.getByRole("alert").textContent).toContain("already exists");
+     });
++    expect((screen.getByLabelText("Household name") as HTMLInputElement).value).toBe(
++      "Another Household",
++    );
++    expect(screen.queryByText("Household profile saved.")).toBeNull();
++    expect(
++      fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/audit-events")),
++    ).toHaveLength(1);
++  });
++
++  it("keeps a created profile visible and retries only its failed audit refresh", async () => {
++    let created = false;
++    let auditRequests = 0;
++    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
++      const url = String(input);
++      if (init?.method === "POST") {
++        created = true;
++        return jsonResponse(profile, 201);
++      }
++      if (url.endsWith("/audit-events")) {
++        auditRequests += 1;
++        if (!created) return jsonResponse([]);
++        if (auditRequests === 2) return jsonResponse({ detail: "Unavailable" }, 503);
++        return jsonResponse([auditEvent]);
++      }
++      return created ? jsonResponse(profile) : jsonResponse({ detail: "Not found" }, 404);
++    });
++    vi.stubGlobal("fetch", fetchMock);
++    render(<HouseholdClient />);
++    await screen.findByRole("heading", { name: "Create the household profile" });
++
++    await userEvent.type(screen.getByLabelText("Household name"), profile.household_name);
++    await userEvent.click(screen.getByRole("button", { name: "Create profile" }));
++
++    expect(await screen.findByRole("heading", { name: profile.household_name })).toBeTruthy();
++    expect(screen.queryByRole("heading", { name: "Create the household profile" })).toBeNull();
++    expect(screen.getByText("Household profile saved.")).toBeTruthy();
++    expect(screen.getByRole("alert").textContent).toContain(
++      "saved, but the audit timeline could not be refreshed",
++    );
++
++    await userEvent.click(screen.getByRole("button", { name: "Retry audit timeline" }));
++    expect(await screen.findByText("Profile created")).toBeTruthy();
++    await waitFor(() => {
++      expect(screen.queryByText(/could not be refreshed/)).toBeNull();
++    });
++    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
++    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(0);
++    expect(auditRequests).toBe(3);
++  });
++
++  it("keeps an updated profile visible and retries only its failed audit refresh", async () => {
++    let current = profile;
++    let auditRequests = 0;
++    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
++      const url = String(input);
++      if (init?.method === "PATCH") {
++        current = { ...profile, household_name: "Updated Household" };
++        return jsonResponse(current);
++      }
++      if (url.endsWith("/audit-events")) {
++        auditRequests += 1;
++        if (auditRequests === 2) return jsonResponse({ detail: "Unavailable" }, 503);
++        return jsonResponse(auditRequests === 1 ? [auditEvent] : [auditEvent, updatedAuditEvent]);
++      }
++      return jsonResponse(current);
++    });
++    vi.stubGlobal("fetch", fetchMock);
++    render(<HouseholdClient />);
++    await screen.findByRole("heading", { name: profile.household_name });
++
++    await userEvent.click(screen.getByRole("button", { name: "Edit profile" }));
++    const nameInput = screen.getByLabelText("Household name");
++    await userEvent.clear(nameInput);
++    await userEvent.type(nameInput, "Updated Household");
++    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
++
++    expect(await screen.findByRole("heading", { name: "Updated Household" })).toBeTruthy();
++    expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull();
++    expect(screen.getByText("Household profile saved.")).toBeTruthy();
++    expect(screen.getByRole("alert").textContent).toContain(
++      "saved, but the audit timeline could not be refreshed",
++    );
++
++    await userEvent.click(screen.getByRole("button", { name: "Retry audit timeline" }));
++    expect(await screen.findByText("Profile updated")).toBeTruthy();
++    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(1);
++    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
++    expect(auditRequests).toBe(3);
++  });
++
++  it("shows an existing profile when the initial audit request fails", async () => {
++    let auditRequests = 0;
++    vi.stubGlobal(
++      "fetch",
++      vi.fn(async (input: string | URL | Request) => {
++        if (String(input).endsWith("/audit-events")) {
++          auditRequests += 1;
++          if (auditRequests === 1) return jsonResponse({ detail: "Unavailable" }, 503);
++          return jsonResponse([auditEvent]);
++        }
++        return jsonResponse(profile);
++      }),
++    );
++    render(<HouseholdClient />);
++
++    expect(await screen.findByRole("heading", { name: profile.household_name })).toBeTruthy();
++    expect(screen.getByRole("alert").textContent).toContain(
++      "profile is available, but the audit timeline could not be loaded",
++    );
++    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
++
++    await userEvent.click(screen.getByRole("button", { name: "Retry audit timeline" }));
++    expect(await screen.findByText("Profile created")).toBeTruthy();
++    expect(screen.queryByRole("alert")).toBeNull();
++    expect(auditRequests).toBe(2);
+   });
+ 
+   it("does not render prohibited product surfaces", async () => {
+diff --git a/migrations/versions/0001_household_persistence.py b/migrations/versions/0001_household_persistence.py
+index b7ad57d..d7c48a4 100644
+--- a/migrations/versions/0001_household_persistence.py
++++ b/migrations/versions/0001_household_persistence.py
+@@ -22,8 +22,8 @@ def upgrade() -> None:
+         "household_profiles",
+         sa.Column("id", sa.Uuid(), nullable=False),
+         sa.Column("singleton_key", sa.Boolean(), server_default=sa.text("true"), nullable=False),
+-        sa.Column("household_name", sa.String(length=200), nullable=False),
+-        sa.Column("base_currency", sa.String(length=3), nullable=False),
++        sa.Column("household_name", sa.Text(), nullable=False),
++        sa.Column("base_currency", sa.Text(), nullable=False),
+         sa.Column("investment_horizon", sa.Text(), nullable=False),
+         sa.Column("liquidity_needs", sa.Text(), nullable=False),
+         sa.Column("risk_statement", sa.Text(), nullable=False),
+@@ -35,6 +35,30 @@ def upgrade() -> None:
+             "updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+         ),
+         sa.CheckConstraint("singleton_key", name="ck_household_profiles_singleton_key"),
++        sa.CheckConstraint(
++            "char_length(household_name) BETWEEN 1 AND 200",
++            name="ck_household_profiles_name_length",
++        ),
++        sa.CheckConstraint(
++            "base_currency ~ '^[A-Z]{3}$'",
++            name="ck_household_profiles_currency_format",
++        ),
++        sa.CheckConstraint(
++            "char_length(investment_horizon) <= 2000",
++            name="ck_household_profiles_investment_horizon_length",
++        ),
++        sa.CheckConstraint(
++            "char_length(liquidity_needs) <= 4000",
++            name="ck_household_profiles_liquidity_needs_length",
++        ),
++        sa.CheckConstraint(
++            "char_length(risk_statement) <= 4000",
++            name="ck_household_profiles_risk_statement_length",
++        ),
++        sa.CheckConstraint(
++            "char_length(notes) <= 8000",
++            name="ck_household_profiles_notes_length",
++        ),
+         sa.PrimaryKeyConstraint("id"),
+         sa.UniqueConstraint("singleton_key", name="uq_household_profiles_singleton_key"),
+     )
+diff --git a/pytest.ini b/pytest.ini
+index 4584de7..366c933 100644
+--- a/pytest.ini
++++ b/pytest.ini
+@@ -1,3 +1,5 @@
+ [pytest]
+ testpaths = tests
+ pythonpath = .
++markers =
++    postgres: requires a live PostgreSQL database migrated to the current Alembic head
+diff --git a/tests/api/test_households.py b/tests/api/test_households.py
+index bd904b9..7506daf 100644
+--- a/tests/api/test_households.py
++++ b/tests/api/test_households.py
+@@ -4,12 +4,12 @@ from typing import Any
+ 
+ import pytest
+ from fastapi.testclient import TestClient
+-from sqlalchemy import func, inspect, select
++from sqlalchemy import func, inspect, select, text
+ from sqlalchemy.exc import IntegrityError
+ from sqlalchemy.orm import Session
+ 
+ from apps.api.models import AuditEvent, HouseholdProfile
+-from apps.api.schemas import HouseholdCreate, HouseholdUpdate
++from apps.api.schemas import HouseholdCreate, HouseholdResponse, HouseholdUpdate
+ from apps.api.services import households as household_service
+ 
+ HOUSEHOLD_PAYLOAD: dict[str, str] = {
+@@ -21,6 +21,17 @@ HOUSEHOLD_PAYLOAD: dict[str, str] = {
+     "notes": "Private household notes",
+ }
+ 
++pytestmark = pytest.mark.postgres
++
++HOUSEHOLD_CHECK_CONSTRAINTS = {
++    "ck_household_profiles_name_length",
++    "ck_household_profiles_currency_format",
++    "ck_household_profiles_investment_horizon_length",
++    "ck_household_profiles_liquidity_needs_length",
++    "ck_household_profiles_risk_statement_length",
++    "ck_household_profiles_notes_length",
++}
++
+ 
+ def create_household(client: TestClient, payload: dict[str, Any] | None = None):
+     return client.post("/api/households", json=payload or HOUSEHOLD_PAYLOAD)
+@@ -134,6 +145,72 @@ def test_database_singleton_constraint_is_enforced(db_session: Session) -> None:
+     assert db_session.scalar(select(func.count()).select_from(HouseholdProfile)) == 1
+ 
+ 
++@pytest.mark.parametrize(
++    ("constraint_name", "overrides"),
++    [
++        ("ck_household_profiles_name_length", {"household_name": ""}),
++        ("ck_household_profiles_name_length", {"household_name": "x" * 201}),
++        ("ck_household_profiles_currency_format", {"base_currency": "usd"}),
++        (
++            "ck_household_profiles_investment_horizon_length",
++            {"investment_horizon": "x" * 2_001},
++        ),
++        ("ck_household_profiles_liquidity_needs_length", {"liquidity_needs": "x" * 4_001}),
++        ("ck_household_profiles_risk_statement_length", {"risk_statement": "x" * 4_001}),
++        ("ck_household_profiles_notes_length", {"notes": "x" * 8_001}),
++    ],
++)
++def test_database_rejects_values_outside_named_safety_constraints(
++    db_session: Session,
++    constraint_name: str,
++    overrides: dict[str, str],
++) -> None:
++    db_session.add(HouseholdProfile(**{**HOUSEHOLD_PAYLOAD, **overrides}))
++
++    with pytest.raises(IntegrityError) as exc_info:
++        db_session.commit()
++
++    assert exc_info.value.orig.diag.constraint_name == constraint_name
++    db_session.rollback()
++    assert db_session.scalar(select(func.count()).select_from(HouseholdProfile)) == 0
++    assert db_session.scalar(select(text("1"))) == 1
++
++
++def test_database_accepts_unicode_at_character_limits_and_response_schema(
++    db_session: Session,
++) -> None:
++    household = HouseholdProfile(
++        **{
++            **HOUSEHOLD_PAYLOAD,
++            "household_name": "家" * 200,
++            "investment_horizon": "期" * 2_000,
++            "liquidity_needs": "流" * 4_000,
++            "risk_statement": "险" * 4_000,
++            "notes": "注" * 8_000,
++        }
++    )
++    db_session.add(household)
++    db_session.commit()
++
++    response = HouseholdResponse.model_validate(household)
++    assert len(response.household_name) == 200
++    assert len(response.notes) == 8_000
++
++
++def test_migration_installs_all_named_household_check_constraints(postgres_engine) -> None:
++    constraints = {
++        constraint["name"]
++        for constraint in inspect(postgres_engine).get_check_constraints("household_profiles")
++    }
++    assert HOUSEHOLD_CHECK_CONSTRAINTS <= constraints
++
++
++def test_required_postgres_suite_uses_live_postgresql(postgres_engine) -> None:
++    with postgres_engine.connect() as connection:
++        version = connection.scalar(text("SELECT current_setting('server_version_num')::int"))
++        assert version >= 160000
++
++
+ def test_audit_failure_rolls_back_household_create(
+     db_session: Session, monkeypatch: pytest.MonkeyPatch
+ ) -> None:
+diff --git a/tests/conftest.py b/tests/conftest.py
+index 1b489a6..17ea69b 100644
+--- a/tests/conftest.py
++++ b/tests/conftest.py
+@@ -13,11 +13,20 @@ from apps.api.database import get_session
+ from apps.api.main import app
+ 
+ 
++def postgres_test_database_url() -> str:
++    database_url = os.environ.get("TEST_DATABASE_URL", "").strip()
++    if database_url:
++        return database_url
++    if os.environ.get("COMPOUNDOS_REQUIRE_POSTGRES_TESTS") == "1":
++        pytest.fail(
++            "CompoundOS CI requires real PostgreSQL tests, but TEST_DATABASE_URL is missing"
++        )
++    pytest.skip("TEST_DATABASE_URL is required for PostgreSQL integration tests")
++
++
+ @pytest.fixture(scope="session")
+ def postgres_engine() -> Engine:
+-    database_url = os.environ.get("TEST_DATABASE_URL")
+-    if not database_url:
+-        pytest.skip("TEST_DATABASE_URL is required for PostgreSQL integration tests")
++    database_url = postgres_test_database_url()
+     engine = create_engine(database_url, pool_pre_ping=True)
+     try:
+         with engine.connect() as connection:
+diff --git a/tests/test_postgres_gate.py b/tests/test_postgres_gate.py
+new file mode 100644
+index 0000000..c511847
+--- /dev/null
++++ b/tests/test_postgres_gate.py
+@@ -0,0 +1,38 @@
++from __future__ import annotations
++
++import pytest
++
++from tests.conftest import postgres_test_database_url
++
++
++def test_missing_database_url_skips_outside_required_mode(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    monkeypatch.delenv("TEST_DATABASE_URL", raising=False)
++    monkeypatch.delenv("COMPOUNDOS_REQUIRE_POSTGRES_TESTS", raising=False)
++
++    with pytest.raises(pytest.skip.Exception, match="TEST_DATABASE_URL is required"):
++        postgres_test_database_url()
++
++
++def test_missing_database_url_fails_in_required_mode(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    monkeypatch.delenv("TEST_DATABASE_URL", raising=False)
++    monkeypatch.setenv("COMPOUNDOS_REQUIRE_POSTGRES_TESTS", "1")
++
++    with pytest.raises(
++        pytest.fail.Exception,
++        match="CI requires real PostgreSQL tests",
++    ):
++        postgres_test_database_url()
++
++
++def test_required_mode_returns_configured_database_url(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    database_url = "postgresql+psycopg://test-host/compoundos"
++    monkeypatch.setenv("TEST_DATABASE_URL", database_url)
++    monkeypatch.setenv("COMPOUNDOS_REQUIRE_POSTGRES_TESTS", "1")
++
++    assert postgres_test_database_url() == database_url

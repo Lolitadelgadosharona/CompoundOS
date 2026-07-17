@@ -1,0 +1,405 @@
+diff --git a/.dockerignore b/.dockerignore
+new file mode 100644
+index 0000000..7e9924f
+--- /dev/null
++++ b/.dockerignore
+@@ -0,0 +1,13 @@
++.git
++.github
++.venv
++**/__pycache__
++**/.pytest_cache
++**/.ruff_cache
++frontend/.next
++frontend/node_modules
++*.pyc
++*.tsbuildinfo
++.env
++.env.*
++!.env.example
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 8e91fb3..6c04d54 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -6,6 +6,15 @@ on:
+   pull_request:
+ 
+ jobs:
++  infrastructure:
++    runs-on: ubuntu-latest
++    steps:
++      - uses: actions/checkout@v4
++      - name: Inspect Docker Compose version
++        run: docker compose version
++      - name: Validate Docker Compose configuration
++        run: docker compose config
++
+   backend:
+     runs-on: ubuntu-latest
+     steps:
+@@ -42,5 +51,7 @@ jobs:
+         run: npm run lint
+       - name: Run frontend type check
+         run: npm run type-check
++      - name: Run frontend tests
++        run: npm test
+       - name: Build frontend
+         run: npm run build
+diff --git a/README.md b/README.md
+index db889d3..87cc1e9 100644
+--- a/README.md
++++ b/README.md
+@@ -52,6 +52,7 @@ The frontend is available at `http://localhost:3000`; its health endpoint is
+ - Backend tests: `pytest -q tests/api`
+ - Frontend lint: `npm --prefix frontend run lint`
+ - Frontend type check: `npm --prefix frontend run type-check`
++- Frontend tests: `npm --prefix frontend test`
+ - Frontend production build: `npm --prefix frontend run build`
+ 
+ ## Environment Variables
+@@ -61,9 +62,20 @@ development-only placeholders and no real secrets.
+ 
+ ## Local Infrastructure
+ 
+-PostgreSQL, Redis, and Docker-based development are architectural targets. A
+-Compose configuration is intentionally deferred until it can be validated in a
+-Docker-enabled environment.
++The containerized local stack includes the Next.js frontend, FastAPI backend,
++PostgreSQL, and Redis:
++
++1. Copy `.env.example` to `.env` if local overrides are needed.
++2. Validate the configuration: `docker compose config`
++3. Build and start the stack: `docker compose up --build -d`
++4. Check service state: `docker compose ps`
++5. Verify `http://localhost:3000/api/health` and
++   `http://localhost:8000/health`.
++6. Stop the stack: `docker compose down`
++
++The Compose file and Docker build paths have been statically validated. Docker
++runtime verification remains pending because Docker is not installed in the
++current validation environment.
+ 
+ ## Monorepo Convention
+ 
+diff --git a/apps/api/Dockerfile b/apps/api/Dockerfile
+new file mode 100644
+index 0000000..f58f450
+--- /dev/null
++++ b/apps/api/Dockerfile
+@@ -0,0 +1,15 @@
++FROM python:3.11-slim
++
++ENV PYTHONDONTWRITEBYTECODE=1 \
++    PYTHONUNBUFFERED=1
++
++WORKDIR /app
++
++COPY requirements.txt ./requirements.txt
++RUN pip install --no-cache-dir -r requirements.txt
++
++COPY apps ./apps
++
++EXPOSE 8000
++
++CMD ["python", "-m", "uvicorn", "apps.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+diff --git a/compose.yaml b/compose.yaml
+new file mode 100644
+index 0000000..ce3db2b
+--- /dev/null
++++ b/compose.yaml
+@@ -0,0 +1,81 @@
++services:
++  web:
++    build:
++      context: ./frontend
++      dockerfile: Dockerfile
++    environment:
++      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
++    ports:
++      - "3000:3000"
++    depends_on:
++      api:
++        condition: service_healthy
++    healthcheck:
++      test:
++        - CMD
++        - node
++        - -e
++        - fetch('http://localhost:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
++      interval: 10s
++      timeout: 5s
++      retries: 5
++
++  api:
++    build:
++      context: .
++      dockerfile: apps/api/Dockerfile
++    environment:
++      POSTGRES_USER: ${POSTGRES_USER:-compoundos}
++      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-compoundos}
++      POSTGRES_DB: ${POSTGRES_DB:-compoundos}
++      REDIS_URL: redis://redis:6379/0
++    ports:
++      - "8000:8000"
++    depends_on:
++      postgres:
++        condition: service_healthy
++      redis:
++        condition: service_healthy
++    healthcheck:
++      test:
++        - CMD
++        - python
++        - -c
++        - import urllib.request; urllib.request.urlopen('http://localhost:8000/health')
++      interval: 10s
++      timeout: 5s
++      retries: 5
++
++  postgres:
++    image: postgres:16-alpine
++    environment:
++      POSTGRES_USER: ${POSTGRES_USER:-compoundos}
++      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-compoundos}
++      POSTGRES_DB: ${POSTGRES_DB:-compoundos}
++    ports:
++      - "5432:5432"
++    volumes:
++      - postgres_data:/var/lib/postgresql/data
++    healthcheck:
++      test:
++        - CMD-SHELL
++        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
++      interval: 10s
++      timeout: 5s
++      retries: 5
++
++  redis:
++    image: redis:7-alpine
++    ports:
++      - "6379:6379"
++    volumes:
++      - redis_data:/data
++    healthcheck:
++      test: ["CMD", "redis-cli", "ping"]
++      interval: 10s
++      timeout: 5s
++      retries: 5
++
++volumes:
++  postgres_data:
++  redis_data:
+diff --git a/docs/ARCHITECTURE.md b/docs/ARCHITECTURE.md
+index 14ae354..9c80d72 100644
+--- a/docs/ARCHITECTURE.md
++++ b/docs/ARCHITECTURE.md
+@@ -9,10 +9,11 @@ CompoundOS will use a modular monorepo with a Next.js frontend, a FastAPI backen
+ - Frontend: Next.js 16.2.10 App Router application with TypeScript in `frontend/`
+ - Backend: minimal FastAPI service in `apps/api/`
+ - Data: PostgreSQL and Redis are planned but not connected in Sprint 001
+-- Local infrastructure: Docker-based development is planned; Compose is deferred
+-  until it can be validated in a Docker-enabled environment
++- Local infrastructure: `compose.yaml` defines the web, API, PostgreSQL, and Redis
++  services using Dockerfiles aligned with the current repository paths; runtime
++  verification remains pending in a Docker-enabled environment
+ - Validation: pytest and Ruff for the backend; ESLint, TypeScript, and the Next.js
+-  production build for the frontend
++  health test and production build for the frontend
+ 
+ ## Repository Layout Decision
+ 
+@@ -36,5 +37,5 @@ and CI toolchain.
+ 
+ - Add shared contracts between frontend and backend.
+ - Define deployment and environment strategy.
+-- Add and validate Docker-based local infrastructure.
++- Complete Docker build and runtime verification in a Docker-enabled environment.
+ - Decide whether to migrate `frontend/` to `apps/web/` in a later approved sprint.
+diff --git a/docs/CHANGELOG.md b/docs/CHANGELOG.md
+index b7251d8..04a0318 100644
+--- a/docs/CHANGELOG.md
++++ b/docs/CHANGELOG.md
+@@ -1,5 +1,32 @@
+ # Changelog
+ 
++## [Unreleased] - Sprint 001 Review
++
++### Added
++
++- Frontend health endpoint test using the Node.js test runner
++- CI execution of the frontend health test
++- CI validation of the Docker Compose configuration
++- Dockerfiles for the existing `frontend/` and `apps/api/` applications
++- `compose.yaml` for the web, API, PostgreSQL, and Redis local stack
++- Docker build-context ignore files
++
++### Validation
++
++- Frontend lint, type-check, health test, production build, and production
++  dependency audit pass locally
++- Backend Ruff and pytest checks pass locally
++- Compose YAML, CI YAML, build contexts, dependency paths, and container commands
++  pass static consistency checks
++- Docker runtime verification was not completed because Docker is unavailable in
++  the current environment
++
++### Status
++
++- Sprint 001: Review
++- Sprint 002: Not Started
++- This entry records foundation work and is not a product release
++
+ ## [0.1.1] - 2026-07-12
+ 
+ ### Changed
+diff --git a/docs/MASTER_PLAN.md b/docs/MASTER_PLAN.md
+index f5b12f0..2dc2913 100644
+--- a/docs/MASTER_PLAN.md
++++ b/docs/MASTER_PLAN.md
+@@ -12,14 +12,15 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+ 
+ ## Current Sprint
+ 
+-- Sprint 002: Not Started
+-- Status: Not Started
+-- Next approved action: Sprint 002 planning only; implementation requires explicit
+-  sprint approval
++- Sprint 001: Project Foundation
++- Status: Review
++- Scope: final foundation verification, frontend health test, and Docker-based
++  local development configuration
++- Sprint 002: Not Started; implementation requires explicit sprint approval
+ 
+ ## Backlog
+ 
+-- Add and validate Docker-based local development configuration
++- Complete Docker runtime verification in a Docker-enabled environment
+ - Decide whether to migrate `frontend/` to `apps/web/`
+ - Add backend domain modules
+ - Introduce data persistence and orchestration
+@@ -33,11 +34,12 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+ 
+ ## Review
+ 
+-- None
++- Sprint 001 Docker runtime verification remains pending because Docker is not
++  installed in the current environment
++- Review the final Sprint 001 foundation changes before any further merge or release
+ 
+ ## Done
+ 
+-- Sprint 001: Project Foundation
+ - Sprint 001.1: Repository Hardening
+ - Repository structure created
+ - Basic health endpoints implemented
+@@ -52,6 +54,9 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+ - Pull request #1 squash-merged into `main` as
+   `b3801c64fa09856d491317b0ebda45007c210ae0`
+ - GitHub Actions backend and frontend checks passed for push and pull request events
++- Frontend health endpoint automated test added and included in CI
++- Docker Compose and Dockerfiles added with static YAML, context, path, and command
++  consistency validation
+ 
+ ## Decision Log
+ 
+@@ -65,3 +70,7 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+ - 2026-07-12: Finalize Sprint 001 and Sprint 001.1 through pull request #1 using a
+   squash merge (`b3801c64fa09856d491317b0ebda45007c210ae0`).
+ - 2026-07-12: Keep Sprint 002 Not Started; the next approved action is planning only.
++- 2026-07-12: Reopen Sprint 001 in Review to add the approved Docker development
++  configuration and frontend health test without beginning Sprint 002.
++- 2026-07-12: Record Docker runtime verification as pending; do not claim container
++  validation until Docker is available.
+diff --git a/frontend/.dockerignore b/frontend/.dockerignore
+new file mode 100644
+index 0000000..3c2862f
+--- /dev/null
++++ b/frontend/.dockerignore
+@@ -0,0 +1,7 @@
++.next
++node_modules
++*.tsbuildinfo
++.env
++.env.*
++!.env.example
++npm-debug.log*
+diff --git a/frontend/Dockerfile b/frontend/Dockerfile
+new file mode 100644
+index 0000000..0546193
+--- /dev/null
++++ b/frontend/Dockerfile
+@@ -0,0 +1,24 @@
++FROM node:22-alpine AS dependencies
++
++WORKDIR /app
++COPY package.json package-lock.json ./
++RUN npm ci
++
++FROM node:22-alpine AS builder
++
++WORKDIR /app
++COPY --from=dependencies /app/node_modules ./node_modules
++COPY . .
++RUN npm run build
++
++FROM node:22-alpine AS runner
++
++ENV NODE_ENV=production
++WORKDIR /app
++COPY --from=builder /app/package.json ./package.json
++COPY --from=builder /app/node_modules ./node_modules
++COPY --from=builder /app/.next ./.next
++
++EXPOSE 3000
++
++CMD ["npm", "run", "start", "--", "-H", "0.0.0.0"]
+diff --git a/frontend/app/api/health/route.test.mjs b/frontend/app/api/health/route.test.mjs
+new file mode 100644
+index 0000000..5b71821
+--- /dev/null
++++ b/frontend/app/api/health/route.test.mjs
+@@ -0,0 +1,11 @@
++import assert from "node:assert/strict";
++import test from "node:test";
++
++import { GET } from "./route.ts";
++
++test("GET returns the web health response", async () => {
++  const response = GET();
++
++  assert.equal(response.status, 200);
++  assert.deepEqual(await response.json(), { status: "ok", service: "web" });
++});
+diff --git a/frontend/next.config.js b/frontend/next.config.mjs
+similarity index 75%
+rename from frontend/next.config.js
+rename to frontend/next.config.mjs
+index 91ef62f..d5456a1 100644
+--- a/frontend/next.config.js
++++ b/frontend/next.config.mjs
+@@ -3,4 +3,4 @@ const nextConfig = {
+   reactStrictMode: true,
+ };
+ 
+-module.exports = nextConfig;
++export default nextConfig;
+diff --git a/frontend/package.json b/frontend/package.json
+index c0a3368..11eb4c1 100644
+--- a/frontend/package.json
++++ b/frontend/package.json
+@@ -2,6 +2,7 @@
+   "name": "compoundos-frontend",
+   "version": "0.1.0",
+   "private": true,
++  "type": "module",
+   "packageManager": "npm@10.9.8",
+   "engines": {
+     "node": ">=22 <23",
+@@ -12,6 +13,7 @@
+     "build": "next build",
+     "start": "next start",
+     "lint": "eslint . --max-warnings=0",
++    "test": "node --test app/api/health/route.test.mjs",
+     "type-check": "tsc --noEmit"
+   },
+   "dependencies": {

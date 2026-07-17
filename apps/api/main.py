@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from apps.api.routers.decisions import router as decisions_router
 from apps.api.routers.households import router as households_router
 from apps.api.routers.policies import router as policies_router
+from apps.api.routers.portfolios import router as portfolios_router
 
 app = FastAPI(title="CompoundOS API", version="0.1.0")
 
@@ -43,3 +44,4 @@ def api_health() -> dict[str, str]:
 app.include_router(households_router)
 app.include_router(policies_router)
 app.include_router(decisions_router)
+app.include_router(portfolios_router)

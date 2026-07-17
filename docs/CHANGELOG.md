@@ -1,5 +1,25 @@
 # Changelog
 
+## [Unreleased] - Sprint 003 Slice B (In Review)
+
+### Added
+
+- Portfolio API: 9 endpoints under /api/portfolio
+- Cash unit_price = 1.00 database CHECK constraint (migration 0005, additive)
+- Controlled snapshot status transition current→superseded (migration 0006, additive)
+- Future-proof JSONB row comparison in immutability trigger
+- Comprehensive API, gate, trigger, migration, and concurrency tests
+
+### Changed
+
+- Portfolio status semantics: 'draft' = draft exists; 'active' = confirmed, no draft
+- Snapshot current→superseded transition allowed per Owner Decision Option A
+
+### Fixed
+
+- 0004 snapshot immutability trigger: allowed controlled status-only UPDATE via 0006
+- Deferred trigger active+draft semantics clarified per Owner Decision
+
 ## [Unreleased] - Sprint 002 Slice 3B Complete
 
 ### Added

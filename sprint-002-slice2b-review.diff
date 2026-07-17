@@ -1,0 +1,2013 @@
+diff --git a/README.md b/README.md
+index 2c5fe6b..31f47fc 100644
+--- a/README.md
++++ b/README.md
+@@ -1,8 +1,8 @@
+ # CompoundOS
+ 
+ CompoundOS is a long-term AI Family Office and Wealth Operating System. Sprint
+-002 Slice 1 adds a local-only household recordkeeping workflow to the validated
+-Sprint 001 foundation.
++002 now includes the local-only Household workflow and the Slice 2B Investment
++Policy backend API on top of the validated foundation.
+ 
+ > **Local-only security boundary:** This Sprint 002 build is for local,
+ > single-user development only. It has no authentication and must not be exposed
+@@ -13,8 +13,10 @@ Sprint 001 foundation.
+ - Create, read, and update the sole `HouseholdProfile`.
+ - Persist the profile and append-only `AuditEvent` records in PostgreSQL.
+ - Show the household summary and read-only audit timeline at `/household`.
+-- Keep all policy, allocation, journal, AI, Guardian, broker, trading, and
+-  authentication behavior out of Slice 1.
++- Record user-authored Investment Policy Draft text and target percentages through
++  the backend API, then publish immutable Version snapshots.
++- Keep Policy frontend, journal, AI, Guardian, broker, trading, recommendation,
++  and authentication behavior outside the current implementation.
+ 
+ ## Repository Layout
+ 
+@@ -67,6 +69,17 @@ Slice 1 exposes only:
+ Request bodies reject undeclared fields. Responses use explicit schemas and do
+ not expose ORM-only singleton state.
+ 
++### Investment Policy API
++
++Slice 2B exposes the local-only backend contracts documented by FastAPI at
++`http://127.0.0.1:8000/docs`. The API supports the sole Policy and Draft,
++whole-collection allocation replacement, immutable publication, version reads,
++and a Policy-filtered audit timeline under `/api/policies`.
++
++Percentages are JSON decimal strings such as `"12.50"`. These endpoints record
++only user-entered policy information; they do not evaluate, recommend, score, or
++execute anything. No Policy frontend is included in Slice 2B.
++
+ ### Frontend
+ 
+ 1. Change directories: `cd frontend`
+@@ -124,6 +137,7 @@ to a separately approved sprint; Sprint 001.1 does not restructure working code.
+ 
+ ## Notes
+ 
+-This slice intentionally does not implement investment policy, target allocation,
+-decision journals, trading, broker integrations, authentication, Guardian logic,
+-or autonomous agents. Sprint 002 is not complete, and Slice 2 is not authorized.
++This slice intentionally does not implement a Policy frontend, decision journals,
++trading, broker integrations, authentication, Guardian logic, recommendations,
++or autonomous agents. Sprint 002 is not complete; Slice 2C and Slice 3 are not
++authorized.
+diff --git a/apps/api/main.py b/apps/api/main.py
+index 8e95551..e425112 100644
+--- a/apps/api/main.py
++++ b/apps/api/main.py
+@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
+ from fastapi.responses import JSONResponse
+ 
+ from apps.api.routers.households import router as households_router
++from apps.api.routers.policies import router as policies_router
+ 
+ app = FastAPI(title="CompoundOS API", version="0.1.0")
+ 
+@@ -11,7 +12,7 @@ app.add_middleware(
+     CORSMiddleware,
+     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+     allow_credentials=False,
+-    allow_methods=["GET", "POST", "PATCH"],
++    allow_methods=["GET", "POST", "PATCH", "PUT"],
+     allow_headers=["Content-Type"],
+ )
+ 
+@@ -39,3 +40,4 @@ def api_health() -> dict[str, str]:
+ 
+ 
+ app.include_router(households_router)
++app.include_router(policies_router)
+diff --git a/apps/api/policy_schemas.py b/apps/api/policy_schemas.py
+new file mode 100644
+index 0000000..72a344d
+--- /dev/null
++++ b/apps/api/policy_schemas.py
+@@ -0,0 +1,213 @@
++from __future__ import annotations
++
++import re
++import unicodedata
++from datetime import datetime
++from decimal import Decimal, InvalidOperation
++from typing import Any, Literal, Optional
++from uuid import UUID
++
++from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
++
++POLICY_TEXT_LIMITS = {
++    "objectives": 4_000,
++    "time_horizon": 2_000,
++    "liquidity": 4_000,
++    "diversification": 4_000,
++    "contribution_policy": 4_000,
++    "rebalancing_policy": 4_000,
++    "prohibited_assets": 4_000,
++    "leverage_policy": 4_000,
++    "decision_process": 4_000,
++    "notes": 8_000,
++}
++POLICY_TEXT_FIELDS = tuple(POLICY_TEXT_LIMITS)
++REQUIRED_PUBLISH_FIELDS = ("objectives", "time_horizon", "decision_process")
++
++
++def normalize_asset_class_name(value: str) -> tuple[str, str]:
++    display_name = re.sub(r"\s+", " ", unicodedata.normalize("NFKC", value).strip())
++    if not display_name:
++        raise ValueError("asset class name cannot be blank")
++    if len(display_name) > 200:
++        raise ValueError("asset class name must contain at most 200 characters")
++    return display_name, display_name.casefold()
++
++
++class PolicyTextFields(BaseModel):
++    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
++
++    objectives: str = Field(default="", max_length=4_000)
++    time_horizon: str = Field(default="", max_length=2_000)
++    liquidity: str = Field(default="", max_length=4_000)
++    diversification: str = Field(default="", max_length=4_000)
++    contribution_policy: str = Field(default="", max_length=4_000)
++    rebalancing_policy: str = Field(default="", max_length=4_000)
++    prohibited_assets: str = Field(default="", max_length=4_000)
++    leverage_policy: str = Field(default="", max_length=4_000)
++    decision_process: str = Field(default="", max_length=4_000)
++    notes: str = Field(default="", max_length=8_000)
++
++
++class PolicyDraftUpdate(BaseModel):
++    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
++
++    expected_revision: int = Field(ge=1)
++    objectives: Optional[str] = Field(default=None, max_length=4_000)
++    time_horizon: Optional[str] = Field(default=None, max_length=2_000)
++    liquidity: Optional[str] = Field(default=None, max_length=4_000)
++    diversification: Optional[str] = Field(default=None, max_length=4_000)
++    contribution_policy: Optional[str] = Field(default=None, max_length=4_000)
++    rebalancing_policy: Optional[str] = Field(default=None, max_length=4_000)
++    prohibited_assets: Optional[str] = Field(default=None, max_length=4_000)
++    leverage_policy: Optional[str] = Field(default=None, max_length=4_000)
++    decision_process: Optional[str] = Field(default=None, max_length=4_000)
++    notes: Optional[str] = Field(default=None, max_length=8_000)
++
++    @field_validator(*POLICY_TEXT_FIELDS)
++    @classmethod
++    def reject_null_text(cls, value: Optional[str]) -> str:
++        if value is None:
++            raise ValueError("field cannot be null")
++        return value
++
++
++class AllocationItemInput(BaseModel):
++    model_config = ConfigDict(extra="forbid")
++
++    asset_class_name: str
++    target_percentage: str
++
++    @field_validator("asset_class_name")
++    @classmethod
++    def normalize_display_name(cls, value: str) -> str:
++        display_name, _ = normalize_asset_class_name(value)
++        return display_name
++
++    @field_validator("target_percentage", mode="before")
++    @classmethod
++    def validate_decimal_string(cls, value: Any) -> str:
++        if not isinstance(value, str):
++            raise ValueError("target percentage must be a decimal string")
++        if not re.fullmatch(r"\d+(?:\.\d{1,2})?", value):
++            raise ValueError("target percentage must have at most two decimal places")
++        try:
++            percentage = Decimal(value)
++        except InvalidOperation as exc:
++            raise ValueError("target percentage must be a decimal string") from exc
++        if percentage <= Decimal("0.00") or percentage > Decimal("100.00"):
++            raise ValueError("target percentage must be greater than 0 and at most 100")
++        return format(percentage, ".2f")
++
++
++class AllocationReplaceRequest(BaseModel):
++    model_config = ConfigDict(extra="forbid")
++
++    expected_revision: int = Field(ge=1)
++    items: list[AllocationItemInput]
++
++    @model_validator(mode="after")
++    def reject_canonical_duplicates(self) -> AllocationReplaceRequest:
++        canonical_names = [
++            normalize_asset_class_name(item.asset_class_name)[1] for item in self.items
++        ]
++        if len(canonical_names) != len(set(canonical_names)):
++            raise ValueError("asset class names must be unique after normalization")
++        return self
++
++
++class ExpectedRevisionRequest(BaseModel):
++    model_config = ConfigDict(extra="forbid")
++
++    expected_revision: int = Field(ge=1)
++
++
++class CreatePolicyDraftRequest(BaseModel):
++    model_config = ConfigDict(extra="forbid")
++
++    source_version_id: Optional[UUID] = None
++
++
++class PublishPolicyDraftRequest(ExpectedRevisionRequest):
++    confirmation: Literal[True]
++
++
++class AllocationResponse(BaseModel):
++    model_config = ConfigDict(from_attributes=True)
++
++    id: UUID
++    asset_class_name: str
++    target_percentage: str
++    sort_order: int
++
++    @field_validator("target_percentage", mode="before")
++    @classmethod
++    def serialize_decimal(cls, value: Any) -> str:
++        return format(Decimal(str(value)), ".2f")
++
++
++class PolicyResponse(BaseModel):
++    model_config = ConfigDict(from_attributes=True)
++
++    id: UUID
++    household_id: UUID
++    created_at: datetime
++    updated_at: datetime
++
++
++class PolicyDraftResponse(PolicyTextFields):
++    model_config = ConfigDict(from_attributes=True)
++
++    id: UUID
++    policy_id: UUID
++    source_version_id: Optional[UUID]
++    revision: int
++    created_at: datetime
++    updated_at: datetime
++    allocations: list[AllocationResponse]
++
++
++class PolicyCreateResponse(BaseModel):
++    policy: PolicyResponse
++    draft: PolicyDraftResponse
++
++
++class PolicyVersionSummary(BaseModel):
++    model_config = ConfigDict(from_attributes=True)
++
++    id: UUID
++    version_number: int
++    status: str
++    published_at: datetime
++    superseded_at: Optional[datetime]
++
++
++class PolicyVersionResponse(PolicyTextFields):
++    model_config = ConfigDict(from_attributes=True)
++
++    id: UUID
++    policy_id: UUID
++    version_number: int
++    status: str
++    published_at: datetime
++    superseded_at: Optional[datetime]
++    allocations: list[AllocationResponse]
++
++
++class PolicyVersionHistoryResponse(BaseModel):
++    items: list[PolicyVersionSummary]
++    next_before_version_number: Optional[int]
++
++
++class PolicyAuditEventResponse(BaseModel):
++    model_config = ConfigDict(from_attributes=True)
++
++    id: UUID
++    household_id: UUID
++    actor: str
++    action: str
++    entity_type: str
++    entity_id: UUID
++    occurred_at: datetime
++    sequence_number: int
++    metadata: dict[str, Any] = Field(validation_alias="event_metadata")
+diff --git a/apps/api/repositories/policies.py b/apps/api/repositories/policies.py
+new file mode 100644
+index 0000000..748e60a
+--- /dev/null
++++ b/apps/api/repositories/policies.py
+@@ -0,0 +1,194 @@
++from __future__ import annotations
++
++from typing import Any, Optional
++from uuid import UUID
++
++from sqlalchemy import delete, func, select
++from sqlalchemy.orm import Session
++
++from apps.api.models import (
++    AuditEvent,
++    InvestmentPolicy,
++    InvestmentPolicyDraft,
++    InvestmentPolicyDraftAllocation,
++    InvestmentPolicyVersion,
++    InvestmentPolicyVersionAllocation,
++)
++
++AUDIT_ACTOR = "local-owner"
++POLICY_ENTITY_TYPE = "InvestmentPolicy"
++
++
++def get_policy(
++    session: Session, household_id: UUID, *, for_update: bool = False
++) -> Optional[InvestmentPolicy]:
++    statement = select(InvestmentPolicy).where(InvestmentPolicy.household_id == household_id)
++    if for_update:
++        statement = statement.with_for_update()
++    return session.scalar(statement)
++
++
++def add_policy(session: Session, household_id: UUID) -> InvestmentPolicy:
++    policy = InvestmentPolicy(household_id=household_id)
++    session.add(policy)
++    session.flush()
++    return policy
++
++
++def get_draft(
++    session: Session, policy_id: UUID, *, for_update: bool = False
++) -> Optional[InvestmentPolicyDraft]:
++    statement = select(InvestmentPolicyDraft).where(InvestmentPolicyDraft.policy_id == policy_id)
++    if for_update:
++        statement = statement.with_for_update()
++    return session.scalar(statement)
++
++
++def add_draft(
++    session: Session,
++    policy_id: UUID,
++    *,
++    values: Optional[dict[str, Any]] = None,
++    source_version_id: Optional[UUID] = None,
++) -> InvestmentPolicyDraft:
++    draft = InvestmentPolicyDraft(
++        policy_id=policy_id,
++        source_version_id=source_version_id,
++        **(values or {}),
++    )
++    session.add(draft)
++    session.flush()
++    return draft
++
++
++def list_draft_allocations(
++    session: Session, draft_id: UUID
++) -> list[InvestmentPolicyDraftAllocation]:
++    statement = (
++        select(InvestmentPolicyDraftAllocation)
++        .where(InvestmentPolicyDraftAllocation.draft_id == draft_id)
++        .order_by(InvestmentPolicyDraftAllocation.sort_order.asc())
++    )
++    return list(session.scalars(statement))
++
++
++def replace_draft_allocations(
++    session: Session, draft_id: UUID, items: list[dict[str, Any]]
++) -> list[InvestmentPolicyDraftAllocation]:
++    session.execute(
++        delete(InvestmentPolicyDraftAllocation).where(
++            InvestmentPolicyDraftAllocation.draft_id == draft_id
++        )
++    )
++    allocations = [InvestmentPolicyDraftAllocation(draft_id=draft_id, **item) for item in items]
++    session.add_all(allocations)
++    session.flush()
++    return allocations
++
++
++def get_current_published(
++    session: Session, policy_id: UUID
++) -> Optional[InvestmentPolicyVersion]:
++    return session.scalar(
++        select(InvestmentPolicyVersion).where(
++            InvestmentPolicyVersion.policy_id == policy_id,
++            InvestmentPolicyVersion.status == "published",
++        )
++    )
++
++
++def get_version(
++    session: Session, policy_id: UUID, version_number: int
++) -> Optional[InvestmentPolicyVersion]:
++    return session.scalar(
++        select(InvestmentPolicyVersion).where(
++            InvestmentPolicyVersion.policy_id == policy_id,
++            InvestmentPolicyVersion.version_number == version_number,
++        )
++    )
++
++
++def list_versions(
++    session: Session,
++    policy_id: UUID,
++    *,
++    before_version_number: Optional[int],
++    limit: int,
++) -> tuple[list[InvestmentPolicyVersion], Optional[int]]:
++    statement = select(InvestmentPolicyVersion).where(
++        InvestmentPolicyVersion.policy_id == policy_id
++    )
++    if before_version_number is not None:
++        statement = statement.where(
++            InvestmentPolicyVersion.version_number < before_version_number
++        )
++    versions = list(
++        session.scalars(
++            statement.order_by(InvestmentPolicyVersion.version_number.desc()).limit(limit + 1)
++        )
++    )
++    has_more = len(versions) > limit
++    page = versions[:limit]
++    next_cursor = page[-1].version_number if has_more and page else None
++    return page, next_cursor
++
++
++def list_version_allocations(
++    session: Session, version_id: UUID
++) -> list[InvestmentPolicyVersionAllocation]:
++    statement = (
++        select(InvestmentPolicyVersionAllocation)
++        .where(InvestmentPolicyVersionAllocation.version_id == version_id)
++        .order_by(InvestmentPolicyVersionAllocation.sort_order.asc())
++    )
++    return list(session.scalars(statement))
++
++
++def next_version_number(session: Session, policy_id: UUID) -> int:
++    current = session.scalar(
++        select(func.max(InvestmentPolicyVersion.version_number)).where(
++            InvestmentPolicyVersion.policy_id == policy_id
++        )
++    )
++    return (current or 0) + 1
++
++
++def add_policy_audit_event(
++    session: Session,
++    *,
++    household_id: UUID,
++    policy_id: UUID,
++    action: str,
++    metadata: dict[str, Any],
++) -> AuditEvent:
++    event = AuditEvent(
++        household_id=household_id,
++        actor=AUDIT_ACTOR,
++        action=action,
++        entity_type=POLICY_ENTITY_TYPE,
++        entity_id=policy_id,
++        event_metadata=metadata,
++    )
++    session.add(event)
++    session.flush()
++    return event
++
++
++def list_policy_audit_events(
++    session: Session,
++    *,
++    household_id: UUID,
++    policy_id: UUID,
++    limit: int,
++) -> list[AuditEvent]:
++    statement = (
++        select(AuditEvent)
++        .where(
++            AuditEvent.household_id == household_id,
++            AuditEvent.entity_type == POLICY_ENTITY_TYPE,
++            AuditEvent.entity_id == policy_id,
++        )
++        .order_by(AuditEvent.sequence_number.desc())
++        .limit(limit)
++    )
++    return list(reversed(list(session.scalars(statement))))
+diff --git a/apps/api/routers/policies.py b/apps/api/routers/policies.py
+new file mode 100644
+index 0000000..8661f26
+--- /dev/null
++++ b/apps/api/routers/policies.py
+@@ -0,0 +1,241 @@
++from __future__ import annotations
++
++from typing import Annotated, Optional
++
++from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status
++from sqlalchemy.orm import Session
++
++from apps.api.database import get_session
++from apps.api.policy_schemas import (
++    AllocationReplaceRequest,
++    AllocationResponse,
++    CreatePolicyDraftRequest,
++    ExpectedRevisionRequest,
++    PolicyAuditEventResponse,
++    PolicyCreateResponse,
++    PolicyDraftResponse,
++    PolicyDraftUpdate,
++    PolicyResponse,
++    PolicyVersionHistoryResponse,
++    PolicyVersionResponse,
++    PolicyVersionSummary,
++    PublishPolicyDraftRequest,
++)
++from apps.api.services.policies import (
++    DraftAlreadyExistsError,
++    DraftConflictError,
++    DraftNotFoundError,
++    HouseholdRequiredError,
++    NoPolicyChangesError,
++    PolicyAlreadyExistsError,
++    PolicyIncompleteError,
++    PolicyNotFoundError,
++    PolicyVersionNotFoundError,
++    PublishedVersionNotFoundError,
++    create_new_draft,
++    create_policy,
++    discard_draft,
++    publish_draft,
++    read_current_draft,
++    read_current_policy,
++    read_current_published,
++    read_policy_audit_events,
++    read_version,
++    read_version_history,
++    replace_allocations,
++    update_draft_text,
++)
++
++router = APIRouter(prefix="/api/policies", tags=["policies"])
++DatabaseSession = Annotated[Session, Depends(get_session)]
++
++
++def _draft_response(draft, allocations) -> PolicyDraftResponse:
++    values = {
++        name: getattr(draft, name)
++        for name in PolicyDraftResponse.model_fields
++        if name != "allocations"
++    }
++    values["allocations"] = [AllocationResponse.model_validate(item) for item in allocations]
++    return PolicyDraftResponse.model_validate(values)
++
++
++def _version_response(version, allocations) -> PolicyVersionResponse:
++    values = {
++        name: getattr(version, name)
++        for name in PolicyVersionResponse.model_fields
++        if name != "allocations"
++    }
++    values["allocations"] = [AllocationResponse.model_validate(item) for item in allocations]
++    return PolicyVersionResponse.model_validate(values)
++
++
++def _translate(exc: Exception) -> HTTPException:
++    if isinstance(exc, HouseholdRequiredError):
++        return HTTPException(status_code=404, detail="Household profile not found")
++    if isinstance(exc, PolicyNotFoundError):
++        return HTTPException(status_code=404, detail="Investment policy not found")
++    if isinstance(exc, DraftNotFoundError):
++        return HTTPException(status_code=404, detail="Investment policy draft not found")
++    if isinstance(exc, PublishedVersionNotFoundError):
++        return HTTPException(status_code=404, detail="Published policy version not found")
++    if isinstance(exc, PolicyVersionNotFoundError):
++        return HTTPException(status_code=404, detail="Policy version not found")
++    if isinstance(exc, PolicyAlreadyExistsError):
++        return HTTPException(status_code=409, detail="An investment policy already exists")
++    if isinstance(exc, DraftAlreadyExistsError):
++        return HTTPException(status_code=409, detail="An investment policy draft already exists")
++    if isinstance(exc, DraftConflictError):
++        return HTTPException(
++            status_code=409, detail="Investment policy draft changed or unavailable"
++        )
++    if isinstance(exc, NoPolicyChangesError):
++        return HTTPException(status_code=400, detail="No investment policy changes provided")
++    if isinstance(exc, PolicyIncompleteError):
++        return HTTPException(status_code=400, detail="Investment policy draft is incomplete")
++    raise exc
++
++
++@router.post("", response_model=PolicyCreateResponse, status_code=status.HTTP_201_CREATED)
++def create(session: DatabaseSession) -> PolicyCreateResponse:
++    try:
++        policy, draft, allocations = create_policy(session)
++        return PolicyCreateResponse(
++            policy=PolicyResponse.model_validate(policy),
++            draft=_draft_response(draft, allocations),
++        )
++    except Exception as exc:
++        raise _translate(exc) from exc
++
++
++@router.get("/current", response_model=PolicyResponse)
++def get_current(session: DatabaseSession) -> PolicyResponse:
++    try:
++        return PolicyResponse.model_validate(read_current_policy(session))
++    except Exception as exc:
++        raise _translate(exc) from exc
++
++
++@router.get("/current/draft", response_model=PolicyDraftResponse)
++def get_draft(session: DatabaseSession) -> PolicyDraftResponse:
++    try:
++        draft, allocations = read_current_draft(session)
++        return _draft_response(draft, allocations)
++    except Exception as exc:
++        raise _translate(exc) from exc
++
++
++@router.patch("/current/draft", response_model=PolicyDraftResponse)
++def patch_draft(payload: PolicyDraftUpdate, session: DatabaseSession) -> PolicyDraftResponse:
++    try:
++        draft, allocations = update_draft_text(session, payload)
++        return _draft_response(draft, allocations)
++    except Exception as exc:
++        raise _translate(exc) from exc
++
++
++@router.put("/current/draft/allocations", response_model=PolicyDraftResponse)
++def put_allocations(
++    payload: AllocationReplaceRequest, session: DatabaseSession
++) -> PolicyDraftResponse:
++    try:
++        draft, allocations = replace_allocations(session, payload)
++        return _draft_response(draft, allocations)
++    except Exception as exc:
++        raise _translate(exc) from exc
++
++
++@router.post("/current/draft/discard", status_code=status.HTTP_204_NO_CONTENT)
++def discard(payload: ExpectedRevisionRequest, session: DatabaseSession) -> Response:
++    try:
++        discard_draft(session, payload.expected_revision)
++        return Response(status_code=status.HTTP_204_NO_CONTENT)
++    except Exception as exc:
++        raise _translate(exc) from exc
++
++
++@router.post(
++    "/current/draft",
++    response_model=PolicyDraftResponse,
++    status_code=status.HTTP_201_CREATED,
++)
++def new_draft(
++    session: DatabaseSession,
++    payload: CreatePolicyDraftRequest = Body(default_factory=CreatePolicyDraftRequest),
++) -> PolicyDraftResponse:
++    try:
++        draft, allocations = create_new_draft(session, payload)
++        return _draft_response(draft, allocations)
++    except Exception as exc:
++        raise _translate(exc) from exc
++
++
++@router.post(
++    "/current/draft/publish",
++    response_model=PolicyVersionResponse,
++    status_code=status.HTTP_201_CREATED,
++)
++def publish(
++    payload: PublishPolicyDraftRequest, session: DatabaseSession
++) -> PolicyVersionResponse:
++    try:
++        version, allocations = publish_draft(session, payload)
++        return _version_response(version, allocations)
++    except Exception as exc:
++        raise _translate(exc) from exc
++
++
++@router.get("/current/published", response_model=PolicyVersionResponse)
++def get_published(session: DatabaseSession) -> PolicyVersionResponse:
++    try:
++        version, allocations = read_current_published(session)
++        return _version_response(version, allocations)
++    except Exception as exc:
++        raise _translate(exc) from exc
++
++
++@router.get("/current/versions", response_model=PolicyVersionHistoryResponse)
++def get_versions(
++    session: DatabaseSession,
++    before_version_number: Optional[int] = Query(default=None, ge=1),
++    limit: int = Query(default=20, ge=1, le=100),
++) -> PolicyVersionHistoryResponse:
++    try:
++        versions, next_cursor = read_version_history(
++            session,
++            before_version_number=before_version_number,
++            limit=limit,
++        )
++        return PolicyVersionHistoryResponse(
++            items=[PolicyVersionSummary.model_validate(item) for item in versions],
++            next_before_version_number=next_cursor,
++        )
++    except Exception as exc:
++        raise _translate(exc) from exc
++
++
++@router.get("/current/versions/{version_number}", response_model=PolicyVersionResponse)
++def get_version(
++    version_number: int, session: DatabaseSession
++) -> PolicyVersionResponse:
++    if version_number < 1:
++        raise HTTPException(status_code=422, detail="version number must be positive")
++    try:
++        version, allocations = read_version(session, version_number)
++        return _version_response(version, allocations)
++    except Exception as exc:
++        raise _translate(exc) from exc
++
++
++@router.get("/current/audit-events", response_model=list[PolicyAuditEventResponse])
++def get_audit_events(
++    session: DatabaseSession,
++    limit: int = Query(default=50, ge=1, le=100),
++) -> list[PolicyAuditEventResponse]:
++    try:
++        return [
++            PolicyAuditEventResponse.model_validate(event)
++            for event in read_policy_audit_events(session, limit)
++        ]
++    except Exception as exc:
++        raise _translate(exc) from exc
+diff --git a/apps/api/services/policies.py b/apps/api/services/policies.py
+new file mode 100644
+index 0000000..cce3e47
+--- /dev/null
++++ b/apps/api/services/policies.py
+@@ -0,0 +1,472 @@
++from __future__ import annotations
++
++from datetime import datetime, timezone
++from decimal import Decimal
++from typing import Optional
++from uuid import UUID
++
++from sqlalchemy.exc import IntegrityError
++from sqlalchemy.orm import Session
++
++from apps.api.models import (
++    AuditEvent,
++    InvestmentPolicy,
++    InvestmentPolicyDraft,
++    InvestmentPolicyDraftAllocation,
++    InvestmentPolicyVersion,
++    InvestmentPolicyVersionAllocation,
++)
++from apps.api.policy_schemas import (
++    POLICY_TEXT_FIELDS,
++    AllocationReplaceRequest,
++    CreatePolicyDraftRequest,
++    PolicyDraftUpdate,
++    PublishPolicyDraftRequest,
++    normalize_asset_class_name,
++)
++from apps.api.repositories.households import get_current_household
++from apps.api.repositories.policies import (
++    add_draft,
++    add_policy,
++    add_policy_audit_event,
++    get_current_published,
++    get_draft,
++    get_policy,
++    get_version,
++    list_draft_allocations,
++    list_policy_audit_events,
++    list_version_allocations,
++    list_versions,
++    next_version_number,
++    replace_draft_allocations,
++)
++
++
++class PolicyNotFoundError(Exception):
++    pass
++
++
++class HouseholdRequiredError(Exception):
++    pass
++
++
++class PolicyAlreadyExistsError(Exception):
++    pass
++
++
++class DraftNotFoundError(Exception):
++    pass
++
++
++class DraftAlreadyExistsError(Exception):
++    pass
++
++
++class DraftConflictError(Exception):
++    pass
++
++
++class NoPolicyChangesError(Exception):
++    pass
++
++
++class PolicyIncompleteError(Exception):
++    pass
++
++
++class PublishedVersionNotFoundError(Exception):
++    pass
++
++
++class PolicyVersionNotFoundError(Exception):
++    pass
++
++
++def _constraint_name(exc: IntegrityError) -> Optional[str]:
++    diagnostics = getattr(exc.orig, "diag", None)
++    return getattr(diagnostics, "constraint_name", None)
++
++
++def _require_household(session: Session):
++    household = get_current_household(session)
++    if household is None:
++        raise HouseholdRequiredError
++    return household
++
++
++def _require_policy(
++    session: Session, household_id: UUID, *, for_update: bool = False
++) -> InvestmentPolicy:
++    policy = get_policy(session, household_id, for_update=for_update)
++    if policy is None:
++        raise PolicyNotFoundError
++    return policy
++
++
++def _require_draft(
++    session: Session, policy_id: UUID, *, for_update: bool = False
++) -> InvestmentPolicyDraft:
++    draft = get_draft(session, policy_id, for_update=for_update)
++    if draft is None:
++        raise DraftNotFoundError
++    return draft
++
++
++def _require_mutable_draft(
++    session: Session, policy_id: UUID
++) -> InvestmentPolicyDraft:
++    draft = get_draft(session, policy_id, for_update=True)
++    if draft is not None:
++        return draft
++    if get_current_published(session, policy_id) is not None:
++        raise DraftConflictError
++    raise DraftNotFoundError
++
++
++def create_policy(
++    session: Session,
++) -> tuple[InvestmentPolicy, InvestmentPolicyDraft, list[InvestmentPolicyDraftAllocation]]:
++    try:
++        with session.begin():
++            household = _require_household(session)
++            policy = add_policy(session, household.id)
++            draft = add_draft(session, policy.id)
++            add_policy_audit_event(
++                session,
++                household_id=household.id,
++                policy_id=policy.id,
++                action="policy.created",
++                metadata={},
++            )
++            add_policy_audit_event(
++                session,
++                household_id=household.id,
++                policy_id=policy.id,
++                action="policy.draft.created",
++                metadata={"draft_revision": draft.revision},
++            )
++        return policy, draft, []
++    except IntegrityError as exc:
++        session.rollback()
++        if _constraint_name(exc) != "uq_investment_policies_household_id":
++            raise
++        raise PolicyAlreadyExistsError from exc
++
++
++def read_current_policy(session: Session) -> InvestmentPolicy:
++    household = _require_household(session)
++    return _require_policy(session, household.id)
++
++
++def read_current_draft(
++    session: Session,
++) -> tuple[InvestmentPolicyDraft, list[InvestmentPolicyDraftAllocation]]:
++    policy = read_current_policy(session)
++    draft = _require_draft(session, policy.id)
++    return draft, list_draft_allocations(session, draft.id)
++
++
++def update_draft_text(
++    session: Session, payload: PolicyDraftUpdate
++) -> tuple[InvestmentPolicyDraft, list[InvestmentPolicyDraftAllocation]]:
++    submitted = payload.model_dump(exclude={"expected_revision"}, exclude_unset=True)
++    if not submitted:
++        raise NoPolicyChangesError
++
++    with session.begin():
++        household = _require_household(session)
++        policy = _require_policy(session, household.id, for_update=True)
++        draft = _require_mutable_draft(session, policy.id)
++        if draft.revision != payload.expected_revision:
++            raise DraftConflictError
++        changed = sorted(
++            name for name, value in submitted.items() if getattr(draft, name) != value
++        )
++        if not changed:
++            raise NoPolicyChangesError
++        for name in changed:
++            setattr(draft, name, submitted[name])
++        draft.revision += 1
++        now = datetime.now(timezone.utc)
++        draft.updated_at = now
++        policy.updated_at = now
++        session.flush()
++        add_policy_audit_event(
++            session,
++            household_id=household.id,
++            policy_id=policy.id,
++            action="policy.draft.updated",
++            metadata={"changed_fields": changed, "draft_revision": draft.revision},
++        )
++    return draft, list_draft_allocations(session, draft.id)
++
++
++def _allocation_values(payload: AllocationReplaceRequest) -> list[dict[str, object]]:
++    values: list[dict[str, object]] = []
++    for sort_order, item in enumerate(payload.items):
++        display_name, canonical_name = normalize_asset_class_name(item.asset_class_name)
++        values.append(
++            {
++                "asset_class_name": display_name,
++                "normalized_asset_class_name": canonical_name,
++                "target_percentage": Decimal(item.target_percentage),
++                "sort_order": sort_order,
++            }
++        )
++    return values
++
++
++def replace_allocations(
++    session: Session, payload: AllocationReplaceRequest
++) -> tuple[InvestmentPolicyDraft, list[InvestmentPolicyDraftAllocation]]:
++    values = _allocation_values(payload)
++    with session.begin():
++        household = _require_household(session)
++        policy = _require_policy(session, household.id, for_update=True)
++        draft = _require_mutable_draft(session, policy.id)
++        if draft.revision != payload.expected_revision:
++            raise DraftConflictError
++        existing = list_draft_allocations(session, draft.id)
++        existing_signature = [
++            (
++                item.asset_class_name,
++                item.normalized_asset_class_name,
++                item.target_percentage,
++                item.sort_order,
++            )
++            for item in existing
++        ]
++        proposed_signature = [
++            (
++                item["asset_class_name"],
++                item["normalized_asset_class_name"],
++                item["target_percentage"],
++                item["sort_order"],
++            )
++            for item in values
++        ]
++        if existing_signature == proposed_signature:
++            raise NoPolicyChangesError
++        allocations = replace_draft_allocations(session, draft.id, values)
++        draft.revision += 1
++        now = datetime.now(timezone.utc)
++        draft.updated_at = now
++        policy.updated_at = now
++        session.flush()
++        add_policy_audit_event(
++            session,
++            household_id=household.id,
++            policy_id=policy.id,
++            action="policy.draft.updated",
++            metadata={
++                "changed_fields": ["allocations"],
++                "draft_revision": draft.revision,
++                "allocation_item_count": len(allocations),
++            },
++        )
++    return draft, allocations
++
++
++def discard_draft(session: Session, expected_revision: int) -> None:
++    with session.begin():
++        household = _require_household(session)
++        policy = _require_policy(session, household.id, for_update=True)
++        draft = _require_mutable_draft(session, policy.id)
++        if draft.revision != expected_revision:
++            raise DraftConflictError
++        revision = draft.revision
++        session.delete(draft)
++        policy.updated_at = datetime.now(timezone.utc)
++        session.flush()
++        add_policy_audit_event(
++            session,
++            household_id=household.id,
++            policy_id=policy.id,
++            action="policy.draft.discarded",
++            metadata={"draft_revision": revision},
++        )
++
++
++def create_new_draft(
++    session: Session, payload: CreatePolicyDraftRequest
++) -> tuple[InvestmentPolicyDraft, list[InvestmentPolicyDraftAllocation]]:
++    try:
++        with session.begin():
++            household = _require_household(session)
++            policy = _require_policy(session, household.id, for_update=True)
++            if get_draft(session, policy.id) is not None:
++                raise DraftAlreadyExistsError
++
++            source = None
++            source_allocations: list[InvestmentPolicyVersionAllocation] = []
++            values: dict[str, object] = {}
++            if payload.source_version_id is not None:
++                source = get_current_published(session, policy.id)
++                if source is None or source.id != payload.source_version_id:
++                    raise DraftConflictError
++                values = {name: getattr(source, name) for name in POLICY_TEXT_FIELDS}
++                source_allocations = list_version_allocations(session, source.id)
++
++            draft = add_draft(
++                session,
++                policy.id,
++                values=values,
++                source_version_id=source.id if source is not None else None,
++            )
++            allocation_values = [
++                {
++                    "asset_class_name": item.asset_class_name,
++                    "normalized_asset_class_name": item.normalized_asset_class_name,
++                    "target_percentage": item.target_percentage,
++                    "sort_order": item.sort_order,
++                }
++                for item in source_allocations
++            ]
++            allocations = replace_draft_allocations(session, draft.id, allocation_values)
++            policy.updated_at = datetime.now(timezone.utc)
++            metadata = {"draft_revision": draft.revision}
++            if source is not None:
++                metadata["source_version_number"] = source.version_number
++            add_policy_audit_event(
++                session,
++                household_id=household.id,
++                policy_id=policy.id,
++                action="policy.draft.created",
++                metadata=metadata,
++            )
++        return draft, allocations
++    except IntegrityError as exc:
++        session.rollback()
++        if _constraint_name(exc) != "uq_investment_policy_drafts_policy_id":
++            raise
++        raise DraftAlreadyExistsError from exc
++
++
++def publish_draft(
++    session: Session, payload: PublishPolicyDraftRequest
++) -> tuple[InvestmentPolicyVersion, list[InvestmentPolicyVersionAllocation]]:
++    try:
++        with session.begin():
++            household = _require_household(session)
++            policy = _require_policy(session, household.id, for_update=True)
++            draft = get_draft(session, policy.id, for_update=True)
++            if draft is None:
++                raise DraftConflictError
++            if draft.revision != payload.expected_revision:
++                raise DraftConflictError
++            required_fields = ("objectives", "time_horizon", "decision_process")
++            if any(not getattr(draft, name).strip() for name in required_fields):
++                raise PolicyIncompleteError
++
++            draft_allocations = list_draft_allocations(session, draft.id)
++            if not draft_allocations or sum(
++                (item.target_percentage for item in draft_allocations), Decimal("0.00")
++            ) != Decimal("100.00"):
++                raise PolicyIncompleteError
++
++            version_number = next_version_number(session, policy.id)
++            current = get_current_published(session, policy.id)
++            if current is not None:
++                current.status = "superseded"
++                current.superseded_at = datetime.now(timezone.utc)
++                session.flush()
++                add_policy_audit_event(
++                    session,
++                    household_id=household.id,
++                    policy_id=policy.id,
++                    action="policy.superseded",
++                    metadata={"version_number": current.version_number},
++                )
++
++            now = datetime.now(timezone.utc)
++            version = InvestmentPolicyVersion(
++                policy_id=policy.id,
++                version_number=version_number,
++                status="published",
++                published_at=now,
++                **{name: getattr(draft, name) for name in POLICY_TEXT_FIELDS},
++            )
++            session.add(version)
++            session.flush()
++            allocations = [
++                InvestmentPolicyVersionAllocation(
++                    version_id=version.id,
++                    asset_class_name=item.asset_class_name,
++                    normalized_asset_class_name=item.normalized_asset_class_name,
++                    target_percentage=item.target_percentage,
++                    sort_order=item.sort_order,
++                )
++                for item in draft_allocations
++            ]
++            session.add_all(allocations)
++            session.flush()
++            version.sealed_at = now
++            session.flush()
++            session.delete(draft)
++            policy.updated_at = now
++            session.flush()
++            add_policy_audit_event(
++                session,
++                household_id=household.id,
++                policy_id=policy.id,
++                action="policy.published",
++                metadata={
++                    "version_number": version.version_number,
++                    "allocation_item_count": len(allocations),
++                },
++            )
++        return version, allocations
++    except IntegrityError as exc:
++        session.rollback()
++        if _constraint_name(exc) not in {
++            "uq_investment_policy_versions_current_published",
++            "uq_investment_policy_versions_policy_version",
++        }:
++            raise
++        raise DraftConflictError from exc
++
++
++def read_current_published(
++    session: Session,
++) -> tuple[InvestmentPolicyVersion, list[InvestmentPolicyVersionAllocation]]:
++    policy = read_current_policy(session)
++    version = get_current_published(session, policy.id)
++    if version is None:
++        raise PublishedVersionNotFoundError
++    return version, list_version_allocations(session, version.id)
++
++
++def read_version_history(
++    session: Session,
++    *,
++    before_version_number: Optional[int],
++    limit: int,
++) -> tuple[list[InvestmentPolicyVersion], Optional[int]]:
++    policy = read_current_policy(session)
++    return list_versions(
++        session,
++        policy.id,
++        before_version_number=before_version_number,
++        limit=limit,
++    )
++
++
++def read_version(
++    session: Session, version_number: int
++) -> tuple[InvestmentPolicyVersion, list[InvestmentPolicyVersionAllocation]]:
++    policy = read_current_policy(session)
++    version = get_version(session, policy.id, version_number)
++    if version is None:
++        raise PolicyVersionNotFoundError
++    return version, list_version_allocations(session, version.id)
++
++
++def read_policy_audit_events(session: Session, limit: int) -> list[AuditEvent]:
++    household = _require_household(session)
++    policy = _require_policy(session, household.id)
++    return list_policy_audit_events(
++        session,
++        household_id=household.id,
++        policy_id=policy.id,
++        limit=limit,
++    )
+diff --git a/docs/ADR/0004-investment-policy-backend-transactions.md b/docs/ADR/0004-investment-policy-backend-transactions.md
+new file mode 100644
+index 0000000..7a193e3
+--- /dev/null
++++ b/docs/ADR/0004-investment-policy-backend-transactions.md
+@@ -0,0 +1,40 @@
++# ADR 0004: Investment Policy Backend Transactions
++
++- Date: 2026-07-14
++- Status: Accepted for Sprint 002 Slice 2B
++
++## Context
++
++The approved Policy schema requires a local-only backend workflow that preserves
++Draft concurrency, immutable publication, audit redaction, and exact decimal
++contracts without implementing a frontend or investment decision logic.
++
++## Decision
++
++- Use strict Pydantic contracts that forbid undeclared fields, trim Policy text,
++  reject JSON numbers for percentages, and retain decimal strings at the API boundary.
++- Normalize allocation display names with Unicode NFKC and whitespace collapse;
++  use Unicode casefold only for the stored canonical uniqueness key.
++- Keep SQLAlchemy queries in a Policy repository and transaction ownership in a
++  synchronous Policy service.
++- Lock Policy before Draft whenever both rows are involved. Use Draft revision
++  checks for every editable mutation.
++- Replace the complete Draft allocation collection atomically; do not add item
++  CRUD or autosave.
++- Publish by superseding the prior current Version, inserting and sealing one
++  complete immutable snapshot, consuming the Draft, and writing AuditEvents in
++  one transaction.
++- Map only explicit lifecycle/revision conflicts and approved named uniqueness
++  constraints to 409. Propagate unrelated database errors.
++- Allow Audit metadata only for changed field names, Draft revision, source or
++  published/superseded version number, and allocation item count.
++
++## Consequences
++
++- Competing mutations serialize through consistent row-lock order and stale
++  requests fail without partial state.
++- Failed publication is cleaned up exclusively by transaction rollback.
++- Policy APIs remain local-only and non-advisory; they do not create a complete
++  user experience without separately authorized Slice 2C frontend work.
++- Real PostgreSQL tests remain required for locking, triggers, rollback, and
++  concurrency behavior; mocks and SQLite cannot replace them.
+diff --git a/docs/ADR/README.md b/docs/ADR/README.md
+index fe3707f..1ddc34a 100644
+--- a/docs/ADR/README.md
++++ b/docs/ADR/README.md
+@@ -14,3 +14,4 @@ This directory records significant architectural decisions for CompoundOS.
+ - [ADR 0001: Frontend Framework and Package Manager](0001-frontend-framework-and-package-manager.md) — Accepted
+ - [ADR 0002: PostgreSQL Persistence and Transactions](0002-postgresql-persistence-and-transactions.md) — Accepted
+ - [ADR 0003: Immutable Investment Policy Snapshots](0003-immutable-investment-policy-snapshots.md) — Accepted for Sprint 002 Slice 2A
++- [ADR 0004: Investment Policy Backend Transactions](0004-investment-policy-backend-transactions.md) — Accepted for Sprint 002 Slice 2B
+diff --git a/docs/ARCHITECTURE.md b/docs/ARCHITECTURE.md
+index a1017cf..4c32875 100644
+--- a/docs/ARCHITECTURE.md
++++ b/docs/ARCHITECTURE.md
+@@ -45,6 +45,30 @@ user-facing workflow:
+ - Real PostgreSQL tests cover fresh/incremental migration, downgrade/re-upgrade,
+   named constraints, trigger transitions, rollback, and AuditEvent sequencing.
+ 
++## Sprint 002 Slice 2B Architecture
++
++Slice 2B adds the approved local-only backend workflow without changing the
++Slice 2A schema:
++
++- `policy_schemas.py` owns strict request/response contracts, decimal-string
++  validation, and Unicode allocation-name normalization.
++- `repositories/policies.py` contains SQLAlchemy reads, row-locking queries,
++  collection replacement, and non-sensitive AuditEvent construction.
++- `services/policies.py` owns transaction boundaries and maps only approved named
++  database conflicts or explicit lifecycle/revision conflicts.
++- `routers/policies.py` exposes the approved `/api/policies` contracts and neutral
++  400/404/409/422 responses without leaking SQL errors or sensitive values.
++- Mutations that touch both rows lock Policy before Draft. Publication supersedes
++  the prior Version, snapshots the Draft, seals the new Version, consumes the
++  Draft, and writes ordered AuditEvents in one transaction.
++- Target percentages remain decimal strings at the API boundary, `Decimal` in
++  Python, and `NUMERIC(5,2)` in PostgreSQL.
++- Policy audit reads select the newest limited window by descending database
++  sequence and return that window ascending.
++
++No frontend, authentication, recommendation, Guardian, AI, Broker, trading, or
++Decision Journal module is introduced in Slice 2B.
++
+ ## Module Boundaries
+ 
+ - `routers/households.py`: four approved HTTP contracts and status mapping
+@@ -119,5 +143,5 @@ and CI toolchain.
+ - Decide whether to migrate `frontend/` to `apps/web/` in a later approved sprint.
+ - Any later persistence, authentication, policy, journal, Guardian, AI, or broker
+   architecture requires separate approval.
+-- Policy services, APIs, and frontend workflows remain outside Slice 2A and require
+-  separate Slice 2B or Slice 2C authorization.
++- A Policy frontend remains outside Slice 2B and requires separate Slice 2C
++  authorization. Decision Journal work remains outside Slice 2 and unauthorized.
+diff --git a/docs/CHANGELOG.md b/docs/CHANGELOG.md
+index 5cf9017..096cdaf 100644
+--- a/docs/CHANGELOG.md
++++ b/docs/CHANGELOG.md
+@@ -1,5 +1,32 @@
+ # Changelog
+ 
++## [Unreleased] - Sprint 002 Slice 2B Review
++
++### Added
++
++- Strict Pydantic contracts for ten Policy text fields and decimal-string target
++  allocation values
++- Policy, Draft, allocation, publication, immutable Version, history, and audit APIs
++- Unicode NFKC/casefold allocation-name normalization and atomic whole-collection saves
++- Synchronous service transactions with Policy-then-Draft locking, optimistic
++  Draft revisions, named-conflict mapping, and atomic non-sensitive AuditEvents
++- Real PostgreSQL API, rollback, immutable publication, concurrency, and race tests
++- ADR 0004 documenting the Policy backend transaction and API boundary
++
++### Boundaries
++
++- Slice 2B provides a backend API only; no `/policy` frontend or frontend API
++  client is included.
++- The API records user-entered text and target percentages without evaluation,
++  recommendation, scoring, eligibility, Guardian, AI, Broker, or trading behavior.
++- Slice 2C and Slice 3 remain unauthorized and Not Started.
++
++### Status
++
++- Sprint 002 remains In Progress.
++- Slice 2A remains Done.
++- Slice 2B is in Review and is not a production-readiness claim.
++
+ ## [Unreleased] - Sprint 002 Slice 2A Complete
+ 
+ ### Added
+diff --git a/docs/MASTER_PLAN.md b/docs/MASTER_PLAN.md
+index b34f75a..a4c2d66 100644
+--- a/docs/MASTER_PLAN.md
++++ b/docs/MASTER_PLAN.md
+@@ -21,9 +21,9 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+ - Completed work: Implementation Slice 2A — Investment Policy Persistence and
+   Immutability Foundation
+ - Slice 2 Technical Design: Approved
+-- Current implementation authorization: none
++- Current implementation authorization: Slice 2B only
+ - Slice 2A: Done
+-- Slice 2B: Not authorized / Not Started
++- Slice 2B: Investment Policy Backend Workflow and API / Review
+ - Slice 2C: Not authorized / Not Started
+ - Slice 3: Not authorized / Not Started
+ 
+@@ -36,7 +36,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+   implementation slices remain unauthorized.
+ - Sprint 002 Slice 2 technical design is authorized for planning and review only.
+ - Slice 2A implementation was separately authorized on 2026-07-14.
+-- Slice 2B, Slice 2C, and Slice 3 remain unauthorized.
++- Slice 2B implementation was separately authorized on 2026-07-14.
++- Slice 2C and Slice 3 remain unauthorized.
+ 
+ ## Backlog
+ 
+@@ -61,7 +62,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+ 
+ - Sprint 002 remains In Progress.
+ - Slice 2A is Done after independent review and approval for merge.
+-- Slice 2B, Slice 2C, and Slice 3 remain unauthorized and Not Started.
++- Slice 2B backend implementation is complete and awaiting independent review.
++- Slice 2C and Slice 3 remain unauthorized and Not Started.
+ 
+ ## Review
+ 
+@@ -100,6 +102,12 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+ - Pull request #7 approved for merge.
+ - Sprint 002 remains In Progress; Slice 2B, Slice 2C, and Slice 3 are not
+   authorized and Not Started.
++- Sprint 002 Slice 2B backend workflow and API is in Review.
++- Slice 2B contains strict Policy contracts, repository queries, atomic service
++  transactions, locking, immutable publication orchestration, version reads, and
++  Policy-filtered AuditEvent reads.
++- Slice 2B adds no frontend, recommendation, Guardian, AI, Broker, trading,
++  authentication, Slice 2C, or Slice 3 behavior.
+ 
+ ## Done
+ 
+@@ -250,3 +258,10 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+ - 2026-07-14: Pull request #7 is approved for merge; Slice 2A is Done while
+   Sprint 002 remains In Progress.
+ - 2026-07-14: Slice 2B, Slice 2C, and Slice 3 remain unauthorized and Not Started.
++- 2026-07-14: Sprint 002 Slice 2B implementation authorized for the Investment
++  Policy backend workflow and API only.
++- 2026-07-14: Slice 2B implements approved decimal-string allocation contracts,
++  Policy/Draft lifecycle transactions, immutable publication, version history,
++  and Policy-filtered audit reads.
++- 2026-07-14: Slice 2B enters Review; Slice 2C and Slice 3 remain unauthorized and
++  Not Started.
+diff --git a/docs/PRD.md b/docs/PRD.md
+index 9093c9b..67e0d8d 100644
+--- a/docs/PRD.md
++++ b/docs/PRD.md
+@@ -2,10 +2,9 @@
+ 
+ ## Status
+ 
+-Approved user-facing behavior remains limited to Sprint 002 Implementation Slice
+-1. Slice 2A is an authorized persistence and immutability foundation in Review;
+-it adds no Policy API or user-facing behavior. Slice 2B, Slice 2C, and Slice 3 are
+-not authorized.
++Approved behavior includes the Slice 1 Household workflow and the Slice 2B
++local-only Investment Policy backend API. Slice 2A is Done. Slice 2B is in Review;
++Slice 2C and Slice 3 are not authorized.
+ 
+ ## Summary
+ 
+@@ -13,6 +12,33 @@ Slice 1 provides a local, single-user HouseholdProfile record with PostgreSQL
+ persistence and an append-only AuditEvent timeline. It records user-entered
+ context without interpreting it or providing investment advice.
+ 
++Slice 2B records user-authored Investment Policy Draft text and target allocation
++percentages, publishes immutable Version snapshots, and exposes version and audit
++reads. It provides no frontend and never evaluates the recorded information.
++
++## Slice 2B Backend Requirements
++
++- The sole Household owns at most one stable Policy and one editable Draft.
++- Draft text updates and whole-allocation replacement require an expected revision,
++  reject no-ops, and commit one redacted AuditEvent atomically.
++- Allocation percentages are decimal strings with at most two places; Draft totals
++  may be incomplete, while publication mechanically requires exactly `100.00`.
++- Publication requires non-whitespace `objectives`, `time_horizon`, and
++  `decision_process`, without judging their meaning or quality.
++- Publication creates immutable Version snapshots and consumes the Draft in one
++  Policy-then-Draft locked transaction.
++- Reads expose current metadata, Draft, current Published Version, cursor-based
++  newest-first history, immutable Version detail, and a limited Policy audit window.
++- Responses never expose normalized names, sealing internals, or sensitive Audit metadata.
++
++## Slice 2B Explicit Non-Goals
++
++- Policy frontend or frontend API client
++- Advice, recommendations, evaluation, suitability, eligibility, scores, rankings,
++  compliance conclusions, rebalancing calculations, or trades
++- Decision Journal, Guardian, AI, Broker, market, holdings, accounts, authentication,
++  multiple households/users, export, or hard-delete workflows
++
+ ## User Stories
+ 
+ - As the local owner, I can create the sole HouseholdProfile.
+diff --git a/tests/api/test_policy_api.py b/tests/api/test_policy_api.py
+new file mode 100644
+index 0000000..bd35bdc
+--- /dev/null
++++ b/tests/api/test_policy_api.py
+@@ -0,0 +1,432 @@
++from __future__ import annotations
++
++from concurrent.futures import ThreadPoolExecutor
++from uuid import uuid4
++
++import pytest
++from fastapi.testclient import TestClient
++from sqlalchemy import func, select
++from sqlalchemy.orm import Session, sessionmaker
++
++from apps.api.models import (
++    AuditEvent,
++    HouseholdProfile,
++    InvestmentPolicy,
++    InvestmentPolicyDraft,
++    InvestmentPolicyVersion,
++)
++from apps.api.policy_schemas import AllocationReplaceRequest, PublishPolicyDraftRequest
++from apps.api.services import policies as policy_service
++
++pytestmark = pytest.mark.postgres
++
++HOUSEHOLD = {
++    "household_name": "Policy API Household",
++    "base_currency": "USD",
++    "investment_horizon": "",
++    "liquidity_needs": "",
++    "risk_statement": "",
++    "notes": "",
++}
++READY_TEXT = {
++    "objectives": "Preserve the owner's stated long-term objectives.",
++    "time_horizon": "Long term",
++    "decision_process": "Record reasons before making a decision.",
++}
++ALLOCATIONS = [
++    {"asset_class_name": "Global Equity", "target_percentage": "60.00"},
++    {"asset_class_name": "Cash", "target_percentage": "40.00"},
++]
++
++
++def create_household(client: TestClient) -> None:
++    response = client.post("/api/households", json=HOUSEHOLD)
++    assert response.status_code == 201
++
++
++def create_policy(client: TestClient) -> dict:
++    response = client.post("/api/policies")
++    assert response.status_code == 201, response.text
++    return response.json()
++
++
++def prepare_draft(client: TestClient, revision: int = 1) -> dict:
++    text_response = client.patch(
++        "/api/policies/current/draft",
++        json={"expected_revision": revision, **READY_TEXT},
++    )
++    assert text_response.status_code == 200, text_response.text
++    allocation_response = client.put(
++        "/api/policies/current/draft/allocations",
++        json={
++            "expected_revision": text_response.json()["revision"],
++            "items": ALLOCATIONS,
++        },
++    )
++    assert allocation_response.status_code == 200, allocation_response.text
++    return allocation_response.json()
++
++
++def publish(client: TestClient, revision: int) -> dict:
++    response = client.post(
++        "/api/policies/current/draft/publish",
++        json={"expected_revision": revision, "confirmation": True},
++    )
++    assert response.status_code == 201, response.text
++    return response.json()
++
++
++def allocation_content(items: list[dict]) -> list[dict]:
++    return [
++        {
++            "asset_class_name": item["asset_class_name"],
++            "target_percentage": item["target_percentage"],
++            "sort_order": item["sort_order"],
++        }
++        for item in items
++    ]
++
++
++def test_policy_create_read_singleton_and_audit_redaction(api_client: TestClient) -> None:
++    assert api_client.post("/api/policies").status_code == 404
++    create_household(api_client)
++    created = create_policy(api_client)
++    assert created["policy"]["household_id"]
++    assert created["draft"]["revision"] == 1
++    assert created["draft"]["allocations"] == []
++    assert api_client.get("/api/policies/current").status_code == 200
++    assert api_client.post("/api/policies").status_code == 409
++
++    events = api_client.get("/api/policies/current/audit-events").json()
++    assert [event["action"] for event in events] == [
++        "policy.created",
++        "policy.draft.created",
++    ]
++    assert events[0]["metadata"] == {}
++    assert events[1]["metadata"] == {"draft_revision": 1}
++    assert all(event["actor"] == "local-owner" for event in events)
++
++
++def test_draft_text_revision_noop_stale_and_validation(api_client: TestClient) -> None:
++    create_household(api_client)
++    create_policy(api_client)
++    updated = api_client.patch(
++        "/api/policies/current/draft",
++        json={"expected_revision": 1, "objectives": "  Owner objective  "},
++    )
++    assert updated.status_code == 200
++    assert updated.json()["objectives"] == "Owner objective"
++    assert updated.json()["revision"] == 2
++
++    assert api_client.patch(
++        "/api/policies/current/draft",
++        json={"expected_revision": 2, "objectives": "Owner objective"},
++    ).status_code == 400
++    assert api_client.patch(
++        "/api/policies/current/draft",
++        json={"expected_revision": 1, "notes": "stale private value"},
++    ).status_code == 409
++    invalid = api_client.patch(
++        "/api/policies/current/draft",
++        json={"expected_revision": 2, "unknown": "private value"},
++    )
++    assert invalid.status_code == 422
++    assert "private value" not in invalid.text
++
++    events = api_client.get("/api/policies/current/audit-events").json()
++    assert [event["action"] for event in events].count("policy.draft.updated") == 1
++    assert events[-1]["metadata"] == {
++        "changed_fields": ["objectives"],
++        "draft_revision": 2,
++    }
++    assert "Owner objective" not in str(events)
++
++
++def test_allocation_replace_is_atomic_revisioned_and_validated(api_client: TestClient) -> None:
++    create_household(api_client)
++    create_policy(api_client)
++    replaced = api_client.put(
++        "/api/policies/current/draft/allocations",
++        json={"expected_revision": 1, "items": ALLOCATIONS},
++    )
++    assert replaced.status_code == 200
++    body = replaced.json()
++    assert body["revision"] == 2
++    assert [item["target_percentage"] for item in body["allocations"]] == [
++        "60.00",
++        "40.00",
++    ]
++    assert all("normalized_asset_class_name" not in item for item in body["allocations"])
++
++    assert api_client.put(
++        "/api/policies/current/draft/allocations",
++        json={"expected_revision": 2, "items": ALLOCATIONS},
++    ).status_code == 400
++    duplicate = api_client.put(
++        "/api/policies/current/draft/allocations",
++        json={
++            "expected_revision": 2,
++            "items": [
++                {"asset_class_name": "Cash", "target_percentage": "50.00"},
++                {"asset_class_name": " ＣＡＳＨ ", "target_percentage": "50.00"},
++            ],
++        },
++    )
++    assert duplicate.status_code == 422
++    assert api_client.put(
++        "/api/policies/current/draft/allocations",
++        json={
++            "expected_revision": 2,
++            "items": [{"asset_class_name": "Cash", "target_percentage": 100}],
++        },
++    ).status_code == 422
++    assert api_client.get("/api/policies/current/draft").json()["allocations"] == body[
++        "allocations"
++    ]
++
++
++def test_discard_and_blank_draft_lifecycle(api_client: TestClient) -> None:
++    create_household(api_client)
++    create_policy(api_client)
++    assert api_client.post(
++        "/api/policies/current/draft/discard", json={"expected_revision": 2}
++    ).status_code == 409
++    assert api_client.post(
++        "/api/policies/current/draft/discard", json={"expected_revision": 1}
++    ).status_code == 204
++    assert api_client.get("/api/policies/current/draft").status_code == 404
++    recreated = api_client.post("/api/policies/current/draft", json={})
++    assert recreated.status_code == 201
++    assert recreated.json()["source_version_id"] is None
++    assert recreated.json()["allocations"] == []
++    assert api_client.post("/api/policies/current/draft", json={}).status_code == 409
++
++
++def test_publish_requires_complete_record_and_exposes_immutable_reads(
++    api_client: TestClient,
++) -> None:
++    create_household(api_client)
++    create_policy(api_client)
++    assert api_client.post(
++        "/api/policies/current/draft/publish",
++        json={"expected_revision": 1, "confirmation": True},
++    ).status_code == 400
++    draft = prepare_draft(api_client)
++    published = publish(api_client, draft["revision"])
++    assert published["version_number"] == 1
++    assert published["status"] == "published"
++    assert "sealed_at" not in published
++    assert [item["target_percentage"] for item in published["allocations"]] == [
++        "60.00",
++        "40.00",
++    ]
++    assert api_client.get("/api/policies/current/draft").status_code == 404
++    assert api_client.get("/api/policies/current/published").json() == published
++    assert api_client.get("/api/policies/current/versions/1").json() == published
++    assert api_client.get("/api/policies/current/versions/2").status_code == 404
++
++
++def test_replacement_publish_copy_provenance_history_and_audit_order(
++    api_client: TestClient,
++) -> None:
++    create_household(api_client)
++    create_policy(api_client)
++    first = publish(api_client, prepare_draft(api_client)["revision"])
++
++    invalid_source = api_client.post(
++        "/api/policies/current/draft", json={"source_version_id": str(uuid4())}
++    )
++    assert invalid_source.status_code == 409
++    copied = api_client.post(
++        "/api/policies/current/draft", json={"source_version_id": first["id"]}
++    )
++    assert copied.status_code == 201
++    assert copied.json()["source_version_id"] == first["id"]
++    assert allocation_content(copied.json()["allocations"]) == allocation_content(
++        first["allocations"]
++    )
++    assert {item["id"] for item in copied.json()["allocations"]}.isdisjoint(
++        {item["id"] for item in first["allocations"]}
++    )
++    second = publish(api_client, copied.json()["revision"])
++    assert second["version_number"] == 2
++    assert api_client.post(
++        "/api/policies/current/draft", json={"source_version_id": first["id"]}
++    ).status_code == 409
++
++    history = api_client.get("/api/policies/current/versions?limit=1").json()
++    assert [item["version_number"] for item in history["items"]] == [2]
++    assert history["next_before_version_number"] == 2
++    next_page = api_client.get(
++        "/api/policies/current/versions?limit=1&before_version_number=2"
++    ).json()
++    assert [item["version_number"] for item in next_page["items"]] == [1]
++    assert next_page["next_before_version_number"] is None
++
++    events = api_client.get("/api/policies/current/audit-events?limit=2").json()
++    assert [event["action"] for event in events] == [
++        "policy.superseded",
++        "policy.published",
++    ]
++    assert events[0]["sequence_number"] < events[1]["sequence_number"]
++    assert events[0]["metadata"] == {"version_number": 1}
++    assert events[1]["metadata"] == {
++        "allocation_item_count": 2,
++        "version_number": 2,
++    }
++    assert "Global Equity" not in str(events)
++    assert "60.00" not in str(events)
++
++
++def test_audit_failure_rolls_back_policy_create(
++    db_session: Session, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    db_session.add(HouseholdProfile(**HOUSEHOLD))
++    db_session.commit()
++    calls = 0
++    real_add = policy_service.add_policy_audit_event
++
++    def fail_second(*args, **kwargs):
++        nonlocal calls
++        calls += 1
++        if calls == 2:
++            raise RuntimeError("simulated audit failure")
++        return real_add(*args, **kwargs)
++
++    monkeypatch.setattr(policy_service, "add_policy_audit_event", fail_second)
++    with pytest.raises(RuntimeError):
++        policy_service.create_policy(db_session)
++    assert db_session.scalar(select(func.count()).select_from(InvestmentPolicy)) == 0
++    assert db_session.scalar(select(func.count()).select_from(InvestmentPolicyDraft)) == 0
++
++
++def test_publish_failure_rolls_back_snapshot_draft_and_audit(
++    api_client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    create_household(api_client)
++    create_policy(api_client)
++    draft = prepare_draft(api_client)
++    real_add = policy_service.add_policy_audit_event
++
++    def fail_published(*args, **kwargs):
++        if kwargs.get("action") == "policy.published":
++            raise RuntimeError("simulated publish audit failure")
++        return real_add(*args, **kwargs)
++
++    monkeypatch.setattr(policy_service, "add_policy_audit_event", fail_published)
++    with pytest.raises(RuntimeError):
++        policy_service.publish_draft(
++            db_session,
++            PublishPolicyDraftRequest(
++                expected_revision=draft["revision"], confirmation=True
++            ),
++        )
++    assert db_session.scalar(select(func.count()).select_from(InvestmentPolicyVersion)) == 0
++    assert db_session.scalar(select(func.count()).select_from(InvestmentPolicyDraft)) == 1
++    actions = list(db_session.scalars(select(AuditEvent.action)))
++    assert "policy.published" not in actions
++
++
++def test_concurrent_policy_create_has_one_winner(postgres_engine, db_session: Session) -> None:
++    del db_session
++    with Session(postgres_engine) as setup:
++        setup.add(HouseholdProfile(**HOUSEHOLD))
++        setup.commit()
++    factory = sessionmaker(bind=postgres_engine, expire_on_commit=False)
++
++    def attempt() -> str:
++        with factory() as session:
++            try:
++                policy_service.create_policy(session)
++                return "created"
++            except policy_service.PolicyAlreadyExistsError:
++                return "conflict"
++
++    with ThreadPoolExecutor(max_workers=2) as executor:
++        results = list(executor.map(lambda _index: attempt(), range(2)))
++    assert sorted(results) == ["conflict", "created"]
++
++
++def test_concurrent_publish_has_one_winner(api_client: TestClient, postgres_engine) -> None:
++    create_household(api_client)
++    create_policy(api_client)
++    draft = prepare_draft(api_client)
++    factory = sessionmaker(bind=postgres_engine, expire_on_commit=False)
++
++    def attempt() -> str:
++        with factory() as session:
++            try:
++                policy_service.publish_draft(
++                    session,
++                    PublishPolicyDraftRequest(
++                        expected_revision=draft["revision"], confirmation=True
++                    ),
++                )
++                return "published"
++            except policy_service.DraftConflictError:
++                return "conflict"
++
++    with ThreadPoolExecutor(max_workers=2) as executor:
++        results = list(executor.map(lambda _index: attempt(), range(2)))
++    assert sorted(results) == ["conflict", "published"]
++    with Session(postgres_engine) as session:
++        assert session.scalar(select(func.count()).select_from(InvestmentPolicyVersion)) == 1
++
++
++def test_allocation_replace_racing_publish_cannot_create_mixed_snapshot(
++    api_client: TestClient, postgres_engine
++) -> None:
++    create_household(api_client)
++    create_policy(api_client)
++    draft = prepare_draft(api_client)
++    factory = sessionmaker(bind=postgres_engine, expire_on_commit=False)
++
++    def replace_attempt() -> str:
++        with factory() as session:
++            try:
++                policy_service.replace_allocations(
++                    session,
++                    AllocationReplaceRequest(
++                        expected_revision=draft["revision"],
++                        items=[
++                            {
++                                "asset_class_name": "Cash",
++                                "target_percentage": "100.00",
++                            }
++                        ],
++                    ),
++                )
++                return "allocations"
++            except policy_service.DraftConflictError:
++                return "conflict"
++
++    def publish_attempt() -> str:
++        with factory() as session:
++            try:
++                policy_service.publish_draft(
++                    session,
++                    PublishPolicyDraftRequest(
++                        expected_revision=draft["revision"], confirmation=True
++                    ),
++                )
++                return "published"
++            except policy_service.DraftConflictError:
++                return "conflict"
++
++    with ThreadPoolExecutor(max_workers=2) as executor:
++        results = [
++            executor.submit(replace_attempt),
++            executor.submit(publish_attempt),
++        ]
++        outcomes = sorted(future.result() for future in results)
++    assert "conflict" in outcomes
++    assert len(set(outcomes)) == 2
++
++    published = api_client.get("/api/policies/current/published")
++    if published.status_code == 200:
++        assert allocation_content(published.json()["allocations"]) == allocation_content(
++            draft["allocations"]
++        )
++    else:
++        current_draft = api_client.get("/api/policies/current/draft").json()
++        assert current_draft["allocations"][0]["target_percentage"] == "100.00"
+diff --git a/tests/api/test_policy_schemas.py b/tests/api/test_policy_schemas.py
+new file mode 100644
+index 0000000..71ee397
+--- /dev/null
++++ b/tests/api/test_policy_schemas.py
+@@ -0,0 +1,95 @@
++from datetime import datetime, timezone
++from decimal import Decimal
++from uuid import uuid4
++
++import pytest
++from pydantic import ValidationError
++
++from apps.api.policy_schemas import (
++    AllocationItemInput,
++    AllocationReplaceRequest,
++    AllocationResponse,
++    PolicyDraftUpdate,
++    PolicyVersionResponse,
++    normalize_asset_class_name,
++)
++
++
++@pytest.mark.parametrize("value", [12.5, 12, Decimal("12.50"), None])
++def test_allocation_rejects_non_string_percentages(value) -> None:
++    with pytest.raises(ValidationError):
++        AllocationItemInput(asset_class_name="Cash", target_percentage=value)
++
++
++@pytest.mark.parametrize("value", ["1.234", "0.00", "-1.00", "100.01", "NaN"])
++def test_allocation_rejects_invalid_precision_and_range(value: str) -> None:
++    with pytest.raises(ValidationError):
++        AllocationItemInput(asset_class_name="Cash", target_percentage=value)
++
++
++def test_allocation_normalizes_decimal_string_without_binary_float() -> None:
++    item = AllocationItemInput(asset_class_name="Cash", target_percentage="12.5")
++    assert item.target_percentage == "12.50"
++
++
++def test_unicode_name_normalization_is_nfkc_whitespace_collapsed_and_casefolded() -> None:
++    display, canonical = normalize_asset_class_name("  Ｇlobal\u2003EQUITY  ")
++    assert display == "Global EQUITY"
++    assert canonical == "global equity"
++
++
++def test_allocation_collection_rejects_canonical_duplicates() -> None:
++    with pytest.raises(ValidationError):
++        AllocationReplaceRequest(
++            expected_revision=1,
++            items=[
++                {"asset_class_name": "Cash", "target_percentage": "50.00"},
++                {"asset_class_name": "  CASH ", "target_percentage": "50.00"},
++            ],
++        )
++
++
++def test_policy_patch_trims_text_and_rejects_extra_or_null_fields() -> None:
++    payload = PolicyDraftUpdate(expected_revision=1, objectives="  Owner goal  ")
++    assert payload.objectives == "Owner goal"
++    with pytest.raises(ValidationError):
++        PolicyDraftUpdate(expected_revision=1, unknown="private")
++    with pytest.raises(ValidationError):
++        PolicyDraftUpdate(expected_revision=1, objectives=None)
++
++
++def test_response_serializes_percentage_as_decimal_string_and_hides_internal_fields() -> None:
++    allocation = AllocationResponse.model_validate(
++        {
++            "id": uuid4(),
++            "asset_class_name": "Cash",
++            "target_percentage": Decimal("12.50"),
++            "sort_order": 0,
++            "normalized_asset_class_name": "cash",
++        }
++    )
++    version = PolicyVersionResponse.model_validate(
++        {
++            "id": uuid4(),
++            "policy_id": uuid4(),
++            "version_number": 1,
++            "status": "published",
++            "objectives": "Owner goal",
++            "time_horizon": "Long term",
++            "liquidity": "",
++            "diversification": "",
++            "contribution_policy": "",
++            "rebalancing_policy": "",
++            "prohibited_assets": "",
++            "leverage_policy": "",
++            "decision_process": "Owner process",
++            "notes": "",
++            "published_at": datetime.now(timezone.utc),
++            "superseded_at": None,
++            "allocations": [allocation],
++        }
++    )
++    body = version.model_dump(mode="json")
++    assert body["allocations"][0]["target_percentage"] == "12.50"
++    assert "normalized_asset_class_name" not in str(body)
++    assert "sealed_at" not in body

@@ -1,0 +1,15 @@
+docs/sprints/SPRINT_002_SLICE_3_TECHNICAL_DESIGN.md
+docs/MASTER_PLAN.md
+docs/sprints/SPRINT_002_PROPOSAL.md
+docs/sprints/SPRINT_002_OPEN_QUESTIONS.md
+docs/sprints/SPRINT_002_SLICE_2_TECHNICAL_DESIGN.md
+docs/ARCHITECTURE.md
+docs/PRD.md
+docs/INVESTMENT_RULEBOOK.md
+docs/ADR/0002-postgresql-persistence-and-transactions.md
+docs/ADR/0003-immutable-investment-policy-snapshots.md
+docs/ADR/0004-investment-policy-backend-transactions.md
+apps/api/models.py
+apps/api/repositories/policies.py
+apps/api/services/policies.py
+migrations/versions/0002_investment_policy_foundation.py
