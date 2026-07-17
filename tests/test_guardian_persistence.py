@@ -938,12 +938,15 @@ def test_event_type_must_match_confirmed_type_staleness_vs_drift(fresh_db: Engin
         hid = _get_household_id(conn)
         run_id = str(uuid4())
         conn.execute(text("INSERT INTO guardian_evaluation_runs (id, household_id, status, checks_evaluated, events_created, as_of_date) VALUES (:id, :hid, 'completed', 1, 0, '2026-07-17')"), {"id": run_id, "hid": hid})
-        cid = str(uuid4()); _create_check(conn, cid, hid, "TypeMismatch", "drift")
+        cid = str(uuid4())
+        _create_check(conn, cid, hid, "TypeMismatch", "drift")
         conn.execute(text("INSERT INTO guardian_check_drafts (check_id, threshold_value, target_category, target_holding_category) VALUES (:cid, 5.00, 'eq', 'eq')"), {"cid": cid})
         cvid = str(uuid4())
         conn.execute(text("INSERT INTO guardian_check_confirmed (id, check_id, version_number, check_type, threshold_value, target_category, target_holding_category, severity) VALUES (:id, :cid, 1, 'drift', 5.00, 'eq', 'eq', 'info')"), {"id": cvid, "cid": cid})
-        pid = str(uuid4()); sid = str(uuid4())
-        _create_policy_version(conn, pid, hid); _create_portfolio_snapshot(conn, sid, hid)
+        pid = str(uuid4())
+        sid = str(uuid4())
+        _create_policy_version(conn, pid, hid)
+        _create_portfolio_snapshot(conn, sid, hid)
         # event check_type='staleness' but confirmed check_type='drift' → FK violation
         with pytest.raises(IntegrityError):
             conn.execute(text("INSERT INTO guardian_events (id, evaluation_run_id, household_id, check_id, check_version_id, check_type, policy_version_id, portfolio_snapshot_id, staleness_days_actual, as_of_date) VALUES (:id, :r, :hid, :cid, :cvid, 'staleness', :pid, :sid, 10, '2026-07-17')"), {"id": str(uuid4()), "r": run_id, "hid": hid, "cid": cid, "cvid": cvid, "pid": pid, "sid": sid})
@@ -956,12 +959,15 @@ def test_event_type_must_match_confirmed_type_drift_vs_staleness(fresh_db: Engin
         hid = _get_household_id(conn)
         run_id = str(uuid4())
         conn.execute(text("INSERT INTO guardian_evaluation_runs (id, household_id, status, checks_evaluated, events_created, as_of_date) VALUES (:id, :hid, 'completed', 1, 0, '2026-07-17')"), {"id": run_id, "hid": hid})
-        cid = str(uuid4()); _create_check(conn, cid, hid, "TypeMismatch2", "staleness")
+        cid = str(uuid4())
+        _create_check(conn, cid, hid, "TypeMismatch2", "staleness")
         conn.execute(text("INSERT INTO guardian_check_drafts (check_id, threshold_value, staleness_days) VALUES (:cid, 1.00, 30)"), {"cid": cid})
         cvid = str(uuid4())
         conn.execute(text("INSERT INTO guardian_check_confirmed (id, check_id, version_number, check_type, threshold_value, staleness_days, severity) VALUES (:id, :cid, 1, 'staleness', 1.00, 30, 'info')"), {"id": cvid, "cid": cid})
-        pid = str(uuid4()); sid = str(uuid4())
-        _create_policy_version(conn, pid, hid); _create_portfolio_snapshot(conn, sid, hid)
+        pid = str(uuid4())
+        sid = str(uuid4())
+        _create_policy_version(conn, pid, hid)
+        _create_portfolio_snapshot(conn, sid, hid)
         with pytest.raises(IntegrityError):
             conn.execute(text("INSERT INTO guardian_events (id, evaluation_run_id, household_id, check_id, check_version_id, check_type, policy_version_id, portfolio_snapshot_id, drift_pp, as_of_date) VALUES (:id, :r, :hid, :cid, :cvid, 'drift', :pid, :sid, 3.50, '2026-07-17')"), {"id": str(uuid4()), "r": run_id, "hid": hid, "cid": cid, "cvid": cvid, "pid": pid, "sid": sid})
 
@@ -976,15 +982,19 @@ def test_category_exposure_same_inputs_conflict(fresh_db: Engine) -> None:
     with fresh_db.begin() as conn:
         _create_household(conn, str(uuid4()))
         hid = _get_household_id(conn)
-        r1 = str(uuid4()); r2 = str(uuid4())
+        r1 = str(uuid4())
+        r2 = str(uuid4())
         conn.execute(text("INSERT INTO guardian_evaluation_runs (id, household_id, status, checks_evaluated, events_created, as_of_date) VALUES (:id, :hid, 'completed', 1, 1, '2026-07-17')"), {"id": r1, "hid": hid})
         conn.execute(text("INSERT INTO guardian_evaluation_runs (id, household_id, status, checks_evaluated, events_created, as_of_date) VALUES (:id, :hid, 'completed', 1, 1, '2026-07-18')"), {"id": r2, "hid": hid})
-        cid = str(uuid4()); _create_check(conn, cid, hid, "CatExpDedup", "category_exposure")
+        cid = str(uuid4())
+        _create_check(conn, cid, hid, "CatExpDedup", "category_exposure")
         conn.execute(text("INSERT INTO guardian_check_drafts (check_id, threshold_value, target_holding_category) VALUES (:cid, 20.00, 'equity')"), {"cid": cid})
         cvid = str(uuid4())
         conn.execute(text("INSERT INTO guardian_check_confirmed (id, check_id, version_number, check_type, threshold_value, target_holding_category, severity) VALUES (:id, :cid, 1, 'category_exposure', 20.00, 'equity', 'info')"), {"id": cvid, "cid": cid})
-        pid = str(uuid4()); sid = str(uuid4())
-        _create_policy_version(conn, pid, hid); _create_portfolio_snapshot(conn, sid, hid)
+        pid = str(uuid4())
+        sid = str(uuid4())
+        _create_policy_version(conn, pid, hid)
+        _create_portfolio_snapshot(conn, sid, hid)
         conn.execute(text("INSERT INTO guardian_events (id, evaluation_run_id, household_id, check_id, check_version_id, check_type, policy_version_id, portfolio_snapshot_id, exposure_pct, as_of_date) VALUES (:id, :r, :hid, :cid, :cvid, 'category_exposure', :pid, :sid, 25.00, '2026-07-17')"), {"id": str(uuid4()), "r": r1, "hid": hid, "cid": cid, "cvid": cvid, "pid": pid, "sid": sid})
         with pytest.raises(IntegrityError):
             conn.execute(text("INSERT INTO guardian_events (id, evaluation_run_id, household_id, check_id, check_version_id, check_type, policy_version_id, portfolio_snapshot_id, exposure_pct, as_of_date) VALUES (:id, :r, :hid, :cid, :cvid, 'category_exposure', :pid, :sid, 25.00, '2026-07-18')"), {"id": str(uuid4()), "r": r2, "hid": hid, "cid": cid, "cvid": cvid, "pid": pid, "sid": sid})
@@ -998,14 +1008,18 @@ def test_drift_diff_snapshot_succeeds(fresh_db: Engine) -> None:
     with fresh_db.begin() as conn:
         _create_household(conn, str(uuid4()))
         hid = _get_household_id(conn)
-        r1 = str(uuid4()); r2 = str(uuid4())
+        r1 = str(uuid4())
+        r2 = str(uuid4())
         conn.execute(text("INSERT INTO guardian_evaluation_runs (id, household_id, status, checks_evaluated, events_created, as_of_date) VALUES (:id, :hid, 'completed', 1, 1, '2026-07-17')"), {"id": r1, "hid": hid})
         conn.execute(text("INSERT INTO guardian_evaluation_runs (id, household_id, status, checks_evaluated, events_created, as_of_date) VALUES (:id, :hid, 'completed', 1, 1, '2026-07-17')"), {"id": r2, "hid": hid})
-        cid = str(uuid4()); _create_check(conn, cid, hid, "DriftDiffSnap", "drift")
+        cid = str(uuid4())
+        _create_check(conn, cid, hid, "DriftDiffSnap", "drift")
         conn.execute(text("INSERT INTO guardian_check_drafts (check_id, threshold_value, target_category, target_holding_category) VALUES (:cid, 5.00, 'eq', 'eq')"), {"cid": cid})
         cvid = str(uuid4())
         conn.execute(text("INSERT INTO guardian_check_confirmed (id, check_id, version_number, check_type, threshold_value, target_category, target_holding_category, severity) VALUES (:id, :cid, 1, 'drift', 5.00, 'eq', 'eq', 'info')"), {"id": cvid, "cid": cid})
-        pid = str(uuid4()); sid1 = str(uuid4()); sid2 = str(uuid4())
+        pid = str(uuid4())
+        sid1 = str(uuid4())
+        sid2 = str(uuid4())
         _create_policy_version(conn, pid, hid)
         port_id = _create_portfolio_snapshot(conn, sid1, hid)
         _create_portfolio_snapshot(conn, sid2, hid, existing_portfolio_id=port_id, version=2)
@@ -1020,14 +1034,18 @@ def test_category_exposure_diff_snapshot_succeeds(fresh_db: Engine) -> None:
     with fresh_db.begin() as conn:
         _create_household(conn, str(uuid4()))
         hid = _get_household_id(conn)
-        r1 = str(uuid4()); r2 = str(uuid4())
+        r1 = str(uuid4())
+        r2 = str(uuid4())
         conn.execute(text("INSERT INTO guardian_evaluation_runs (id, household_id, status, checks_evaluated, events_created, as_of_date) VALUES (:id, :hid, 'completed', 1, 1, '2026-07-17')"), {"id": r1, "hid": hid})
         conn.execute(text("INSERT INTO guardian_evaluation_runs (id, household_id, status, checks_evaluated, events_created, as_of_date) VALUES (:id, :hid, 'completed', 1, 1, '2026-07-17')"), {"id": r2, "hid": hid})
-        cid = str(uuid4()); _create_check(conn, cid, hid, "CEXPDiffSnap", "category_exposure")
+        cid = str(uuid4())
+        _create_check(conn, cid, hid, "CEXPDiffSnap", "category_exposure")
         conn.execute(text("INSERT INTO guardian_check_drafts (check_id, threshold_value, target_holding_category) VALUES (:cid, 20.00, 'equity')"), {"cid": cid})
         cvid = str(uuid4())
         conn.execute(text("INSERT INTO guardian_check_confirmed (id, check_id, version_number, check_type, threshold_value, target_holding_category, severity) VALUES (:id, :cid, 1, 'category_exposure', 20.00, 'equity', 'info')"), {"id": cvid, "cid": cid})
-        pid = str(uuid4()); sid1 = str(uuid4()); sid2 = str(uuid4())
+        pid = str(uuid4())
+        sid1 = str(uuid4())
+        sid2 = str(uuid4())
         _create_policy_version(conn, pid, hid)
         port_id = _create_portfolio_snapshot(conn, sid1, hid)
         _create_portfolio_snapshot(conn, sid2, hid, existing_portfolio_id=port_id, version=2)
@@ -1054,7 +1072,8 @@ def test_concurrent_duplicate_fingerprint_at_most_one_event(fresh_db: Engine) ->
             text("INSERT INTO guardian_evaluation_runs (id, household_id, status, checks_evaluated, events_created, as_of_date) VALUES (:id, :hid, 'completed', 1, 0, '2026-07-17')"),
             {"id": run_id, "hid": hid},
         )
-        cid = str(uuid4()); _create_check(conn, cid, hid, "Concurrent", "drift")
+        cid = str(uuid4())
+        _create_check(conn, cid, hid, "Concurrent", "drift")
         conn.execute(
             text("INSERT INTO guardian_check_drafts (check_id, threshold_value, target_category, target_holding_category) VALUES (:cid, 5.00, 'eq', 'eq')"),
             {"cid": cid},
@@ -1064,8 +1083,10 @@ def test_concurrent_duplicate_fingerprint_at_most_one_event(fresh_db: Engine) ->
             text("INSERT INTO guardian_check_confirmed (id, check_id, version_number, check_type, threshold_value, target_category, target_holding_category, severity) VALUES (:id, :cid, 1, 'drift', 5.00, 'eq', 'eq', 'info')"),
             {"id": cvid, "cid": cid},
         )
-        pid = str(uuid4()); sid = str(uuid4())
-        _create_policy_version(conn, pid, hid); _create_portfolio_snapshot(conn, sid, hid)
+        pid = str(uuid4())
+        sid = str(uuid4())
+        _create_policy_version(conn, pid, hid)
+        _create_portfolio_snapshot(conn, sid, hid)
 
     db_url = fresh_db.url
     barrier = threading.Barrier(2, timeout=10)
@@ -1095,8 +1116,10 @@ def test_concurrent_duplicate_fingerprint_at_most_one_event(fresh_db: Engine) ->
 
     t1 = threading.Thread(target=insert_event)
     t2 = threading.Thread(target=insert_event)
-    t1.start(); t2.start()
-    t1.join(); t2.join()
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
 
     assert len(results) == 2
     assert "inserted" in results
