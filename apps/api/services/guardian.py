@@ -179,8 +179,8 @@ def create_guardian_check(
     _audit(session, household_id, "guardian.check.created", str(check_id),
            {"name": name.strip(), "check_type": check_type})
 
-    result = _load_check_detail(session, check_id)
-    return result
+    session.commit()
+    return _load_check_detail(session, check_id)
 
 
 def update_guardian_draft(
@@ -250,8 +250,8 @@ def update_guardian_draft(
             "notes": new_notes, "rev": new_rev,
         },
     )
-    result = _load_check_detail(session, check_id)
-    return result
+    session.commit()
+    return _load_check_detail(session, check_id)
 
 
 def confirm_guardian_check(
@@ -317,8 +317,8 @@ def confirm_guardian_check(
     _audit(session, hid, "guardian.check.confirmed", str(cid),
            {"version_number": next_ver, "check_type": ctype})
 
-    result = _load_check_detail(session, cid)
-    return result
+    session.commit()
+    return _load_check_detail(session, cid)
 
 
 def discard_guardian_check(session: Session, check_id: UUID) -> None:
@@ -415,6 +415,7 @@ def _evaluate(
                     0, 0, as_of_date, "No published Policy version exists")
         _audit_eval(session, household_id, run_id, "skipped",
                     "no_published_policy", 0, 0)
+        session.commit()
         return _load_eval_result(session, run_id)
 
     policy_version_id = str(prow[0])
@@ -453,6 +454,7 @@ def _evaluate(
                     0, 0, as_of_date, "No Portfolio Snapshot exists")
         _audit_eval(session, household_id, run_id, "skipped",
                      "no_portfolio_snapshot", 0, 0)
+        session.commit()
         return _load_eval_result(session, run_id)
 
     snapshot_id = str(srow[0])
@@ -480,6 +482,7 @@ def _evaluate(
                     0, 0, as_of_date, "Portfolio Snapshot has zero total value")
         _audit_eval(session, household_id, run_id, "skipped",
                      "zero_total_value", 0, 0)
+        session.commit()
         return _load_eval_result(session, run_id)
 
     category_map = build_category_map(holdings)
