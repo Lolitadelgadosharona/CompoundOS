@@ -22,7 +22,11 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   - Slice 3B: Decision Journal Backend Workflow and API — Done
   - Slice 3C: Decision Journal Frontend — Done
   - Safe Autopilot Foundation — Done
-- Sprint 003: Not Authorized / Not Started
+- Sprint 003: Portfolio Snapshot + Holdings Foundation — Planning / Technical Design
+  - Implementation: Not Authorized / Not Started
+  - Recommended: Candidate A — proposed, not approved
+  - 15 Open Decisions — Owner Decision Required
+- Sprint 004: Not Authorized / Not Started
 
 ## Backlog
 
