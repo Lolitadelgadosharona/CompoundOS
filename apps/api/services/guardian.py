@@ -567,6 +567,7 @@ def _evaluate(
         snapshot_version=snapshot_version,
     )
 
+    session.commit()
     result = _load_eval_result(session, run_id)
     return result
 
