@@ -189,4 +189,103 @@ describe("GuardianClient", () => {
     await waitFor(() => { expect(screen.getByRole("alert")).toBeTruthy(); });
     expect(screen.getByRole("alert").textContent).toContain("unexpected server error");
   });
+
+  // ---- Evaluation skip states ----
+
+  it("shows evaluation skipped for no published policy", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input); void init;
+      if (url.includes("/api/households/current")) return jsonResponse(household);
+      if (url.includes("/api/guardian/evaluate") && !url.includes("evaluations")) {
+        return jsonResponse({ evaluation_run: { ...evalRun, status: "skipped_no_published_policy", skip_reason: "No published Policy version exists" }, events: [] });
+      }
+      if (url.includes("/api/guardian/checks")) return jsonResponse({ checks: [] });
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<GuardianClient />);
+    await screen.findByRole("button", { name: /Evaluate all checks/ });
+    await userEvent.click(screen.getByRole("button", { name: /Evaluate all checks/ }));
+    await waitFor(() => { expect(screen.getByText("No configured thresholds were exceeded.")).toBeTruthy(); });
+  });
+
+  // ---- Confirm review + execute ----
+
+  it("confirms a draft check", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input); void init;
+      if (url.includes("/api/households/current")) return jsonResponse(household);
+      if (url.includes("/api/guardian/checks/c1/draft/confirm") && init?.method === "POST") {
+        return jsonResponse({ identity: { ...checkIdentity, status: "confirmed" }, draft: null, latest_version: latestVersion });
+      }
+      if (url.includes("/api/guardian/checks/c1") && !url.includes("draft")) return jsonResponse(checkDetail);
+      if (url.includes("/api/guardian/checks") && !url.includes("c1")) return jsonResponse({ checks: [checkDetail.identity] });
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<GuardianClient />);
+    await screen.findByRole("button", { name: /Check Equity Drift/ });
+    await userEvent.click(screen.getByRole("button", { name: /Check Equity Drift/ }));
+    await screen.findByText("Draft Threshold");
+    await userEvent.click(screen.getByRole("button", { name: /Confirm/ }));
+    await waitFor(() => { expect(screen.getByText("confirmed")).toBeTruthy(); });
+  });
+
+  // ---- Category exposure editor ----
+
+  it("shows category_exposure fields without policy category", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input); void init;
+      if (url.includes("/api/households/current")) return jsonResponse(household);
+      if (url.includes("/api/guardian/checks")) return jsonResponse({ checks: [] });
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<GuardianClient />);
+    await screen.findByRole("button", { name: /Create Guardian Check/ });
+    await userEvent.click(screen.getByRole("button", { name: /Create Guardian Check/ }));
+    await userEvent.selectOptions(screen.getByLabelText("Type"), "category_exposure");
+    expect(screen.getByLabelText("Portfolio Category")).toBeTruthy();
+    expect(screen.queryByLabelText("Policy Category")).toBeNull();
+    expect(screen.queryByLabelText("Staleness Days")).toBeNull();
+  });
+
+  // ---- Aborted request does not crash UI ----
+
+  it("recovers after an aborted detail request", async () => {
+    let detailCalled = false;
+    const fetchMock = vi.fn(async (input: string | URL | Request, _init?: RequestInit) => {
+      const url = String(input); void _init;
+      if (url.includes("/api/households/current")) return jsonResponse(household);
+      if (url.includes("/api/guardian/checks/c1") && !url.includes("draft")) {
+        detailCalled = true;
+        throw new DOMException("aborted", "AbortError");
+      }
+      if (url.includes("/api/guardian/checks")) return jsonResponse({ checks: [checkAfterDiscard.identity] });
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<GuardianClient />);
+    await screen.findByRole("button", { name: /Check Equity Drift/ });
+    await userEvent.click(screen.getByRole("button", { name: /Check Equity Drift/ }));
+    await waitFor(() => { expect(detailCalled).toBe(true); });
+    // UI should not crash — still showing the region
+    expect(screen.getByRole("region", { name: /Guardian Monitoring/ })).toBeTruthy();
+  });
+
+  // ---- Keyboard / aria-invalid ----
+
+  it("has aria-describedby on threshold input", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input); void init;
+      if (url.includes("/api/households/current")) return jsonResponse(household);
+      if (url.includes("/api/guardian/checks")) return jsonResponse({ checks: [] });
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<GuardianClient />);
+    await screen.findByRole("button", { name: /Create Guardian Check/ });
+    await userEvent.click(screen.getByRole("button", { name: /Create Guardian Check/ }));
+    expect(screen.getByLabelText(/Threshold/).getAttribute("aria-describedby")).toBeTruthy();
+  });
 });
