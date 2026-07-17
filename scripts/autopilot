@@ -52,27 +52,11 @@ cmd_install() {
         exit 1
     fi
     
-    # Generate final plist with resolved paths
-    python3 -c "
-import plistlib, sys
-with open('${plist_src}', 'rb') as f:
-    p = plistlib.load(f)
-# Resolve template variables
-import os
-program = p.get('ProgramArguments', [])
-program = [arg.replace('\${REPO_ROOT}', '${REPO_ROOT}').replace('\${HOME}', '${HOME}') for arg in program]
-p['ProgramArguments'] = program
-# Resolve WorkingDirectory
-if 'WorkingDirectory' in p:
-    p['WorkingDirectory'] = p['WorkingDirectory'].replace('\${REPO_ROOT}', '${REPO_ROOT}')
-# Resolve StandardOutPath and StandardErrorPath
-for key in ('StandardOutPath', 'StandardErrorPath'):
-    if key in p:
-        p[key] = p[key].replace('\${AUTOPILOT_ROOT}', '${AUTOPILOT_ROOT}')
-with open('${plist_dst}', 'wb') as f:
-    plistlib.dump(p, f)
-print(f'Installed: ${plist_dst}')
-"
+    # Generate final plist using the render-launchd script
+    .venv/bin/python "${SCRIPTS_DIR}/autopilot-render-launchd" --output "${plist_dst}" --repo-root "${REPO_ROOT}" 2>&1 || {
+        echo "ERROR: Failed to render launchd plist."
+        exit 1
+    }
     
     # Validate the generated plist
     if ! plutil -lint "${plist_dst}" > /dev/null 2>&1; then
