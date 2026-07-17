@@ -176,7 +176,7 @@ def create_portfolio(
 ) -> tuple[Portfolio, PortfolioDraft, list[PortfolioDraftHolding]]:
     """Create portfolio with initial draft. Idempotent: returns existing if present."""
     try:
-        with session.begin():
+        with session.begin_nested():
             household = _require_household(session)
             try:
                 portfolio = add_portfolio(session, household.id)
@@ -218,7 +218,7 @@ def read_or_create_portfolio(
             return existing, draft, holdings, False
         # Portfolio exists but no draft (e.g., after confirm).
         # Create a new draft (via internal transaction).
-        with session.begin():
+        with session.begin_nested():
             draft = add_draft(session, existing.id)
             add_portfolio_audit_event(
                 session,
@@ -256,7 +256,7 @@ def read_current_state(
 def update_draft(
     session: Session, payload: PortfolioDraftUpdate
 ) -> PortfolioDraftResponse:
-    with session.begin():
+    with session.begin_nested():
         household = _require_household(session)
         portfolio = _require_portfolio(session, household.id, for_update=True)
         draft = _require_draft(session, portfolio.id, for_update=True)
@@ -298,7 +298,7 @@ def update_draft(
 def replace_holdings(
     session: Session, payload: HoldingsReplaceRequest
 ) -> PortfolioDraftResponse:
-    with session.begin():
+    with session.begin_nested():
         household = _require_household(session)
         portfolio = _require_portfolio(session, household.id, for_update=True)
         draft = _require_draft(session, portfolio.id, for_update=True)
@@ -366,7 +366,7 @@ def replace_holdings(
 def confirm_draft(
     session: Session, payload: ConfirmDraftRequest
 ) -> PortfolioSnapshotDetail:
-    with session.begin():
+    with session.begin_nested():
         household = _require_household(session)
         portfolio = _require_portfolio(session, household.id, for_update=True)
         draft = _require_draft(session, portfolio.id, for_update=True)
@@ -437,7 +437,7 @@ def confirm_draft(
 def discard_draft(
     session: Session, payload: DiscardDraftRequest
 ) -> Optional[PortfolioSnapshotDetail]:
-    with session.begin():
+    with session.begin_nested():
         household = _require_household(session)
         portfolio = _require_portfolio(session, household.id, for_update=True)
         draft = _require_draft(session, portfolio.id, for_update=True)
