@@ -118,30 +118,66 @@ def git_fetch_origin():
         log.warning("Git fetch failed: %s", e)
 
 def verify_untracked_files():
-    """Verify that protected untracked files haven't changed."""
+    """Verify protected untracked file integrity using SHA-256, size, and existence.
+    Uses os.lstat to reject symlinks. Matches the worker and standalone verifier."""
     manifest_path = os.path.join(AUTOPILOT_ROOT, 'state', 'untracked_manifest.json')
     if not os.path.isfile(manifest_path):
         return True  # No manifest, nothing to verify
-    
+
     try:
         with open(manifest_path) as f:
             manifest = json.load(f)
     except Exception:
         return True
-    
+
     all_ok = True
     for entry in manifest.get('files', []):
-        fpath = os.path.join(REPO_ROOT, entry['path'])
-        if not os.path.isfile(fpath):
-            log.warning("Untracked file missing: %s", entry['path'])
+        rel_path = entry['path']
+
+        # Security: reject unsafe paths
+        if os.path.isabs(rel_path) or '..' in rel_path.split(os.sep):
+            log.error("Unsafe path in manifest: %s", rel_path)
             all_ok = False
             continue
-        actual_size = os.path.getsize(fpath)
-        if actual_size != entry['size_bytes']:
-            log.warning("Untracked file size changed: %s (expected %d, got %d)",
-                       entry['path'], entry['size_bytes'], actual_size)
+
+        fpath = os.path.join(REPO_ROOT, rel_path)
+
+        # lstat: reject symlinks
+        try:
+            st = os.lstat(fpath)
+        except FileNotFoundError:
+            log.warning("Untracked file missing: %s", rel_path)
             all_ok = False
-    
+            continue
+
+        if not os.path.isfile(fpath):
+            log.warning("Untracked path not a regular file: %s", rel_path)
+            all_ok = False
+            continue
+
+        # Size check
+        if st.st_size != entry['size_bytes']:
+            log.warning("Untracked file size changed: %s (expected %d, got %d)",
+                       rel_path, entry['size_bytes'], st.st_size)
+            all_ok = False
+            continue
+
+        # SHA-256 check
+        import hashlib
+        sha = hashlib.sha256()
+        try:
+            with open(fpath, 'rb') as fh:
+                for chunk in iter(lambda: fh.read(65536), b''):
+                    sha.update(chunk)
+        except Exception as e:
+            log.warning("Cannot read untracked file: %s (%s)", rel_path, e)
+            all_ok = False
+            continue
+
+        if sha.hexdigest() != entry['sha256']:
+            log.warning("Untracked file SHA-256 mismatch: %s", rel_path)
+            all_ok = False
+
     if not all_ok:
         log.error("Protected untracked files have been modified!")
     return all_ok

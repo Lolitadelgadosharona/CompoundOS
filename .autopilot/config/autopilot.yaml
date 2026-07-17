@@ -4,7 +4,7 @@
 autopilot:
   version: "1.0.0"
   name: "CompoundOS Safe Autopilot"
-  repository_root: "/Users/richardwang/Documents/Customized GPT project/CompoundOS"
+  # repository_root is derived at runtime from script location, not hardcoded.
 
 supervisor:
   # launchd label
@@ -32,7 +32,7 @@ workers:
   qoder:
     installed: true
     cli_version: "1.0.47"
-    cli_path: "/Users/richardwang/.local/bin/qodercli"
+    cli_path: "./qodercli (resolved from PATH at runtime, not hardcoded)"
     verified_healthy: false
     health_state: "temporarily-unavailable"
     health_reason: "TLS/authentication failure in headless mode"
