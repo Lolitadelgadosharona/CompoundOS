@@ -169,7 +169,10 @@ portfolio_snapshot_holdings
 
 Cash is treated as a holding with asset_name = "Cash" or equivalent.
 No special cash table or separate treatment. If the user records no
-holdings, the confirmed snapshot reflects that state.
+holdings, the confirmed snapshot reflects that state. Note: a zero-holding
+confirmed snapshot means "no recorded assets" — this is distinct from
+explicitly recording a Cash holding. The UI should make this distinction
+clear.
 
 ### Private Assets (OD-S3-013)
 
@@ -194,9 +197,13 @@ rate, no multi-currency support in MVP.
 | unit_price | NUMERIC(20,4) | Decimal | Decimal string |
 | total_value | NUMERIC(20,2) | Decimal (computed) | Decimal string |
 
-All API values use decimal strings (e.g., "123.45670000") matching the
-Policy allocation pattern. No silent rounding. The API contract enforces
-decimal string format in Pydantic validators.
+total_value is computed as quantity × unit_price then rounded to 2 decimal
+places (cents) using ROUND_HALF_EVEN or Decimal quantization. This is
+intentional currency rounding (to cents), not IEEE 754 floating-point
+error. The Policy "no silent rounding" principle was about avoiding binary
+floating-point artifacts; currency rounding to cents is explicit and
+deterministic. API values remain decimal strings matching the stored
+precision.
 
 ---
 
@@ -248,10 +255,17 @@ a new Snapshot. The previous Snapshot is unchanged. This avoids:
 
 ### Discard
 
-Only allowed when status = draft and no Confirmed snapshot exists.
-Atomic identity deletion — both portfolio_drafts and portfolio rows
-deleted. If a Confirmed snapshot exists, draft can still be discarded
-but the portfolio identity persists (status remains active).
+Two scenarios:
+
+**(a) Discard before any Confirmed snapshot:**
+Atomic identity deletion — both portfolio_drafts and portfolio rows deleted.
+The portfolio_id is removed entirely (matching Decision Draft discard pattern
+from OD-S3-13). Only allowed when no portfolio_snapshots row exists.
+
+**(b) Discard while Confirmed snapshots exist:**
+Delete draft + draft_holdings only. Portfolio identity persists (status stays
+`active`). Latest Confirmed snapshot remains the current state. This is the
+common case: "I started Draft v3, changed my mind, keep what was Confirmed."
 
 ---
 
@@ -283,7 +297,7 @@ error. 404 for missing resources. 422 for validation failures.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| POST | /api/portfolio/draft | Create Draft (idempotent if draft exists) |
+| POST | /api/portfolio/draft | Create Draft. 201 for new, 200 with existing Draft data if already exists (idempotent). 422 for validation failures. |
 | GET | /api/portfolio | Current state: draft + latest snapshot |
 | PATCH | /api/portfolio/draft | Update draft metadata |
 | PUT | /api/portfolio/draft/holdings | Atomic replace holding collection |
@@ -302,8 +316,13 @@ The service returns a DTO built before commit.
 ### Lock Order
 
 When touching multiple rows: Household → Portfolio → Draft.
-When confirming: Portfolio → Draft → insert Snapshot.
-Matches the Policy→Decision→Draft pattern from Slice 3B.
+For Draft mutations (update metadata, replace holdings, confirm, discard):
+lock Portfolio row FOR UPDATE, then lock Draft row FOR UPDATE.
+For Snapshot version numbering: lock Portfolio row,
+SELECT MAX(version_number) FROM portfolio_snapshots (under the same
+locked transaction), compute next version, then insert Snapshot.
+Version numbering is safe because the Portfolio row lock serializes
+all Confirms. This matches the Policy→Decision→Draft pattern from Slice 3B.
 
 ---
 
@@ -326,7 +345,11 @@ must succeed. Downgrade provided for development.
 ### Indices
 
 - `portfolios.household_id` (unique)
-- `portfolio_snapshots(portfolio_id, version_number)` (unique)
+Snapshot version_number starts at 1 for the first Confirmed snapshot and
+increments by 1 per Confirm, computed as MAX(version_number) + 1 under
+Portfolio row lock. There are no gaps (unless a Confirm transaction
+rolls back — in which case the sequence_number gap in audit_events
+records the attempt).
 - `portfolio_draft_holdings(portfolio_id, sort_order)`
 - `portfolio_snapshot_holdings(snapshot_id, sort_order)`
 
@@ -385,10 +408,12 @@ This matches the Policy and Decision audit patterns.
 
 ### Household Timeline
 
-Household audit endpoint (`GET /api/households/audit`) naturally includes
-portfolio events via entity_type filter. Portfolio-filtered endpoint
-provides `GET /api/portfolio/audit` with cursor pagination
-(before_sequence_number + limit, default 50, max 100).
+The existing Household audit endpoint scope must be decided per OD-S3-014:
+either it returns all entity types (Household, Policy, Decision, Portfolio)
+for the household, or portfolio events are only available via
+GET /api/portfolio/audit. This design proposes the inclusive option
+(all types visible) because the Household timeline already includes
+Policy and Decision events per Slice 2C and 3C.
 
 ---
 
@@ -464,25 +489,26 @@ Audit events contain zero financial values. Only structural metadata
 
 ## 13. Test Matrix
 
-| Category | Tests |
-|----------|-------|
-| Schema/API | Pydantic validation, decimal string format, currency, unicode limits |
-| PostgreSQL | Real database: constraints, triggers, deferred consistency |
-| Migration | upgrade head, downgrade, re-upgrade, offline SQL |
-| Decimal precision | NUMERIC(20,8) × NUMERIC(20,4) = NUMERIC(20,2), no rounding |
-| Currency | ISO 4217 validation, single-currency enforcement |
-| Singleton | One portfolio, one draft, double-create rejection |
-| Draft lifecycle | create, update, holding replace, confirm, discard |
-| Immutable Snapshot | UPDATE/DELETE rejected via trigger; direct SQL bypass test |
-| Transactions | Commit together, rollback on failure, session reuse |
-| Concurrency | Double confirm, confirm vs discard, holding replace race |
-| Audit ordering | sequence_number ascending, entity_type filter |
-| Pagination | Cursor stability, window boundaries, has_more |
-| Frontend states | All 18 UI states (Vitest, React Testing Library or similar) |
-| Accessibility | aria-labels, keyboard navigation, screen reader |
-| Localhost | CORS origin check, no public binding |
-| Docker | compose up, browser path validation |
-| Secret scan | No credentials, keys, or tokens in codebase |
+| Category | Slice | Tests |
+|----------|-------|-------|
+| Schema/API | B | Pydantic validation, decimal string format, currency, unicode limits |
+| PostgreSQL | A | Real database: constraints, triggers, deferred consistency, trigger inspection |
+| Migration | A | upgrade head, downgrade, re-upgrade, offline SQL |
+| Bypass regression | A | Cross-table mutations, cross-transaction updates, direct SQL bypass of triggers |
+| Decimal precision | B | NUMERIC(20,8) × NUMERIC(20,4) = NUMERIC(20,2), cents rounding |
+| Currency | B | ISO 4217 validation, single-currency enforcement |
+| Singleton | B | One portfolio, one draft, double-create rejection |
+| Draft lifecycle | B | create, update, holding replace, confirm, discard (both scenarios) |
+| Immutable Snapshot | A | UPDATE/DELETE rejected via trigger; direct SQL bypass test |
+| Transactions | B | Commit together, rollback on failure, session reuse |
+| Concurrency | B | Double confirm, confirm vs discard, holding replace race, version numbering |
+| Audit ordering | B | sequence_number ascending, entity_type filter |
+| Pagination | B | Cursor stability, window boundaries, has_more |
+| Frontend states | C | All 18 UI states (Vitest, React Testing Library or similar) |
+| Accessibility | C | aria-labels, keyboard navigation, screen reader |
+| Localhost | C | CORS origin check, no public binding |
+| Docker | C | compose up, browser path validation |
+| Secret scan | All | No credentials, keys, or tokens in codebase |
 
 ---
 

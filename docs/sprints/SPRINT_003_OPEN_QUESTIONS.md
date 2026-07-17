@@ -18,12 +18,15 @@
 | OD-S3-011 | Confirm required fields | A: At least one holding required | B: Zero holdings allowed (empty portfolio confirmable) | — | B | User may want to record an empty/cash-only state |
 | OD-S3-012 | Cash position | A: Cash as a special holding type | B: Cash as a separate field on Portfolio | C: Cash not tracked in MVP | A | Cash is a holding; consistent data model without special treatment |
 | OD-S3-013 | Private assets | A: Allowed — any asset name accepted (no validation) | B: Allowed — with "private" asset category | C: Not allowed in MVP | A | User defines what they hold; no regulatory classification |
-| OD-S3-014 | Audit metadata boundary | A: changed_fields only (Policy pattern) | B: + snapshot_version_number + holding_count | C: + full holding names | A | Minimal metadata; no financial values in audit |
+| OD-S3-014 | Audit metadata boundary | A: changed_fields only (Policy pattern) | B: + snapshot_version_number + holding_count | — | B | Snapshot version and holding count add meaningful audit context without leaking financial values; consistent with Policy pattern which includes draft_revision |
 | OD-S3-015 | Implementation slices | A: Slice A (DB) → Slice B (API) → Slice C (Frontend) | B: Combined slice — persistence, API, and frontend together | C: Slice A (DB+API) → Slice B (Frontend) | A | Proven decomposition from Sprint 002; each slice independently reviewable |
 
 ## Recommendation Summary
 
-All 15 Owner Decisions recommend Option A or the closest safe default.
+10 of 15 decisions recommend Option A (OD-S3-001, 003, 007, 008, 009, 010, 012, 013, 015 + general direction).
+Four recommend Option B (OD-S3-004 Account labels, 005 holding fields, 006 value semantics, 011 confirm requirements).
+One recommends Option C (OD-S3-002 data model approach — Identity+Draft+Snapshot).
+All err toward minimal financial computation and the "protect capital" principle.
 None introduce market data, broker integration, trading, AI recommendations,
 Guardian thresholds, or authentication. Each decision errs toward simplicity
 and the "protect capital" principle.
