@@ -527,34 +527,40 @@ def _evaluate(
         for r in crows
     ]
 
-    # --- Insert run first (events need FK) ---
+    # --- Evaluate first, collect results (don't insert events yet) ---
+    event_results: list[tuple[CheckInput, EvaluationResult]] = []
+    for chk in checks:
+        if chk.check_type == "drift":
+            r = evaluate_drift(chk, allocations, category_map, total_value)
+        elif chk.check_type == "category_exposure":
+            r = evaluate_category_exposure(chk, category_map, total_value)
+        elif chk.check_type == "staleness":
+            r = evaluate_staleness(chk, snapshot_val_date, as_of_date)
+        else:
+            r = EvaluationResult(exceeded=False)
+        if r.exceeded:
+            event_results.append((chk, r))
+
+    # --- Insert run with final event count ---
     _insert_run(
         session, run_id, household_id, "completed",
-        len(checks), 0, as_of_date, None,
+        len(checks), len(event_results), as_of_date, None,
     )
 
-    # --- Evaluate ---
-    events_created = 0
-    for chk in checks:
-        evt_id = _evaluate_one_check(
-            session, chk, allocations, category_map, total_value,
-            snapshot_val_date, policy_version_id,
-            portfolio_snapshot_id, as_of_date, run_id, household_id,
+    # --- Insert events ---
+    for chk, r in event_results:
+        _insert_event(
+            session, run_id, chk,
+            household_id=household_id,
+            policy_version_id=UUID(policy_version_id),
+            portfolio_snapshot_id=UUID(portfolio_snapshot_id),
+            as_of_date=as_of_date,
+            result=r,
         )
-        if evt_id is not None:
-            events_created += 1
 
-    # --- Update run with actual event count ---
-    session.execute(
-        text(
-            "UPDATE guardian_evaluation_runs SET events_created = :ec"
-            " WHERE id = :rid"
-        ),
-        {"ec": events_created, "rid": run_id},
-    )
     _audit_eval(
         session, household_id, run_id, "completed", None,
-        len(checks), events_created,
+        len(checks), len(event_results),
         policy_version_id=policy_version_id,
         policy_version_number=policy_version_number,
         snapshot_id=portfolio_snapshot_id,
