@@ -260,4 +260,10 @@ def test_migration_contains_only_approved_product_tables(postgres_engine) -> Non
         "decision_drafts",
         "decision_confirmed_snapshots",
         "decision_corrections",
+        "portfolios",
+        "portfolio_drafts",
+        "portfolio_draft_holdings",
+        "portfolio_snapshots",
+        "portfolio_snapshot_holdings",
+        "accounts",
     }
