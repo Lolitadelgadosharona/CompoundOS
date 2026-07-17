@@ -309,9 +309,7 @@ class TestGuardianLifecycle:
         )
         cid = UUID(result["identity"]["id"])
         discard_guardian_check(db_session, cid)
-        with pytest.raises(CheckNotFoundError):
-            create_guardian_check.__wrapped__(db_session, check_id=cid) if hasattr(create_guardian_check, '__wrapped__') else None
-        # Verify check no longer exists
+        # Verify check no longer exists in DB
         from sqlalchemy import text
         row = db_session.execute(
             text("SELECT 1 FROM guardian_checks WHERE id = :cid"), {"cid": cid}

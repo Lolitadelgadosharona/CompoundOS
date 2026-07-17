@@ -527,20 +527,30 @@ def _evaluate(
         for r in crows
     ]
 
+    # --- Insert run first (events need FK) ---
+    _insert_run(
+        session, run_id, household_id, "completed",
+        len(checks), 0, as_of_date, None,
+    )
+
     # --- Evaluate ---
     events_created = 0
     for chk in checks:
         evt_id = _evaluate_one_check(
             session, chk, allocations, category_map, total_value,
             snapshot_val_date, policy_version_id,
-            portfolio_snapshot_id, as_of_date, run_id,
+            portfolio_snapshot_id, as_of_date, run_id, household_id,
         )
         if evt_id is not None:
             events_created += 1
 
-    _insert_run(
-        session, run_id, household_id, "completed",
-        len(checks), events_created, as_of_date, None,
+    # --- Update run with actual event count ---
+    session.execute(
+        text(
+            "UPDATE guardian_evaluation_runs SET events_created = :ec"
+            " WHERE id = :rid"
+        ),
+        {"ec": events_created, "rid": run_id},
     )
     _audit_eval(
         session, household_id, run_id, "completed", None,
@@ -566,6 +576,7 @@ def _evaluate_one_check(
     portfolio_snapshot_id: str,
     as_of_date: date,
     run_id: UUID,
+    household_id: UUID,
 ) -> Optional[UUID]:
     """Evaluate one check. Returns event UUID if exceeded, None otherwise."""
     if chk.check_type == "drift":
@@ -582,6 +593,7 @@ def _evaluate_one_check(
 
     return _insert_event(
         session, run_id, chk,
+        household_id=household_id,
         policy_version_id=UUID(policy_version_id),
         portfolio_snapshot_id=UUID(portfolio_snapshot_id),
         as_of_date=as_of_date,
@@ -678,6 +690,7 @@ def _insert_event(
     run_id: UUID,
     chk: CheckInput,
     *,
+    household_id: UUID,
     policy_version_id: UUID,
     portfolio_snapshot_id: UUID,
     as_of_date: date,
@@ -706,7 +719,7 @@ def _insert_event(
         {
             "id": uuid4(),
             "run_id": run_id,
-            "hid": UUID(chk.check_id),  # placeholder — get from DB
+            "hid": household_id,
             "cid": UUID(chk.check_id),
             "cvid": UUID(chk.check_version_id),
             "ctype": chk.check_type,
