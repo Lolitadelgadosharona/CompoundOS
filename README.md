@@ -1,8 +1,8 @@
 # CompoundOS
 
 CompoundOS is a long-term AI Family Office and Wealth Operating System. Sprint
-002 now includes the local-only Household workflow and the Slice 2C Investment
-Policy frontend workflow on top of the validated backend foundation.
+003 adds Portfolio Snapshot and Holdings on top of the Household, Investment
+Policy, and Decision Journal foundation.
 
 > **Local-only security boundary:** This Sprint 002 build is for local,
 > single-user development only. It has no authentication and must not be exposed
@@ -18,7 +18,11 @@ Policy frontend workflow on top of the validated backend foundation.
 - Use `/policy` to create and edit the sole Policy Draft, explicitly save text and
   allocations, review and publish immutable Versions, inspect history and audit
   events, and start a blank or current-Published-derived Draft.
-- Keep Decision Journal, AI, Guardian, broker, trading, recommendation, and
+- Record user-maintained Portfolio holdings through `/portfolio` — create a
+  Draft, add/edit/reorder holdings with decimal precision, confirm immutable
+  Snapshots, browse version history, and inspect the audit timeline.
+- Use `/decisions` to create and manage Decision Journal entries.
+- Keep Guardian, broker, trading, recommendation, market data, and
   authentication behavior outside the current implementation.
 
 ## Repository Layout
