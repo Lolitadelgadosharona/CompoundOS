@@ -276,9 +276,12 @@ def test_replace_holdings_idempotency(api_client: TestClient) -> None:
 def test_replace_holdings_empty_collection(api_client: TestClient) -> None:
     create_household(api_client)
     create_portfolio(api_client)
-    body = replace_holdings_call(api_client, expected_revision=1, items=[])
-    assert body["holdings"] == []
-    assert body["expected_revision"] == 2
+    # Empty→empty is a no-op — service returns 400 NoChangesError
+    r = api_client.put(
+        "/api/portfolio/draft/holdings",
+        json={"expected_revision": 1, "items": []},
+    )
+    assert r.status_code == 400, r.text
 
 
 def test_replace_holdings_rejects_invalid_decimal(api_client: TestClient) -> None:

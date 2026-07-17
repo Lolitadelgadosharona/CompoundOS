@@ -19,6 +19,12 @@ from apps.api.database import SessionLocal
 pytestmark = pytest.mark.postgres
 
 BASE = "/api/portfolio/draft"
+HOUSEHOLD_PAYLOAD = {"name": "CompoundOS Test Household", "base_currency": "USD"}
+
+
+def _create_household(client: TestClient) -> None:
+    r = client.post("/api/households", json=HOUSEHOLD_PAYLOAD)
+    assert r.status_code in (200, 201), r.text
 
 
 # ---------------------------------------------------------------------------
@@ -31,7 +37,7 @@ def test_create_returns_201_then_idempotent_returns_200(
 ) -> None:
     """First POST returns 201; second POST (with draft) returns 200."""
     # Setup: create household
-    api_client.post("/api/households", json={"name": "GateTest", "base_currency": "USD"})
+    _create_household(api_client)
 
     # First create
     r1 = api_client.post(BASE, json={})
@@ -49,7 +55,7 @@ def test_create_returns_201_then_idempotent_returns_200(
 
 def test_confirm_then_new_draft(api_client: TestClient) -> None:
     """After Confirm, a new POST /draft creates a fresh draft (200)."""
-    api_client.post("/api/households", json={"name": "GateTest", "base_currency": "USD"})
+    _create_household(api_client)
     api_client.post(BASE, json={})
 
     # Add holding + confirm
@@ -78,7 +84,7 @@ def test_independent_session_verifies_persistence(
     api_client: TestClient,
 ) -> None:
     """After HTTP 201, close request session; a new Session sees all data."""
-    api_client.post("/api/households", json={"name": "GateTest", "base_currency": "USD"})
+    _create_household(api_client)
 
     r = api_client.post(BASE, json={})
     assert r.status_code == 201, r.text
@@ -141,7 +147,7 @@ def test_concurrent_create_one_winner_barrier(
     api_client: TestClient,
 ) -> None:
     """Two threads race to create a portfolio; only one succeeds with 201."""
-    api_client.post("/api/households", json={"name": "GateTest", "base_currency": "USD"})
+    _create_household(api_client)
 
     barrier = threading.Barrier(2)
     results: list[tuple[int, str | None]] = []
@@ -175,7 +181,7 @@ def test_confirm_failure_rolls_back_everything(
     api_client: TestClient,
 ) -> None:
     """A mid-transaction failure rolls back snapshot, draft, and audit."""
-    api_client.post("/api/households", json={"name": "GateTest", "base_currency": "USD"})
+    _create_household(api_client)
     api_client.post(BASE, json={})
 
     p = api_client.get("/api/portfolio").json()
@@ -206,7 +212,7 @@ def test_unrelated_integrity_error_propagated(
     api_client: TestClient,
 ) -> None:
     """Unrelated IntegrityError not caught as idempotent — must be 500."""
-    api_client.post("/api/households", json={"name": "GateTest", "base_currency": "USD"})
+    _create_household(api_client)
     api_client.post(BASE, json={})
 
     # Try to insert duplicate via a raw approach — the API should reject
@@ -225,7 +231,7 @@ def test_session_reuse_after_rollback(
     api_client: TestClient,
 ) -> None:
     """After a failed mutation, the next request works fine."""
-    api_client.post("/api/households", json={"name": "GateTest", "base_currency": "USD"})
+    _create_household(api_client)
     api_client.post(BASE, json={})
 
     # Trigger a conflict
@@ -263,7 +269,7 @@ def test_zero_holdings_confirm_succeeds(
     api_client: TestClient,
 ) -> None:
     """Zero holdings Confirm must succeed per OD-S3-011."""
-    api_client.post("/api/households", json={"name": "GateTest", "base_currency": "USD"})
+    _create_household(api_client)
     api_client.post(BASE, json={})
 
     p = api_client.get("/api/portfolio").json()
@@ -444,7 +450,7 @@ def test_decimal_round_half_even_exact_cents(
     api_client: TestClient,
 ) -> None:
     """Values with exactly 2 decimal places remain unchanged."""
-    api_client.post("/api/households", json={"name": "GateTest", "base_currency": "USD"})
+    _create_household(api_client)
     api_client.post(BASE, json={})
 
     p = api_client.get("/api/portfolio").json()
@@ -466,7 +472,7 @@ def test_decimal_round_half_even_tie_even(
     api_client: TestClient,
 ) -> None:
     """Tie at .xx5 with even preceding digit → round down (ROUND_HALF_EVEN)."""
-    api_client.post("/api/households", json={"name": "GateTest", "base_currency": "USD"})
+    _create_household(api_client)
     api_client.post(BASE, json={})
 
     p = api_client.get("/api/portfolio").json()
@@ -488,7 +494,7 @@ def test_decimal_round_half_even_tie_odd(
     api_client: TestClient,
 ) -> None:
     """Tie at .xx5 with odd preceding digit → round up (ROUND_HALF_EVEN)."""
-    api_client.post("/api/households", json={"name": "GateTest", "base_currency": "USD"})
+    _create_household(api_client)
     api_client.post(BASE, json={})
 
     p = api_client.get("/api/portfolio").json()
@@ -510,7 +516,7 @@ def test_decimal_round_half_even_negative(
     api_client: TestClient,
 ) -> None:
     """ROUND_HALF_EVEN works for non-negative values only (quantity > 0)."""
-    api_client.post("/api/households", json={"name": "GateTest", "base_currency": "USD"})
+    _create_household(api_client)
     api_client.post(BASE, json={})
 
     p = api_client.get("/api/portfolio").json()
@@ -532,7 +538,7 @@ def test_decimal_api_db_consistency(
     api_client: TestClient,
 ) -> None:
     """After Confirm, snapshot total_value matches API response exactly."""
-    api_client.post("/api/households", json={"name": "GateTest", "base_currency": "USD"})
+    _create_household(api_client)
     api_client.post(BASE, json={})
 
     p = api_client.get("/api/portfolio").json()
@@ -573,7 +579,7 @@ def test_decimal_api_db_consistency(
 
 def test_decimal_overflow_rejected(api_client: TestClient) -> None:
     """Values exceeding NUMERIC(20,8) precision are rejected."""
-    api_client.post("/api/households", json={"name": "GateTest", "base_currency": "USD"})
+    _create_household(api_client)
     api_client.post(BASE, json={})
 
     p = api_client.get("/api/portfolio").json()
@@ -597,7 +603,7 @@ def test_cash_unit_price_error_returns_422_safe(
     api_client: TestClient,
 ) -> None:
     """Cash with wrong price returns 422 with fixed message, no SQL leak."""
-    api_client.post("/api/households", json={"name": "GateTest", "base_currency": "USD"})
+    _create_household(api_client)
     api_client.post(BASE, json={})
 
     p = api_client.get("/api/portfolio").json()
@@ -626,7 +632,7 @@ def test_generic_error_returns_500_no_detail(
     # There's no direct way to trigger an unknown exception through the API
     # without mocking. We verify the error translator doesn't have a generic
     # ValueError handler — any unhandled error propagates to FastAPI's 500.
-    api_client.post("/api/households", json={"name": "GateTest", "base_currency": "USD"})
+    _create_household(api_client)
     api_client.post(BASE, json={})
 
     # Trigger a scenario that should fail cleanly
