@@ -48,7 +48,7 @@ def _hid(session: Session) -> UUID:
             text(
                 "INSERT INTO household_profiles"
                 " (id, singleton_key, household_name, base_currency, investment_horizon,"
-                "  liquidity_needs, tax_considerations, legal_structure)"
+                " liquidity_needs, tax_considerations, legal_structure)"
                 " VALUES (:id, TRUE, 'Test Household', 'USD', 'Long term', '', '', '')"
             ),
             {"id": hid},
