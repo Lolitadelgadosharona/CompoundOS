@@ -1,32 +1,47 @@
-# Sprint 003 Open Questions — Owner Decision Required
+# Sprint 003 Open Questions — Owner Decisions Resolved
 
 - Date: 2026-07-17
-- Status: All Open — Owner Decision Required
+- Status: All 15 Resolved by Project Owner
+- Resolved by: Project Owner on 2026-07-17
 
-| ID | Question | Option A | Option B | Option C | Recommendation | Rationale |
-|----|----------|----------|----------|----------|----------------|-----------|
-| OD-S3-001 | Candidate direction | A: Manual Portfolio Snapshot + Holdings Foundation | B: Guardian Data Readiness | C: Notification Infrastructure | A | Directly serves "protect capital"; foundation for B and C |
-| OD-S3-002 | Data model approach | A: Current mutable holdings (simple, no history) | B: Immutable portfolio snapshots only (always append) | C: Stable identity + Draft + Immutable Snapshot (Policy/Decision pattern) | C | Auditable history, user corrections, proven immutability pattern |
-| OD-S3-003 | Portfolio cardinality | A: One Portfolio per Household (single, stable) | B: Multiple named Portfolios | — | A | Single-household scope; simpler than multi-portfolio naming |
-| OD-S3-004 | Account entity in MVP | A: No Account entity — holdings are flat under Portfolio | B: Optional user-named Account labels — local logical container | C: Full Account entity with institution metadata | B | User labeling without financial identifiers; defers institution |
-| OD-S3-005 | Holding minimum fields | A: asset_name + quantity + total_value only | B: + unit_price + valuation_date + asset_category | C: + account + currency + notes | B | Minimal but meaningful; price enables policy comparison |
-| OD-S3-006 | Quantity and value semantics | A: User enters only total_value (no quantity/price) | B: User enters quantity + unit_price; total = quantity × price (authoritative) | C: User may enter any subset; system computes what's missing | B | Single authoritative computation prevents inconsistency |
-| OD-S3-007 | Manual price allowed | A: Yes — user enters unit price (no market data) | B: No — only total_value, no price decomposition | — | A | Price decomposition needed for future policy allocation comparison |
-| OD-S3-008 | Currency and precision | A: Single currency (Household base_currency), no conversion | B: Multi-currency with user-entered exchange rate | C: Multi-currency, no conversion | A | Single currency avoids conversion risk; defers multi-currency |
-| OD-S3-009 | Snapshot lifecycle | A: Draft → Confirmed only (simpler) | B: Draft → Confirmed → Superseded (Policy pattern) | C: Draft → Confirmed → Archived → Corrected (Decision pattern) | A | Portfolio snapshots are discrete points-in-time; supersession adds complexity without clear benefit for a manual process |
-| OD-S3-010 | Correction model | A: New Snapshot (always append) | B: Correction record amending prior Snapshot | — | A | Simpler audit trail; each snapshot is self-contained |
-| OD-S3-011 | Confirm required fields | A: At least one holding required | B: Zero holdings allowed (empty portfolio confirmable) | — | B | User may want to record an empty/cash-only state |
-| OD-S3-012 | Cash position | A: Cash as a special holding type | B: Cash as a separate field on Portfolio | C: Cash not tracked in MVP | A | Cash is a holding; consistent data model without special treatment |
-| OD-S3-013 | Private assets | A: Allowed — any asset name accepted (no validation) | B: Allowed — with "private" asset category | C: Not allowed in MVP | A | User defines what they hold; no regulatory classification |
-| OD-S3-014 | Audit metadata boundary | A: changed_fields only (Policy pattern) | B: + snapshot_version_number + holding_count | — | B | Snapshot version and holding count add meaningful audit context without leaking financial values; consistent with Policy pattern which includes draft_revision |
-| OD-S3-015 | Implementation slices | A: Slice A (DB) → Slice B (API) → Slice C (Frontend) | B: Combined slice — persistence, API, and frontend together | C: Slice A (DB+API) → Slice B (Frontend) | A | Proven decomposition from Sprint 002; each slice independently reviewable |
+## Owner Decisions
 
-## Recommendation Summary
+| ID | Question | Selected | Rejected |
+|----|----------|----------|----------|
+| OD-S3-001 | Candidate direction | A: Manual Portfolio Snapshot + Holdings Foundation | B, C |
+| OD-S3-002 | Data model approach | C: Stable identity + Draft + Immutable Snapshot | A, B |
+| OD-S3-003 | Portfolio cardinality | A: One Portfolio per Household | B |
+| OD-S3-004 | Account entity in MVP | B: Optional user-named Account labels — local logical container, no identifiers | A, C |
+| OD-S3-005 | Holding minimum fields | B: asset_name + quantity + unit_price + valuation_date + asset_category | A |
+| OD-S3-006 | Quantity and value semantics | B: quantity × unit_price = authoritative total (computed, not stored) | A, C |
+| OD-S3-007 | Manual price allowed | A: Yes — user-entered unit price with valuation_date and manual source | B |
+| OD-S3-008 | Currency and precision | A: Single currency = HouseholdProfile.base_currency, no conversion | B, C |
+| OD-S3-009 | Snapshot lifecycle | A: Draft → Confirmed only, no supersession/archive | B, C |
+| OD-S3-010 | Correction model | A: New Snapshot — always append, each self-contained | B |
+| OD-S3-011 | Confirm required fields | B: Zero holdings allowed — must display explicit "0 holdings" warning before Confirm | A |
+| OD-S3-012 | Cash position | A: Cash as holding — quantity represents cash amount, unit_price fixed at 1.00 | B, C |
+| OD-S3-013 | Private assets | A: Allowed — user manual valuation only, no market price implied | B, C |
+| OD-S3-014 | Audit metadata boundary | B: changed_fields + snapshot_version_number + holding_count | A |
+| OD-S3-015 | Implementation slices | A: Slice A (DB) → Slice B (API) → Slice C (Frontend) | B, C |
 
-10 of 15 decisions recommend Option A (OD-S3-001, 003, 007, 008, 009, 010, 012, 013, 015 + general direction).
-Four recommend Option B (OD-S3-004 Account labels, 005 holding fields, 006 value semantics, 011 confirm requirements).
-One recommends Option C (OD-S3-002 data model approach — Identity+Draft+Snapshot).
-All err toward minimal financial computation and the "protect capital" principle.
-None introduce market data, broker integration, trading, AI recommendations,
-Guardian thresholds, or authentication. Each decision errs toward simplicity
-and the "protect capital" principle.
+## Additional Owner Constraints
+
+1. **Decimal-string API**: All monetary amounts and quantities transmitted as decimal strings through the API boundary. Backend uses Python Decimal. Database uses PostgreSQL NUMERIC. No IEEE 754 floating-point in any authoritative computation. No silent rounding — all rounding is explicit, deterministic, and documented.
+
+2. **Single currency**: Portfolio currency must equal HouseholdProfile.base_currency. No conversion, no exchange rate, no multi-currency support.
+
+3. **Manual price**: Unit price is a user-entered valuation statement. Each holding records valuation_date and source=manual. No automatic price, no market data, no broker feed.
+
+4. **Cash**: Cash is a holding with asset_name recording the description, quantity representing the cash amount, and unit_price fixed at 1.00. Total value equals quantity. This makes cash holdings directly comparable to other assets without special treatment.
+
+5. **Private assets**: Allowed. User manual valuation only. No market price implied, no exchange validation, no ticker lookup. Category "private" is a user label only.
+
+6. **Account**: Local label only. No account numbers, routing numbers, institution identifiers, credentials, or API keys. Purely a user-organizational container.
+
+7. **Empty snapshot**: Zero holdings allowed for Confirm. Before Confirm, the UI must display an explicit "0 holdings — no assets recorded" warning. This is distinct from holding Cash.
+
+8. **Immutable Confirmed Snapshot**: Once Confirmed, snapshots are immutable. Corrections create a new Snapshot — always append, never modify. Previous snapshots are permanently preserved for audit.
+
+## Resolution Summary
+
+All 15 Owner Decisions resolved. Eight additional constraints provide precision on decimal handling, currency, manual price semantics, cash modeling, private assets, accounts, empty snapshots, and immutability. No decision introduces market data, broker integration, trading, AI recommendations, Guardian thresholds, or authentication.

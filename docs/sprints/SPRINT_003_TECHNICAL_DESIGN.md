@@ -1,7 +1,8 @@
 # Sprint 003 Technical Design: Portfolio Snapshot + Holdings Foundation
 
 - Date: 2026-07-17
-- Status: Proposed Technical Design — Implementation Not Authorized
+- Status: Approved Technical Design — Implementation Not Authorized
+- Owner Decisions: All 15 Resolved by Project Owner on 2026-07-17
 - Baseline: main @ 3c5edec
 - Branch: planning/sprint-003-portfolio-foundation
 

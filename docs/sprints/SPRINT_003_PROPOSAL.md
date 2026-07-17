@@ -1,7 +1,7 @@
 # Sprint 003 Proposal: Portfolio Snapshot + Holdings Foundation
 
 - Date: 2026-07-17
-- Status: Proposed — Not Authorized for Implementation
+- Status: Approved — Owner Decisions Resolved. Implementation Not Authorized.
 - Baseline: main @ 3c5edec
 
 ## Context
