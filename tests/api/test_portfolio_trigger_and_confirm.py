@@ -15,7 +15,6 @@ from sqlalchemy import text
 from apps.api import models
 from apps.api.database import SessionLocal
 
-
 _INSERT_HOUSEHOLD = (
     "INSERT INTO household_profiles"
     " (id, household_name, base_currency, investment_horizon,"
