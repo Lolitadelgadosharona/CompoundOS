@@ -11,19 +11,12 @@ import {
   evaluateOne,
   getAudit,
   getCheck,
-  getEvaluationRun,
   GuardianApiError,
   GuardianAuditEvent,
   GuardianCheckDetail,
   GuardianCheckType,
-  GuardianConfirmedVersion,
-  GuardianDraft,
-  GuardianEvaluationRun,
-  GuardianEvent,
-  GuardianNetworkError,
   hasCurrentHousehold,
   listChecks,
-  listEvaluationRuns,
   updateDraft,
 } from "../../lib/guardian-api";
 
@@ -49,7 +42,6 @@ export default function GuardianClient() {
   const [form, setForm] = useState<CreateForm>(emptyForm());
 
   // ---- Evaluation state ----
-  const [runs, setRuns] = useState<GuardianEvaluationRun[]>([]);
   const [evalResult, setEvalResult] = useState<string | null>(null);
   const [auditEvents, setAuditEvents] = useState<GuardianAuditEvent[]>([]);
 
@@ -82,7 +74,7 @@ export default function GuardianClient() {
     try {
       const detail = await getCheck(id, signal);
       setChecks(prev => prev.map(c => c.identity.id === id ? detail : c));
-    } catch (_) { /* auxiliary — don't block UI */ }
+    } catch { /* auxiliary — don't block UI */ }
   }, []);
 
   useEffect(() => {
@@ -162,8 +154,6 @@ export default function GuardianClient() {
           ? `Thresholds exceeded on ${result.evaluation_run.events_created} check(s).`
           : "No configured thresholds were exceeded."
       );
-      const updated = await listEvaluationRuns();
-      setRuns(updated.runs);
     } catch (e) {
       setError(e instanceof GuardianApiError ? e.message : "Evaluation failed.");
     }
@@ -174,7 +164,7 @@ export default function GuardianClient() {
     try {
       const data = await getAudit(50, abortRef.current!.signal);
       setAuditEvents(data.audit_events);
-    } catch (_) {}
+    } catch {}
   }
 
   // ---- Render ----
@@ -245,7 +235,8 @@ function emptyForm(): CreateForm {
   return { name: "", check_type: "drift", threshold_value: "", severity: "info", target_category: "", target_holding_category: "", staleness_days: null, notes: "", eval_date: todayISO() };
 }
 
-function formFromDraft(d: GuardianCheckDetail) {
+function formFromDraft(_d: GuardianCheckDetail) {
+  void _d;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (null as any); // placeholder — set via state
 }

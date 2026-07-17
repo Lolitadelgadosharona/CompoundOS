@@ -81,7 +81,7 @@ describe("Guardian API client", () => {
   });
 
   it("confirm uses /draft/confirm path", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockImplementation((_: string, init?: RequestInit) => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((_: string) => {
       const url = _ as string;
       expect(url).toContain("/api/guardian/checks/c1/draft/confirm");
       return Promise.resolve(jsonResponse(checkResponse));
