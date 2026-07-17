@@ -24,7 +24,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
@@ -952,6 +952,10 @@ class GuardianCheck(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
+    confirmed_versions: Mapped[list[GuardianCheckConfirmed]] = relationship(
+        "GuardianCheckConfirmed", back_populates="check",
+    )
+
 
 class GuardianCheckDraft(Base):
     __tablename__ = "guardian_check_drafts"
@@ -1039,6 +1043,11 @@ class GuardianCheckConfirmed(Base):
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     confirmed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    # Back-reference for service layer (e.g., cc.check.household_id)
+    check: Mapped[GuardianCheck] = relationship(
+        "GuardianCheck", back_populates="confirmed_versions",
     )
 
 
