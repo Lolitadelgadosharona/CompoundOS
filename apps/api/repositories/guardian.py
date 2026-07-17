@@ -340,10 +340,9 @@ def list_evaluation_runs(
 # ---------------------------------------------------------------------------
 
 
-def insert_event(
+def insert_event_on_conflict_do_nothing(
     session: Session,
     *,
-    event_id: UUID,
     evaluation_run_id: UUID,
     household_id: UUID,
     check_id: UUID,
@@ -356,30 +355,46 @@ def insert_event(
     exposure_pct: Optional[Decimal] = None,
     staleness_days_actual: Optional[int] = None,
     as_of_date: date,
-) -> Optional[GuardianEvent]:
-    """Insert event with ON CONFLICT DO NOTHING. Returns event or None."""
-    try:
-        event = GuardianEvent(
-            id=event_id,
-            evaluation_run_id=evaluation_run_id,
-            household_id=household_id,
-            check_id=check_id,
-            check_version_id=check_version_id,
-            check_type=check_type,
-            policy_version_id=policy_version_id,
-            portfolio_snapshot_id=portfolio_snapshot_id,
-            exceeded=exceeded,
-            drift_pp=drift_pp,
-            exposure_pct=exposure_pct,
-            staleness_days_actual=staleness_days_actual,
-            as_of_date=as_of_date,
-        )
-        session.add(event)
-        session.flush()
-        return event
-    except IntegrityError:
-        session.rollback()
-        return None
+) -> Optional[UUID]:
+    """INSERT ... ON CONFLICT DO NOTHING RETURNING id. Returns event_id or None."""
+    # Build column list dynamically based on check_type
+    if check_type in ("drift", "category_exposure"):
+        conflict_cols = "check_version_id, policy_version_id, portfolio_snapshot_id"
+        conflict_where = f"check_type IN ('drift', 'category_exposure')"
+    else:
+        conflict_cols = "check_version_id, portfolio_snapshot_id, as_of_date"
+        conflict_where = "check_type = 'staleness'"
+
+    result = session.execute(
+        text(
+            "INSERT INTO guardian_events"
+            " (id, evaluation_run_id, household_id, check_id, check_version_id,"
+            "  check_type, policy_version_id, portfolio_snapshot_id,"
+            "  exceeded, drift_pp, exposure_pct, staleness_days_actual, as_of_date)"
+            " VALUES (:id, :run_id, :hid, :cid, :cvid,"
+            "  :ctype, :pvid, :sid,"
+            "  :exceeded, :drift_pp, :exposure_pct, :staleness_days, :as_of)"
+            f" ON CONFLICT ({conflict_cols}) WHERE {conflict_where} DO NOTHING"
+            " RETURNING id"
+        ),
+        {
+            "id": uuid4(),
+            "run_id": evaluation_run_id,
+            "hid": household_id,
+            "cid": check_id,
+            "cvid": check_version_id,
+            "ctype": check_type,
+            "pvid": policy_version_id,
+            "sid": portfolio_snapshot_id,
+            "exceeded": exceeded,
+            "drift_pp": str(drift_pp) if drift_pp is not None else None,
+            "exposure_pct": str(exposure_pct) if exposure_pct is not None else None,
+            "staleness_days": staleness_days_actual,
+            "as_of": as_of_date,
+        },
+    )
+    row = result.fetchone()
+    return row[0] if row else None
 
 
 def get_events_by_run(

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Optional
+from decimal import Decimal as _Decimal
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status
@@ -14,9 +15,7 @@ from apps.api.guardian_schemas import (
     GuardianCheckDetailResponse,
     GuardianCheckDiscard,
     GuardianCheckDraftCreate,
-    GuardianCheckDraftResponse,
     GuardianCheckDraftUpdate,
-    GuardianCheckIdentityResponse,
     GuardianCheckListResponse,
     GuardianEvaluateRequest,
     GuardianEvaluateResponse,
@@ -26,26 +25,25 @@ from apps.api.guardian_schemas import (
     GuardianEventResponse,
 )
 from apps.api.services.guardian import (
-    CheckAlreadyConfirmedError,
     CheckNotFoundError,
-    CheckNotDraftError,
     ConfirmRequiresDraftError,
     DraftConflictError,
     DraftNotFoundError,
     HouseholdRequiredError,
     InvalidCheckTypeFieldsError,
     NameConflictError,
-    ParentDeletedError,
     confirm_guardian_check,
     create_guardian_check,
     discard_guardian_check,
     evaluate_all_checks,
     evaluate_one_check,
-    get_check_detail,
     update_guardian_draft,
 )
 from apps.api.repositories.guardian import (
     get_current_household_id,
+    get_check,
+    get_draft,
+    get_latest_confirmed_version,
     list_checks,
     list_evaluation_runs,
     list_events,
@@ -57,11 +55,16 @@ router = APIRouter(prefix="/api/guardian", tags=["guardian"])
 DatabaseSession = Annotated[Session, Depends(get_session)]
 
 
-def _get_household(session: Session) -> UUID:
-    hid = get_current_household_id(session)
-    if hid is None:
+def _hid(session: Session) -> str:
+    row = session.execute(
+        text("SELECT id FROM household_profiles LIMIT 1")
+    ).fetchone()
+    if row is None:
         raise HTTPException(status_code=404, detail="Household profile not found")
-    return hid
+    return str(row[0])
+
+
+from sqlalchemy import text
 
 
 def _translate(exc: Exception) -> HTTPException:
@@ -71,11 +74,8 @@ def _translate(exc: Exception) -> HTTPException:
         DraftNotFoundError: (404, "No draft for this check"),
         DraftConflictError: (409, "Draft revision conflict"),
         NameConflictError: (409, "A check with this name already exists"),
-        CheckNotDraftError: (409, "Check is not in draft status"),
-        CheckAlreadyConfirmedError: (409, "Version already confirmed"),
-        ConfirmRequiresDraftError: (422, "Cannot confirm without a draft"),
         InvalidCheckTypeFieldsError: (422, "Invalid check type field combination"),
-        ParentDeletedError: (422, "Parent check deleted"),
+        ConfirmRequiresDraftError: (422, "Cannot confirm without a draft"),
     }
     for cls, (code, msg) in mapping.items():
         if isinstance(exc, cls):
@@ -83,8 +83,16 @@ def _translate(exc: Exception) -> HTTPException:
     return HTTPException(status_code=500, detail="Internal server error")
 
 
+def _build_detail(identity: dict, draft: dict, latest: dict) -> dict:
+    return {
+        "identity": identity,
+        "draft": draft,
+        "latest_version": latest,
+    }
+
+
 # ---------------------------------------------------------------------------
-# Check lifecycle — create, list, read, update, confirm, discard
+# Check lifecycle
 # ---------------------------------------------------------------------------
 
 
@@ -92,103 +100,96 @@ def _translate(exc: Exception) -> HTTPException:
 def api_create_check(
     body: GuardianCheckDraftCreate,
     session: DatabaseSession,
-) -> GuardianCheckDetailResponse:
-    from decimal import Decimal as _D
-    hid = _get_household(session)
+):
+    hid = _hid(session)
     try:
-        check, draft = create_guardian_check(
+        result = create_guardian_check(
             session,
-            household_id=hid,
+            household_id=UUID(hid),
             name=body.name,
             check_type=body.check_type,
-            threshold_value=_D(body.threshold_value),
+            threshold_value=_Decimal(body.threshold_value),
             severity=body.severity,
             target_category=body.target_category,
             target_holding_category=body.target_holding_category,
             staleness_days=body.staleness_days,
             notes=body.notes,
         )
-        session.commit()
     except Exception as exc:
-        session.rollback()
         raise _translate(exc)
-    return _build_detail(check, draft, None)
+    return _build_detail(**result)
 
 
-@router.get("/checks", response_model=GuardianCheckListResponse)
+@router.get("/checks")
 def api_list_checks(session: DatabaseSession) -> GuardianCheckListResponse:
-    hid = _get_household(session)
-    checks = list_checks(session, hid)
+    hid = _hid(session)
+    checks = list_checks(session, UUID(hid))
     return GuardianCheckListResponse(
-        checks=[GuardianCheckIdentityResponse.model_validate(c) for c in checks]
+        checks=[{"id": c.id, "household_id": c.household_id,
+                 "name": c.name, "canonical_name": c.canonical_name,
+                 "check_type": c.check_type, "status": c.status,
+                 "created_at": c.created_at, "updated_at": c.updated_at}
+                for c in checks]
     )
 
 
-@router.get("/checks/{check_id}", response_model=GuardianCheckDetailResponse)
-def api_get_check(check_id: UUID, session: DatabaseSession) -> GuardianCheckDetailResponse:
-    _get_household(session)
+@router.get("/checks/{check_id}")
+def api_get_check(check_id: UUID, session: DatabaseSession):
+    _hid(session)
+    from apps.api.services.guardian import get_check_detail
     try:
-        detail = get_check_detail(session, check_id)
+        result = get_check_detail(session, check_id)
     except Exception as exc:
         raise _translate(exc)
-    return _build_detail(
-        detail["identity"], detail["draft"], detail["latest_version"],
-    )
+    return _build_detail(**result)
 
 
-@router.patch("/checks/{check_id}/draft", response_model=GuardianCheckDetailResponse)
+def get_check_detail(session: Session, check_id: UUID) -> dict:
+    from apps.api.services.guardian import _load_check_detail
+    return _load_check_detail(session, check_id)
+
+
+@router.patch("/checks/{check_id}/draft")
 def api_update_draft(
     check_id: UUID,
     body: GuardianCheckDraftUpdate,
     session: DatabaseSession,
-) -> GuardianCheckDetailResponse:
-    _get_household(session)
-    from decimal import Decimal as _D
+):
+    _hid(session)
     try:
-        draft = update_guardian_draft(
+        result = update_guardian_draft(
             session,
             check_id=check_id,
             expected_revision=body.expected_revision,
-            threshold_value=_D(body.threshold_value) if body.threshold_value else None,
+            threshold_value=_Decimal(body.threshold_value) if body.threshold_value else None,
             target_category=body.target_category,
             target_holding_category=body.target_holding_category,
             staleness_days=body.staleness_days,
             severity=body.severity,
             notes=body.notes,
         )
-        session.commit()
     except Exception as exc:
-        session.rollback()
         raise _translate(exc)
-    detail = get_check_detail(session, check_id)
-    return _build_detail(
-        detail["identity"], detail["draft"], detail["latest_version"],
-    )
+    return _build_detail(**result)
 
 
-@router.post("/checks/{check_id}/confirm", response_model=GuardianCheckDetailResponse)
+@router.post("/checks/{check_id}/confirm")
 def api_confirm_check(
     check_id: UUID,
     body: GuardianCheckConfirm,
     session: DatabaseSession,
-) -> GuardianCheckDetailResponse:
-    _get_household(session)
+):
+    _hid(session)
     if not body.confirmation:
         raise HTTPException(status_code=422, detail="confirmation must be true")
     try:
-        confirm_guardian_check(
-            session,
-            check_id=check_id,
+        result = confirm_guardian_check(
+            session, check_id=check_id,
             expected_revision=body.expected_revision,
         )
-        session.commit()
     except Exception as exc:
-        session.rollback()
         raise _translate(exc)
-    detail = get_check_detail(session, check_id)
-    return _build_detail(
-        detail["identity"], detail["draft"], detail["latest_version"],
-    )
+    return _build_detail(**result)
 
 
 @router.post("/checks/{check_id}/discard", status_code=status.HTTP_204_NO_CONTENT)
@@ -197,14 +198,12 @@ def api_discard_check(
     body: GuardianCheckDiscard,
     session: DatabaseSession,
 ):
-    _get_household(session)
+    _hid(session)
     if not body.confirmation:
         raise HTTPException(status_code=422, detail="confirmation must be true")
     try:
         discard_guardian_check(session, check_id)
-        session.commit()
     except Exception as exc:
-        session.rollback()
         raise _translate(exc)
     return Response(status_code=204)
 
@@ -214,110 +213,130 @@ def api_discard_check(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/evaluate", response_model=GuardianEvaluateResponse)
+@router.post("/evaluate")
 def api_evaluate_all(
     body: GuardianEvaluateRequest,
     session: DatabaseSession,
-) -> GuardianEvaluateResponse:
-    hid = _get_household(session)
+):
+    hid = _hid(session)
     if not body.confirmation:
         raise HTTPException(status_code=422, detail="confirmation must be true")
     try:
-        run = evaluate_all_checks(session, household_id=hid, as_of_date=body.as_of_date)
-        session.commit()
+        result = evaluate_all_checks(
+            session, household_id=UUID(hid),
+            as_of_date=body.as_of_date,
+        )
     except Exception as exc:
-        session.rollback()
         raise _translate(exc)
-    events = get_events_by_run(session, run.id)
-    return GuardianEvaluateResponse(
-        evaluation_run=GuardianEvaluationRunResponse.model_validate(run),
-        events=[GuardianEventResponse.model_validate(e) for e in events],
-    )
+    return result
 
 
-@router.post("/checks/{check_id}/evaluate", response_model=GuardianEvaluateResponse)
+@router.post("/checks/{check_id}/evaluate")
 def api_evaluate_one(
     check_id: UUID,
     body: GuardianEvaluateRequest,
     session: DatabaseSession,
-) -> GuardianEvaluateResponse:
-    hid = _get_household(session)
+):
+    hid = _hid(session)
     if not body.confirmation:
         raise HTTPException(status_code=422, detail="confirmation must be true")
     try:
-        run = evaluate_one_check(
-            session, check_id=check_id, household_id=hid,
+        result = evaluate_one_check(
+            session, check_id=check_id,
+            household_id=UUID(hid),
             as_of_date=body.as_of_date,
         )
-        session.commit()
     except Exception as exc:
-        session.rollback()
         raise _translate(exc)
-    events = get_events_by_run(session, run.id)
-    return GuardianEvaluateResponse(
-        evaluation_run=GuardianEvaluationRunResponse.model_validate(run),
-        events=[GuardianEventResponse.model_validate(e) for e in events],
-    )
+    return result
 
 
 # ---------------------------------------------------------------------------
-# Read-only history
+# History
 # ---------------------------------------------------------------------------
 
 
-@router.get("/runs", response_model=GuardianEvaluationRunListResponse)
+@router.get("/runs")
 def api_list_runs(
     session: DatabaseSession,
     limit: int = Query(50, ge=1, le=200),
-) -> GuardianEvaluationRunListResponse:
-    hid = _get_household(session)
-    runs = list_evaluation_runs(session, hid, limit=limit)
-    return GuardianEvaluationRunListResponse(
-        runs=[GuardianEvaluationRunResponse.model_validate(r) for r in runs]
-    )
+):
+    hid = _hid(session)
+    runs = list_evaluation_runs(session, UUID(hid), limit=limit)
+    return {
+        "runs": [
+            {
+                "id": str(r.id), "household_id": str(r.household_id),
+                "status": r.status, "skip_reason": r.skip_reason,
+                "checks_evaluated": r.checks_evaluated,
+                "events_created": r.events_created,
+                "as_of_date": str(r.as_of_date) if r.as_of_date else None,
+                "created_at": r.created_at,
+            }
+            for r in runs
+        ]
+    }
 
 
-@router.get("/runs/{run_id}", response_model=GuardianEvaluateResponse)
-def api_get_run(
-    run_id: UUID,
-    session: DatabaseSession,
-) -> GuardianEvaluateResponse:
-    _get_household(session)
+@router.get("/runs/{run_id}")
+def api_get_run(run_id: UUID, session: DatabaseSession):
+    _hid(session)
     run = get_evaluation_run(session, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Evaluation run not found")
     events = get_events_by_run(session, run_id)
-    return GuardianEvaluateResponse(
-        evaluation_run=GuardianEvaluationRunResponse.model_validate(run),
-        events=[GuardianEventResponse.model_validate(e) for e in events],
-    )
+    return {
+        "evaluation_run": {
+            "id": str(run.id), "household_id": str(run.household_id),
+            "status": run.status, "skip_reason": run.skip_reason,
+            "checks_evaluated": run.checks_evaluated,
+            "events_created": run.events_created,
+            "as_of_date": str(run.as_of_date) if run.as_of_date else None,
+            "created_at": run.created_at,
+        },
+        "events": [
+            {
+                "id": str(e.id), "evaluation_run_id": str(e.evaluation_run_id),
+                "check_id": str(e.check_id),
+                "check_version_id": str(e.check_version_id),
+                "check_type": e.check_type,
+                "policy_version_id": str(e.policy_version_id),
+                "portfolio_snapshot_id": str(e.portfolio_snapshot_id),
+                "exceeded": e.exceeded,
+                "drift_pp": str(e.drift_pp) if e.drift_pp else None,
+                "exposure_pct": str(e.exposure_pct) if e.exposure_pct else None,
+                "staleness_days_actual": e.staleness_days_actual,
+                "as_of_date": str(e.as_of_date) if e.as_of_date else None,
+                "detected_at": e.detected_at,
+            }
+            for e in events
+        ],
+    }
 
 
-@router.get("/events", response_model=GuardianEventListResponse)
+@router.get("/events")
 def api_list_events(
     session: DatabaseSession,
     limit: int = Query(50, ge=1, le=200),
-) -> GuardianEventListResponse:
-    hid = _get_household(session)
-    events = list_events(session, hid, limit=limit)
-    return GuardianEventListResponse(
-        events=[GuardianEventResponse.model_validate(e) for e in events]
-    )
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-from apps.api.guardian_schemas import GuardianCheckConfirmedResponse
-
-
-def _build_detail(
-    identity, draft, latest
-) -> GuardianCheckDetailResponse:
-    return GuardianCheckDetailResponse(
-        identity=GuardianCheckIdentityResponse.model_validate(identity),
-        draft=GuardianCheckDraftResponse.model_validate(draft) if draft else None,
-        latest_version=GuardianCheckConfirmedResponse.model_validate(latest) if latest else None,
-    )
+):
+    hid = _hid(session)
+    events = list_events(session, UUID(hid), limit=limit)
+    return {
+        "events": [
+            {
+                "id": str(e.id), "evaluation_run_id": str(e.evaluation_run_id),
+                "check_id": str(e.check_id),
+                "check_version_id": str(e.check_version_id),
+                "check_type": e.check_type,
+                "policy_version_id": str(e.policy_version_id),
+                "portfolio_snapshot_id": str(e.portfolio_snapshot_id),
+                "exceeded": e.exceeded,
+                "drift_pp": str(e.drift_pp) if e.drift_pp else None,
+                "exposure_pct": str(e.exposure_pct) if e.exposure_pct else None,
+                "staleness_days_actual": e.staleness_days_actual,
+                "as_of_date": str(e.as_of_date) if e.as_of_date else None,
+                "detected_at": e.detected_at,
+            }
+            for e in events
+        ]
+    }
