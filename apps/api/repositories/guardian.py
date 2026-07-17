@@ -17,6 +17,7 @@ from apps.api.models import (
     GuardianCheckDraft,
     GuardianEvaluationRun,
     GuardianEvent,
+    InvestmentPolicy,
     InvestmentPolicyVersion,
     PortfolioSnapshot,
     PortfolioSnapshotHolding,
@@ -231,18 +232,18 @@ def get_current_published_policy(
 ) -> Optional[InvestmentPolicyVersion]:
     return (
         session.query(InvestmentPolicyVersion)
-        .join(GuardianCheck)  # placeholder join — actual join via policy relationship
+        .join(
+            InvestmentPolicy,
+            text(
+                "investment_policy_versions.policy_id = investment_policies.id"
+                " AND investment_policies.household_id = :hid"
+            ),
+        )
+        .params(hid=household_id)
         .filter(
             InvestmentPolicyVersion.status == "published",
             InvestmentPolicyVersion.superseded_at.is_(None),
         )
-        .filter(
-            text(
-                "investment_policy_versions.policy_id IN ("
-                "SELECT id FROM investment_policies WHERE household_id = :hid)"
-            )
-        )
-        .params(hid=household_id)
         .first()
     )
 
