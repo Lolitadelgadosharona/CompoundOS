@@ -199,7 +199,7 @@ def test_confirm_failure_rolls_back_everything(
     # Draft must still exist, no snapshot created
     p2 = api_client.get("/api/portfolio").json()
     assert p2["draft"] is not None
-    assert p2["snapshot"] is None
+    assert p2["latest_snapshot"] is None
 
 
 def test_unrelated_integrity_error_propagated(

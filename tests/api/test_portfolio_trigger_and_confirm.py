@@ -312,9 +312,9 @@ def test_two_confirms_correct_status_and_versioning(
     assert state["portfolio"]["status"] == "draft"
 
     # v1 still current
-    assert state["snapshot"] is not None
-    assert state["snapshot"]["version_number"] == 1
-    assert state["snapshot"]["status"] == "current"
+    assert state["latest_snapshot"] is not None
+    assert state["latest_snapshot"]["version_number"] == 1
+    assert state["latest_snapshot"]["status"] == "current"
 
     # Second Confirm
     p2 = api_client.get("/api/portfolio").json()
@@ -361,7 +361,7 @@ def test_two_confirms_correct_status_and_versioning(
 
     # Current state returns only v2
     current = api_client.get("/api/portfolio").json()
-    assert current["snapshot"]["version_number"] == 2
+    assert current["latest_snapshot"]["version_number"] == 2
 
     # history returns both, v2 first
     hist = api_client.get("/api/portfolio/snapshots").json()
