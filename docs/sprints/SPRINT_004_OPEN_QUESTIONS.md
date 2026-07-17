@@ -1,37 +1,45 @@
-# Sprint 004 Open Questions — Owner Decisions Required
+# Sprint 004 Open Questions — Owner Decisions Resolved
 
 - Date: 2026-07-17
-- Status: 13 Open — Owner Decision Required
-- Baseline: main @ 759a556
+- Status: All 13 Resolved by Project Owner
+- Resolved by: Project Owner on 2026-07-17
 
 ## Owner Decisions
 
-| ID | Question | Option A | Option B | Option C | Recommended | Rationale |
-|----|----------|----------|----------|----------|-------------|-----------|
-| OD-S4-001 | Auto-evaluate after Portfolio Confirm? | Yes — evaluate all Confirmed Checks immediately after each Portfolio Confirm | No — evaluation is manual only, Owner triggers explicitly | — | A | Immediate feedback after Confirm closes the loop. No scheduler needed. The Confirm transaction already locks Household → Portfolio; evaluation can follow in the same request or a synchronous follow-up. |
-| OD-S4-002 | What to do when Policy has no Current Published Version? | Skip evaluation — return "No published Policy" | Evaluate against empty Policy (all drift = 100%) | Fail with 409 — require published Policy | A | Evaluating against empty Policy produces 100% drift for every category — noise, not signal. Skip is cleaner and matches the Decision Journal pattern (requires current Published Version). |
-| OD-S4-003 | Write events when threshold is NOT exceeded? | Yes — write an event for every evaluation (exceeded=true when breached, exceeded=false when within bounds) | No — only write events when threshold IS exceeded | — | A | An `exceeded=false` record proves evaluation ran and found nothing. Audit trail completeness. Without it, "no events" could mean "not evaluated" or "evaluated and within bounds." The field name `exceeded` (not `passed`) avoids ambiguity: true = threshold breached, false = within bounds. Blocks: event schema design. |
-| OD-S4-004 | Concentration check: allow "all holdings" as target? | Yes — concentration against total portfolio (any single holding > threshold) | No — only category-level checks | — | B | Category-level is simpler, matches Policy allocation categories, and avoids the "which holding is the problem?" ambiguity. If the Owner wants single-holding monitoring, they can create a category check with that category. |
-| OD-S4-005 | Staleness check: what if there is no Portfolio Snapshot at all? | Skip — return "No snapshot" with zero events | Create an event — treat absence as infinite staleness | — | A | "No snapshot" is a distinct state from "stale snapshot." The Wallet UI already shows the empty-portfolio state. Guardian should not fabricate events for missing data. |
-| OD-S4-006 | Check naming: enforce uniqueness? | Yes — UNIQUE constraint on guardian_checks.name (per household) | No — allow duplicate names | — | A | Matches the Policy allocation-name pattern (NFKC + trim + case-insensitive). Owner should be able to distinguish "Equity drift > 5%" from "Equity concentration > 30%." |
-| OD-S4-007 | Evaluation scope: all checks or individual? | Individual — evaluate one Check at a time | All — always evaluate all Confirmed Checks together | Both — support individual and "evaluate all" | C | Individual is useful for testing a new rule. "Evaluate all" is the normal workflow. The API should support both: POST /api/guardian/evaluate (all) and POST /api/guardian/checks/{id}/evaluate (single). |
-| OD-S4-008 | Drift check: what if Policy has allocation for a category but Portfolio has zero holdings in that category? | drift = policy_pct (100% of target is missing) | drift = 0 (zero holdings, zero drift) | skip that category | A | If Policy says 20% equities and Portfolio has 0% equities, the drift is 20 percentage points — that's the mechanical truth. Treating zero holdings as "no drift" hides a meaningful condition. |
-| OD-S4-009 | Severity label: who decides? | Owner-defined per Check (dropdown: info/warning/critical) | System-computed from threshold magnitude | — | A | Severity is organizational, not mathematical. A 5% drift for one Owner is critical; for another it's informational. The threshold is the mathematical boundary; severity is the Owner's label for it. |
-| OD-S4-010 | Guardian Check Draft discard: before-first-Confirm vs after-Confirm? | Identity deletion (like Policy/Decision) for never-Confirmed; Draft-only deletion for after-Confirm | Always only delete Draft — identity persists | — | A | Matches Policy and Decision discard pattern. Never-confirmed = atomic identity deletion. After-confirm = delete draft only, identity and confirmed versions preserved. |
-| OD-S4-011 | GuardianEvent deduplication: prevent duplicate events for same (Check, Policy Version, Portfolio Snapshot) combination? | Yes — UNIQUE constraint on (check_version_id, policy_version_id, portfolio_snapshot_id) | No — each evaluation run writes independent events, even if inputs unchanged | — | A | Duplicate events add noise. If nothing changed (same Policy Version + same Portfolio Snapshot), re-evaluating produces the same result. A UNIQUE constraint with ON CONFLICT DO NOTHING is clean. |
-| OD-S4-012 | Guardian UI: show evaluation results inline or as separate page? | Separate /guardian page with tabs (Checks, Events, Audit) | Inline on /portfolio page — drift shown next to holdings | — | A | Guardian is a distinct concept from Portfolio. A separate page keeps Portfolio focused on holdings and Guardian focused on monitoring. The homepage nav already has room for another link. |
-| OD-S4-013 | Should the evaluation endpoint return a summary or individual events? | Summary only — {checks_evaluated: N, passed: N, exceeded: N} with event IDs | Individual events array — caller aggregates | Both — summary + events array | C | Summary for the UI dashboard, individual events for detail view. The response can include both: {summary: {...}, events: [...]}. Matches the snapshot history response pattern. |
+| ID | Question | Selected | Rejected | Key Constraint |
+|----|----------|----------|----------|----------------|
+| OD-S4-001 | Auto-evaluate after Portfolio Confirm? | B: Manual only — explicit Owner trigger | A | No automatic evaluation. Portfolio Confirm must not be coupled to Guardian. Deferred to Orchestration sprint. |
+| OD-S4-002 | No Published Policy → skip or fail? | A: Skip with machine-readable status `no_published_policy` | B, C | No GuardianEvents created. EvaluationRun records skip reason. |
+| OD-S4-003 | Write events when within bounds? | B: Only exceeded thresholds → Events. EvaluationRuns track "evaluated and found nothing." | A | New `guardian_evaluation_runs` table proves evaluation happened. Events only for breaches. `exceeded` field always TRUE on Events. |
+| OD-S4-004 | Category or individual holding level? | B: Category-level only. Renamed to `category_exposure` | A, C | Single-security concentration deferred. Holding-level belongs in future sprint. |
+| OD-S4-005 | No snapshot → skip or infinite stale? | A: Skip, record `no_portfolio_snapshot` in EvaluationRun | B | No synthetic events for missing data. |
+| OD-S4-006 | Unique check names? | A: UNIQUE after trim + NFKC + casefold, per household | B | Normalization rules consistent across API, DB constraint, and tests. |
+| OD-S4-007 | Evaluate all or individual? | C: Both — shared evaluation service | A, B | POST /api/guardian/evaluate (all) and POST /api/guardian/checks/{id}/evaluate (single). Same computation path. |
+| OD-S4-008 | Drift: percentage points or percent-of-target? | A: Absolute percentage points `abs(actual - target)`. Equal-to-threshold NOT exceeded. | B, C | All Decimal with ROUND_HALF_EVEN. target=20%, actual=0% → drift=20pp. |
+| OD-S4-009 | Severity: Owner or system? | A: Owner-defined | B | System never auto-upgrades severity. |
+| OD-S4-010 | Discard semantics | A: Pattern match — identity deletion if never confirmed, draft-only if confirmed exists | B | Matches Policy/Decision pattern. |
+| OD-S4-011 | Event deduplication | A: Deterministic input fingerprint | B | Drift/exposure: (check_version_id, policy_version_id, portfolio_snapshot_id). Staleness: + `as_of_date`. UNIQUE with ON CONFLICT DO NOTHING. |
+| OD-S4-012 | UI: separate page or inline? | A: Separate `/guardian` page | B | Guardian must not be coupled into Portfolio mutation workflow. |
+| OD-S4-013 | Evaluation response format | C: Both — summary + events with `evaluation_run_id`, `status`, `skip_reason` | A, B | Machine-readable status, human-readable skip_reason, checks_evaluated, events_created, events array. |
 
-## Additional Owner Constraints
+## Mandatory Design Clarifications
 
-1. **No scheduled/cron evaluation in Sprint 004**: All evaluation is manual or on-demand (OD-S4-001 auto-evaluate after Confirm is still synchronous within the same HTTP request, not a background job).
+1. **Data model**: Five tables — `guardian_checks`, `guardian_check_drafts`, `guardian_check_confirmed`, `guardian_evaluation_runs`, `guardian_events`.
 
-2. **No notification delivery**: Guardian Events are viewable in the UI only. No email, SMS, push, or platform notification.
+2. **Category matching**: trim + NFKC + casefold exact match between Policy `asset_class_name` and Portfolio `asset_category`. No fuzzy matching, no AI mapping, no silent guessing. Unmatched categories recorded in EvaluationRun.
 
-3. **No AI-generated rules**: All Guardian Checks are Owner-authored. The system never suggests thresholds, categories, or severities.
+3. **Actual percentage calculation**: Category `total_value` / all holdings `total_value`. Total value of zero → skip with `zero_total_value`. No division by zero, no fake events.
 
-4. **No trading**: Guardian Events are informational only. They cannot trigger orders, rebalancing, or any financial action.
+4. **Staleness**: Explicit `as_of_date` injected by engine. Calendar days (DATE subtraction). Boundary: `>` (strict). No system clock reads during check evaluation.
 
-5. **Local-only**: No external services. Evaluation uses only local PostgreSQL data (Policy, Portfolio).
+5. **Terminology**: GuardianEvent = "threshold breach fact." EvaluationRun = "evaluation execution fact." Do not confuse in API, UI, or docs.
 
-6. **Audit metadata redaction**: GuardianEvent audit records contain check_id, version_number, policy_version_number, portfolio_snapshot_version, passed, and drift_percentage. No financial values (quantities, prices, total_values) in audit metadata.
+6. **Lock order**: Household FOR UPDATE → read only. No write locks on Policy/Portfolio/Checks. No external calls. Pure local computation.
+
+7. **Auto-evaluate prohibited**: OD-S4-001 B. Evaluation is manual only in Sprint 004.
+
+8. **Non-goals**: No trading, no advice, no AI rules, no market data, no notification delivery, no scheduled/cron evaluation, no check retirement/deletion.
+
+## Resolution Summary
+
+All 13 Owner Decisions resolved with detailed constraints. Renamed `concentration` → `category_exposure`. Added `guardian_evaluation_runs` table. Drift uses absolute percentage points with strict `>` boundary. Deduplication uses deterministic input fingerprints with `as_of_date` for staleness. Evaluation is manual-only in Sprint 004.

@@ -1,9 +1,10 @@
 # Sprint 004 Technical Design: Guardian Monitoring Foundation
 
 - Date: 2026-07-17
-- Status: Draft Technical Design — Implementation Not Authorized
-- Owner Decisions: 13 Open — Owner Decision Required
+- Status: Approved Technical Design — Implementation Not Authorized
+- Owner Decisions: All 13 Resolved by Project Owner on 2026-07-17
 - Baseline: main @ 759a556
+- Branch: planning/sprint-004-technical-design
 
 ## 1. Candidate Analysis
 
@@ -226,14 +227,15 @@ non-advisory Guardian Events.
 
 | Term | Definition |
 |------|-----------|
-| Guardian Check | A named, Owner-defined rule configuration (e.g., "Equity drift > 5%") |
-| Guardian Event | An immutable record of a single evaluation pass. Contains the Check ID, the Policy Version and Portfolio Snapshot evaluated, and the result. The `exceeded` boolean field is TRUE when the threshold was breached, FALSE when within bounds. |
-| Threshold | A numeric boundary that triggers a detection. Always Owner-configured, never system-generated. |
-| Severity | A fixed label on each Check: `info`, `warning`, `critical`. Purely organizational — no automatic escalation. |
-| Staleness | A Check that fires when `valuation_date` of the latest Portfolio Snapshot is older than N days from evaluation time. |
-| Drift | The absolute difference between a Policy allocation's target percentage and the corresponding Portfolio holding's actual percentage of total portfolio value. |
-| Concentration | A single holding category exceeding X% of total Portfolio value. |
-| Confirmed | The immutable lifecycle state of a Guardian Check after the Owner confirms its Draft. Analogous to Policy "Published" and Portfolio "Active." The Decision Journal established "Confirmed" as the preferred term for newer domains; Guardian follows this precedent. |
+| Guardian Check | A named, Owner-defined rule configuration (e.g., "Equity drift > 5pp") |
+| Guardian Event | An immutable record of a single threshold breach. Contains the Check ID, the Policy Version and Portfolio Snapshot evaluated, and the computed metric. Events record ONLY when a threshold is exceeded. The `exceeded` boolean is always TRUE for events. |
+| Guardian Evaluation Run | An immutable record of a single evaluation pass (manual trigger). Records whether evaluation executed, how many Checks were evaluated, how many Events were created, and why any Checks were skipped. This is the "evaluation happened" fact — distinct from Events which are the "threshold breached" facts. |
+| Threshold | A numeric boundary in percentage points (drift, category_exposure) or days (staleness). Always Owner-configured, never system-generated. |
+| Severity | A fixed label on each Check: `info`, `warning`, `critical`. Purely organizational — no automatic escalation. Owner explicitly selects severity in the Check Draft. |
+| Staleness | A Check that fires when `valuation_date` of the latest Portfolio Snapshot is older than N calendar days from an explicit `as_of` evaluation date injected by the evaluation engine. |
+| Drift | The absolute percentage-point difference between a Policy allocation's target percentage and the corresponding Portfolio holding category's actual percentage of total portfolio value. Computed as `abs(actual_pct - target_pct)`. |
+| Category Exposure | A single Portfolio holding category exceeding X% of total Portfolio value. Renamed from "concentration" per OD-S4-004 to avoid confusion with single-security concentration. |
+| Confirmed | The immutable lifecycle state of a Guardian Check after the Owner confirms its Draft. Analogous to Policy "Published" and Portfolio "Active." |
 
 ---
 
@@ -259,8 +261,9 @@ Reuses the proven Policy/Portfolio/Decision pattern:
 - `guardian_checks` — stable identity for each rule (Owner-named)
 - `guardian_check_drafts` — mutable working state for rule editing
 - `guardian_check_confirmed` — immutable confirmed rule version (after publish)
-- `guardian_events` — immutable record of each evaluation run (one event per
-  check per evaluation pass)
+- `guardian_evaluation_runs` — immutable record of each evaluation pass (when, status, counts)
+- `guardian_events` — immutable record of each threshold breach (one event per
+  exceeded check per evaluation pass)
 
 A Guardian Check has a lifecycle: Draft → Confirmed. Confirmed Checks are
 immutable (like Policy Versions and Portfolio Snapshots). When the Owner
@@ -277,7 +280,7 @@ guardian_checks
   id UUID PK
   household_id UUID FK → household_profiles
   name VARCHAR(200) NOT NULL UNIQUE
-  check_type VARCHAR(50) CHECK(drift|concentration|staleness)
+  check_type VARCHAR(50) CHECK(drift|category_exposure|staleness)
   status VARCHAR(20) CHECK(draft|confirmed)
   created_at TIMESTAMPTZ
   updated_at TIMESTAMPTZ
@@ -308,19 +311,34 @@ guardian_check_confirmed
   — UNIQUE(check_id, version_number)
   — BEFORE INSERT/UPDATE/DELETE trigger prohibits all modification
 
+guardian_evaluation_runs
+  id UUID PK
+  household_id UUID FK → household_profiles
+  status VARCHAR(50) CHECK(completed|skipped_no_published_policy|skipped_no_portfolio_snapshot)
+  checks_evaluated INTEGER CHECK(>= 0)
+  events_created INTEGER CHECK(>= 0)
+  skip_reason TEXT — human-readable when status starts with 'skipped_'
+  as_of_date DATE NOT NULL — explicit evaluation date injected by engine
+  started_at TIMESTAMPTZ
+  completed_at TIMESTAMPTZ
+  — BEFORE INSERT/UPDATE/DELETE trigger prohibits all modification
+
 guardian_events
   id UUID PK
+  evaluation_run_id UUID FK → guardian_evaluation_runs (RESTRICT)
   household_id UUID FK → household_profiles
   check_id UUID FK → guardian_checks (RESTRICT)
   check_version_id UUID FK → guardian_check_confirmed (RESTRICT)
   policy_version_id UUID FK → policy_versions (RESTRICT)
   portfolio_snapshot_id UUID FK → portfolio_snapshots (RESTRICT)
   detected_at TIMESTAMPTZ
-  drift_percentage NUMERIC(5,2) — for drift checks, the computed difference
-  concentration_percentage NUMERIC(5,2) — for concentration checks
-  staleness_days_actual INTEGER — for staleness checks, the actual age
-  exceeded BOOLEAN NOT NULL — TRUE if threshold breached, FALSE if within bounds
+  drift_pp NUMERIC(5,2) — for drift checks, the computed percentage-point difference
+  exposure_pct NUMERIC(5,2) — for category_exposure checks
+  staleness_days_actual INTEGER — for staleness checks, the actual age in calendar days
+  exceeded BOOLEAN NOT NULL DEFAULT TRUE — always TRUE for events (only exceeded thresholds are recorded)
   — BEFORE INSERT/UPDATE/DELETE trigger prohibits all modification
+  — UNIQUE fingerprint on (check_version_id, policy_version_id, portfolio_snapshot_id, as_of_date)
+    for staleness; (check_version_id, policy_version_id, portfolio_snapshot_id) for drift/exposure
 ```
 
 ---
@@ -345,80 +363,114 @@ preserved for audit.
 
 ### Evaluation Lifecycle
 
+Evaluation is explicitly manual (OD-S4-001: Option B). It is NEVER
+triggered automatically by Portfolio Confirm or any other mutation.
+
 ```
-  Owner triggers "Evaluate All Checks"
+  Owner triggers "Evaluate" (all or single Check)
+    → Insert guardian_evaluation_runs (status=started, as_of_date=NOW())
+    → If no Published Policy Version: set status=skipped_no_published_policy, commit, return
+    → If no Portfolio Snapshot: set status=skipped_no_portfolio_snapshot, commit, return
     → For each Confirmed Check:
         → Load current Policy Published Version
         → Load latest Portfolio Snapshot
         → Compute rule-specific metric
         → Compare against threshold
-        → Write GuardianEvent (passed=true/false)
-        → Write AuditEvent
+        → If exceeded: INSERT GuardianEvent (exceeded=TRUE)
+        → If within bounds: no event recorded
+    → Update evaluation_run (status=completed, checks_evaluated=N, events_created=M)
+    → Write AuditEvent
+    → Commit
 ```
 
-Evaluation is synchronous, in-process, and does not require a scheduler.
-The Owner triggers it manually from the Guardian UI. After a Portfolio
-Confirm, the system can optionally trigger evaluation automatically
-(OD-S4-001).
+The evaluation run + events share one transaction. The Household FOR UPDATE
+lock serializes evaluation. Evaluation does NOT modify Policy, Portfolio, or
+Check data — it only reads immutable snapshots and writes new evaluation
+records and events.
+
+### Auto-Evaluate Prohibition
+
+Per OD-S4-001 Option B: Guardian evaluation is NOT triggered by Portfolio
+Confirm or any other mutation. This prevents Guardian failures from blocking
+Portfolio operations and avoids coupling the two domains. Automatic and
+scheduled evaluation is deferred to the Orchestration sprint (Sprint 006).
 
 ---
 
 ## 8. Evaluation Rules
 
-### Drift Check
+### Category Matching (Mandatory Clarification #2)
+
+Policy allocation categories are matched to Portfolio holding categories
+by trim + NFKC + casefold of the Policy's `asset_class_name` (already
+NFKC-normalized at Policy creation) against the Portfolio's `asset_category`.
+This is an exact string match — no fuzzy matching, no AI mapping, no silent
+guessing. Unmatched categories are recorded in the EvaluationRun summary but
+produce no Events.
+
+### Drift Check (OD-S4-008: absolute percentage points)
 
 For each Policy allocation category named in `target_category`, find the
 corresponding Portfolio holding category named in `target_holding_category`.
-Both names are NFKC-normalized before comparison, matching the Policy
-allocation normalization convention.
+Both are matched via trim + NFKC + casefold (see above).
 
 ```
-policy_pct = allocation.target_percentage (as Decimal)
-portfolio_pct = (sum of holdings in category × unit_price) / (sum of all holdings × unit_price) × 100
-drift = abs(policy_pct - portfolio_pct)
-exceeded = drift > threshold_value
+target_pct = allocation.target_percentage (Decimal, e.g., 20.00)
+actual_pct = (sum of total_value for holdings in category) / (sum of total_value for ALL holdings) × 100
+absolute_drift_pp = abs(actual_pct - target_pct)
+exceeded = absolute_drift_pp > threshold_value
 ```
 
-If total portfolio value is zero (empty snapshot or all zero-value assets):
-skip drift checks for this evaluation run. No baseline exists for comparison.
+If total portfolio value is zero: skip drift checks (record zero_total_value in
+EvaluationRun). No division by zero, no synthetic events.
 
-If the Policy category has no matching Portfolio holdings: drift = policy_pct,
-exceeded = true (100% of target allocation is absent) unless threshold > 100.
+If the Policy category has no matching Portfolio holdings: actual_pct = 0,
+absolute_drift_pp = target_pct. If target is 20% and actual is 0%, drift = 20
+percentage points. Event created if 20 > threshold.
 
-### Concentration Check
+Equal-to-threshold (drift == threshold) is NOT exceeded. The boundary `>`
+is strict. Both threshold and drift use NUMERIC(5,2) with ROUND_HALF_EVEN.
 
-```
-portfolio_pct = (sum of holdings in target_holding_category × unit_price)
-              / (sum of all holdings × unit_price) × 100
-exceeded = portfolio_pct > threshold_value
-```
-
-If total portfolio value is zero: skip concentration checks.
-
-### Staleness Check
+### Category Exposure Check (formerly "Concentration", OD-S4-004: Option B)
 
 ```
-age_days = evaluation_date - latest_snapshot.valuation_date
-exceeded = age_days > staleness_days
+actual_pct = (sum of total_value for holdings in target_holding_category)
+           / (sum of total_value for ALL holdings) × 100
+exceeded = actual_pct > threshold_value
 ```
 
-If no confirmed Portfolio Snapshot exists (portfolio.status='draft' with no
-prior confirm, or no portfolio at all): skip staleness checks. The Owner is
-already aware of the empty-portfolio state from the Portfolio UI. See OD-S4-005.
+If total portfolio value is zero: skip.
 
-### Per-Check-Type Field Validation
+### Staleness Check (OD-S4-005: Mandatory Clarification #4)
+
+```
+age_calendar_days = as_of_date - latest_snapshot.valuation_date
+exceeded = age_calendar_days > staleness_days
+```
+
+The `as_of_date` is injected by the evaluation engine at the start of each
+evaluation run. It is NEVER read from the system clock at check evaluation
+time — this ensures deterministic replay. Calendar days: two DATE values
+subtracted; no hour/minute/second granularity. Boundary: `>` (strict);
+exactly N days old is NOT exceeded.
+
+If no confirmed Portfolio Snapshot exists: skip, record
+status=skipped_no_portfolio_snapshot in EvaluationRun. No events created.
+
+### Per-Check-Type Field Validation (Mandatory Clarification)
 
 The following fields are required based on `check_type`:
 
 | check_type | Required fields | Optional fields |
 |-----------|----------------|-----------------|
-| drift | threshold_value, target_category, target_holding_category | severity, notes |
-| concentration | threshold_value, target_holding_category | severity, notes |
-| staleness | staleness_days | severity, notes |
+| drift | threshold_value (NUMERIC(5,2)), target_category, target_holding_category | severity, notes |
+| category_exposure | threshold_value (NUMERIC(5,2)), target_holding_category | severity, notes |
+| staleness | staleness_days (INTEGER > 0) | severity, notes |
 
 A Draft that omits required fields for its type is rejected at the API
-boundary (422). Fields not relevant to the type (e.g., staleness_days
-on a drift check) are ignored and stored as NULL.
+boundary (422). Fields not relevant to the type are stored as NULL.
+Category names are validated to be non-empty, ≤200 Unicode code points,
+and must satisfy the trim + NFKC + casefold normalization used for matching.
 
 ---
 
@@ -436,29 +488,27 @@ decimal strings.
 Evaluation runs in a single transaction per evaluation pass:
 
 1. Lock Household FOR UPDATE (serializes evaluation)
-2. Read current Published Policy Version (no lock needed — immutable)
-3. Read latest Portfolio Snapshot (no lock needed — immutable)
-4. For each Confirmed Check:
-   a. Compute metric
-   b. INSERT GuardianEvent
-   c. INSERT AuditEvent
-5. Commit
+2. Insert guardian_evaluation_runs (status=started, as_of_date=DATE(NOW()))
+3. If no Published Policy Version: set status=skipped_no_published_policy, commit, return
+4. If no Portfolio Snapshot: set status=skipped_no_portfolio_snapshot, commit, return
+5. Read current Published Policy Version (no lock — immutable)
+6. Read latest Portfolio Snapshot (no lock — immutable)
+7. For each Confirmed Check:
+   a. Match categories (trim + NFKC + casefold)
+   b. Compute metric with ROUND_HALF_EVEN
+   c. If exceeded: INSERT GuardianEvent (with evaluation_run_id)
+   d. If within bounds: skip (no event)
+8. Update evaluation_run (status=completed, checks_evaluated, events_created)
+9. Insert AuditEvent
+10. Commit
 
-Lock order: Household → (read Policy, Portfolio, Checks). No write locks
-on Policy or Portfolio — they are immutable reads. This avoids deadlock
-with Policy/Portfolio mutations (which lock Household → Policy/Portfolio).
+Lock order: Household FOR UPDATE → reads only (Policy, Portfolio, Checks are
+immutable; no write locks needed). Evaluation NEVER acquires locks on Policy,
+Portfolio, or Check rows. It does NOT call external services — pure local
+computation.
 
-Concurrent evaluation: the Household FOR UPDATE lock serializes evaluation
-at the database level. A second evaluation request while one is in progress
-blocks on the lock. If the wait exceeds a configurable timeout (default 30s),
-the API returns 409 Conflict with "Evaluation already in progress."
-The UI disables the Evaluate button during an active evaluation and shows
-a progress indicator.
-
-Concurrent evaluation + Check Confirm:
-- Confirm locks Household → guardian_checks FOR UPDATE → inserts Confirmed.
-- Evaluation locks Household → reads Confirmed Checks (snapshot before Confirm).
-- No conflict because evaluation reads committed state.
+Concurrent evaluation: Household FOR UPDATE serializes. A second request
+blocks. If wait exceeds 30s, return 409 "Evaluation already in progress."
 
 ---
 
@@ -474,8 +524,11 @@ All endpoints under `/api/guardian`. Decimal strings for all numeric values.
 | PATCH | /api/guardian/checks/{id}/draft | Update Draft metadata (threshold, category, severity) |
 | POST | /api/guardian/checks/{id}/draft/confirm | Confirm Draft → immutable Confirmed version |
 | POST | /api/guardian/checks/{id}/draft/discard | Discard Draft (identity deletion if never confirmed) |
-| POST | /api/guardian/evaluate | Run evaluation of all Confirmed Checks |
-| GET | /api/guardian/events | Cursor-paginated event history (before_sequence_number, limit) |
+| POST | /api/guardian/evaluate | Run evaluation of all Confirmed Checks. Returns evaluation_run + events. |
+| POST | /api/guardian/checks/{id}/evaluate | Run evaluation of a single Confirmed Check. Reuses same evaluation service. |
+| GET | /api/guardian/evaluations | Cursor-paginated evaluation run history |
+| GET | /api/guardian/evaluations/{id} | Single evaluation run with summary and events |
+| GET | /api/guardian/events | Cursor-paginated event history (before_sequence_number, limit, filter by check_id) |
 | GET | /api/guardian/events/{id} | Single event detail |
 | GET | /api/guardian/audit | Cursor-paginated Guardian audit |
 
@@ -538,10 +591,11 @@ The system never uses language that implies a recommended action.
 | Schema/API | B | Pydantic validation, decimal strings, severity enum, check_type enum |
 | PostgreSQL | A | Real database: constraints, triggers, immutability, foreign keys |
 | Migration | A | upgrade head, downgrade, re-upgrade, offline SQL |
-| Drift computation | B | Exact matches, zero holdings, missing category, 100% drift |
-| Concentration | B | Single holding, multiple holdings, zero total value edge case |
-| Staleness | B | Today, yesterday, 365 days, future date rejection |
-| Concurrency | B | Evaluate vs Confirm race, double evaluate |
+| Drift computation | B | Absolute pp difference, equal-to-threshold NOT exceeded, zero total value |
+| Category exposure | B | Single category, multiple holdings, zero total value |
+| Staleness | B | as_of_date injection, calendar days, strict >, future date rejection |
+| Evaluation runs | B | Completed, skipped_no_published_policy, skipped_no_portfolio_snapshot |
+| Concurrency | B | Evaluate vs Confirm race, double evaluate (409) |
 | Immutability | A | Confirmed check immutable, event immutable |
 | Audit | B | Check create/confirm/discard, evaluation run |
 | Frontend states | C | All 18 UI states (Vitest) |
@@ -554,18 +608,27 @@ The system never uses language that implies a recommended action.
 ## 16. Migration
 
 New Alembic revision `0007_guardian_foundation` (or next available).
-Creates four tables with named constraints, indices, and immutability
-triggers. Additive only — no modification to existing 0001-0006.
+Creates five tables (guardian_checks, guardian_check_drafts,
+guardian_check_confirmed, guardian_evaluation_runs, guardian_events)
+with named constraints, indices, immutability triggers, and the
+deterministic input fingerprint UNIQUE constraints on events.
+Additive only — no modification to existing 0001-0006.
 
 ---
 
 ## 17. Observability
 
-Each evaluation run writes one AuditEvent per Check evaluated, with
-metadata: check_id, check_version, policy_version_id, portfolio_snapshot_id,
-exceeded, drift_percentage (if applicable). No financial values (quantities,
-prices) in audit metadata — only structural identifiers and computed
-percentages.
+Each evaluation run writes one AuditEvent for the evaluation run itself
+(action: guardian.evaluation.completed or guardian.evaluation.skipped),
+with metadata: evaluation_run_id, status, checks_evaluated, events_created,
+skip_reason (if applicable). Guardian Check lifecycle events (created,
+draft updated, confirmed, discarded) each write one AuditEvent following
+the Policy/Decision pattern.
+
+Audit metadata contains: evaluation_run_id, check_version_number,
+policy_version_number, portfolio_snapshot_version, exceeded.
+No financial values (quantities, prices, total_values) in audit metadata.
+
 
 ---
 
@@ -624,5 +687,10 @@ requires separate explicit Owner authorization.
 
 ## Owner Decision Status
 
-All 13 Owner Decisions are **Open — Owner Decision Required**.
-See `docs/sprints/SPRINT_004_OPEN_QUESTIONS.md` for the full decision table.
+All 13 Owner Decisions (OD-S4-001 through OD-S4-013) are **Resolved**
+by Project Owner on 2026-07-17. See `docs/sprints/SPRINT_004_OPEN_QUESTIONS.md`
+for the full decision table with selected options, rejected alternatives,
+and additional constraints.
+
+**This design is approved.** Sprint 004 implementation is NOT authorized.
+Each slice (A: DB, B: API, C: Frontend) requires separate authorization.
