@@ -88,6 +88,11 @@ export default function GuardianClient() {
     return () => { abortRef.current?.abort(); };
   }, [loadChecks]);
 
+  // Load detail when a check is selected
+  useEffect(() => {
+    if (selectedId) loadCheckDetail(selectedId);
+  }, [selectedId, loadCheckDetail]);
+
   // ---- Handlers ----
 
   const selected = selectedId ? checks.find(c => c.identity.id === selectedId) : null;
