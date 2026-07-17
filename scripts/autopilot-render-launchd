@@ -40,11 +40,16 @@ def render_launchd(output_path=None, repo_root=None, home=None):
 
     # Resolve ProgramArguments
     program = p.get('ProgramArguments', [])
+    # Find the best Python interpreter
+    venv_python = os.path.join(repo_root, '.venv', 'bin', 'python3')
+    if not os.path.isfile(venv_python):
+        venv_python = os.path.join(repo_root, '.venv', 'bin', 'python')
     resolved = []
     for arg in program:
         arg = arg.replace('${REPO_ROOT}', repo_root)
         arg = arg.replace('${HOME}', home)
         arg = arg.replace('${AUTOPILOT_ROOT}', autopilot_root)
+        arg = arg.replace('${PYTHON_PATH}', venv_python)
         resolved.append(arg)
     p['ProgramArguments'] = resolved
 

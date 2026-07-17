@@ -7,6 +7,7 @@
 
     <key>ProgramArguments</key>
     <array>
+        <string>${PYTHON_PATH}</string>
         <string>${REPO_ROOT}/scripts/autopilot-supervisor</string>
     </array>
 
