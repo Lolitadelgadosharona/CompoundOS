@@ -176,67 +176,60 @@ def _snapshot_detail_response(
 # ---------------------------------------------------------------------------
 
 
-def create_portfolio(
+def _create_portfolio_internal(
     session: Session,
-) -> tuple[Portfolio, PortfolioDraft, list[PortfolioDraftHolding]]:
-    """Create portfolio with initial draft. Idempotent: returns existing if present."""
+    household_id: UUID,
+) -> tuple[Portfolio, PortfolioDraft]:
+    """Create portfolio + initial draft. Caller must hold an active transaction."""
     try:
-        with session.begin():
-            household = _require_household(session)
-            try:
-                portfolio = add_portfolio(session, household.id)
-            except IntegrityError as exc:
-                session.rollback()
-                if (
-                    _constraint_name(exc)
-                    == "uq_portfolios_household_id"
-                ):
-                    raise PortfolioAlreadyExistsError from exc
-                raise
-            draft = add_draft(session, portfolio.id)
-            add_portfolio_audit_event(
-                session,
-                household_id=household.id,
-                portfolio_id=portfolio.id,
-                action="portfolio.draft.created",
-                metadata={"draft_revision": draft.expected_revision},
-            )
-        return portfolio, draft, []
-    except IntegrityError:
-        session.rollback()
+        portfolio = add_portfolio(session, household_id)
+    except IntegrityError as exc:
+        if _constraint_name(exc) == "uq_portfolios_household_id":
+            raise PortfolioAlreadyExistsError from exc
         raise
+    draft = add_draft(session, portfolio.id)
+    add_portfolio_audit_event(
+        session,
+        household_id=household_id,
+        portfolio_id=portfolio.id,
+        action="portfolio.draft.created",
+        metadata={"draft_revision": draft.expected_revision},
+    )
+    return portfolio, draft
 
 
 def read_or_create_portfolio(
     session: Session,
 ) -> tuple[Portfolio, PortfolioDraft, list[PortfolioDraftHolding], bool]:
-    """Get existing portfolio+draft, or create them.
+    """Get existing portfolio+draft, or create them in a single transaction.
 
     Returns (portfolio, draft, holdings, created).
     """
     with session.begin():
         household = _require_household(session)
+        try:
+            portfolio, draft = _create_portfolio_internal(session, household.id)
+            return portfolio, draft, [], True
+        except PortfolioAlreadyExistsError:
+            pass  # read existing state below
+
         existing = get_portfolio(session, household.id)
-        if existing is not None:
-            draft = get_draft(session, existing.id)
-            if draft is not None:
-                holdings = list_draft_holdings(session, existing.id)
-                return existing, draft, holdings, False
-            # Portfolio exists but no draft (e.g., after confirm).
-            # Create a new draft.
-            draft = add_draft(session, existing.id)
-            add_portfolio_audit_event(
-                session,
-                household_id=household.id,
-                portfolio_id=existing.id,
-                action="portfolio.draft.created",
-                metadata={"draft_revision": draft.expected_revision},
-            )
-            return existing, draft, [], True
-        # Create portfolio + initial draft (create_portfolio already
-        # manages its own transaction — call it outside our begin block)
-        session.rollback()  # release our transaction first
-    return (*create_portfolio(session), True)
+        assert existing is not None  # must exist after the above
+        draft = get_draft(session, existing.id)
+        if draft is not None:
+            holdings = list_draft_holdings(session, existing.id)
+            return existing, draft, holdings, False
+
+        # Portfolio exists but no draft (e.g., after confirm).
+        draft = add_draft(session, existing.id)
+        add_portfolio_audit_event(
+            session,
+            household_id=household.id,
+            portfolio_id=existing.id,
+            action="portfolio.draft.created",
+            metadata={"draft_revision": draft.expected_revision},
+        )
+        return existing, draft, [], True
 
 
 def read_current_state(
