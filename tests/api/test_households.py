@@ -266,4 +266,9 @@ def test_migration_contains_only_approved_product_tables(postgres_engine) -> Non
         "portfolio_snapshots",
         "portfolio_snapshot_holdings",
         "accounts",
+        "guardian_checks",
+        "guardian_check_drafts",
+        "guardian_check_confirmed",
+        "guardian_evaluation_runs",
+        "guardian_events",
     }

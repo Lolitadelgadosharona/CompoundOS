@@ -31,7 +31,7 @@ def test_missing_database_url_fails_in_required_mode(
 def test_required_mode_returns_configured_database_url(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    database_url = "postgresql+psycopg://test-host/compoundos"
+    database_url = "postgresql+psycopg://test-host/compoundos_test"
     monkeypatch.setenv("TEST_DATABASE_URL", database_url)
     monkeypatch.setenv("COMPOUNDOS_REQUIRE_POSTGRES_TESTS", "1")
 

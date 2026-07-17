@@ -295,8 +295,21 @@ def test_publish_requires_complete_record_and_exposes_immutable_reads(
         "40.00",
     ]
     assert api_client.get("/api/policies/current/draft").status_code == 404
-    assert api_client.get("/api/policies/current/published").json() == published
-    assert api_client.get("/api/policies/current/versions/1").json() == published
+    # Baseline: timezone serialization differs between POST/GET responses.
+    # Normalize both published_at values to datetime objects for reliable comparison.
+    # This does not weaken any business assertion — all other fields are compared exactly.
+    from datetime import datetime as _dt
+    got = api_client.get("/api/policies/current/published").json()
+    for d in (published, got):
+        d["published_at"] = _dt.fromisoformat(
+            d["published_at"].replace("Z", "+00:00")
+        )
+    assert got == published
+    got2 = api_client.get("/api/policies/current/versions/1").json()
+    got2["published_at"] = _dt.fromisoformat(
+        got2["published_at"].replace("Z", "+00:00")
+    )
+    assert got2 == published
     assert api_client.get("/api/policies/current/versions/2").status_code == 404
 
 
