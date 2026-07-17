@@ -142,48 +142,47 @@ def create_guardian_check(
         target_holding_category, staleness_days,
     )
 
-    with session.begin():
-        # Check uniqueness
-        existing = session.execute(
-            text(
-                "SELECT id FROM guardian_checks"
-                " WHERE household_id = :hid AND canonical_name = :cn"
-            ),
-            {"hid": household_id, "cn": canonical},
-        ).fetchone()
-        if existing:
-            raise NameConflictError("A check with this name already exists")
+    # Check uniqueness
+    existing = session.execute(
+        text(
+            "SELECT id FROM guardian_checks"
+            " WHERE household_id = :hid AND canonical_name = :cn"
+        ),
+        {"hid": household_id, "cn": canonical},
+    ).fetchone()
+    if existing:
+        raise NameConflictError("A check with this name already exists")
 
-        check_id = uuid4()
-        session.execute(
-            text(
-                "INSERT INTO guardian_checks (id, household_id, name, canonical_name, check_type)"
-                " VALUES (:id, :hid, :name, :cn, :ctype)"
-            ),
-            {"id": check_id, "hid": household_id, "name": name.strip(),
-             "cn": canonical, "ctype": check_type},
-        )
-        session.execute(
-            text(
-                "INSERT INTO guardian_check_drafts"
-                " (check_id, threshold_value, target_category, target_holding_category,"
-                "  staleness_days, severity, notes, expected_revision)"
-                " VALUES (:cid, :tv, :tc, :thc, :sd, :sev, :notes, 1)"
-            ),
-            {
-                "cid": check_id,
-                "tv": str(threshold_value),
-                "tc": target_category,
-                "thc": target_holding_category,
-                "sd": staleness_days,
-                "sev": severity,
-                "notes": notes,
-            },
-        )
-        _audit(session, household_id, "guardian.check.created", str(check_id),
-               {"name": name.strip(), "check_type": check_type})
+    check_id = uuid4()
+    session.execute(
+        text(
+            "INSERT INTO guardian_checks (id, household_id, name, canonical_name, check_type)"
+            " VALUES (:id, :hid, :name, :cn, :ctype)"
+        ),
+        {"id": check_id, "hid": household_id, "name": name.strip(),
+         "cn": canonical, "ctype": check_type},
+    )
+    session.execute(
+        text(
+            "INSERT INTO guardian_check_drafts"
+            " (check_id, threshold_value, target_category, target_holding_category,"
+            "  staleness_days, severity, notes, expected_revision)"
+            " VALUES (:cid, :tv, :tc, :thc, :sd, :sev, :notes, 1)"
+        ),
+        {
+            "cid": check_id,
+            "tv": str(threshold_value),
+            "tc": target_category,
+            "thc": target_holding_category,
+            "sd": staleness_days,
+            "sev": severity,
+            "notes": notes,
+        },
+    )
+    _audit(session, household_id, "guardian.check.created", str(check_id),
+           {"name": name.strip(), "check_type": check_type})
 
-        result = _load_check_detail(session, check_id)
+    result = _load_check_detail(session, check_id)
     return result
 
 
@@ -199,63 +198,62 @@ def update_guardian_draft(
     severity: Optional[str] = None,
     notes: Optional[str] = None,
 ) -> dict:
-    with session.begin():
-        row = session.execute(
-            text(
-                "SELECT c.check_type, d.threshold_value, d.target_category,"
-                " d.target_holding_category, d.staleness_days, d.severity, d.notes,"
-                " d.expected_revision"
-                " FROM guardian_checks c"
-                " JOIN guardian_check_drafts d ON d.check_id = c.id"
-                " WHERE c.id = :cid"
-            ),
+    row = session.execute(
+        text(
+            "SELECT c.check_type, d.threshold_value, d.target_category,"
+            " d.target_holding_category, d.staleness_days, d.severity, d.notes,"
+            " d.expected_revision"
+            " FROM guardian_checks c"
+            " JOIN guardian_check_drafts d ON d.check_id = c.id"
+            " WHERE c.id = :cid"
+        ),
+        {"cid": check_id},
+    ).fetchone()
+    if row is None:
+        # Check might exist but no draft
+        chk = session.execute(
+            text("SELECT id FROM guardian_checks WHERE id = :cid"),
             {"cid": check_id},
         ).fetchone()
-        if row is None:
-            # Check might exist but no draft
-            chk = session.execute(
-                text("SELECT id FROM guardian_checks WHERE id = :cid"),
-                {"cid": check_id},
-            ).fetchone()
-            if chk is None:
-                raise CheckNotFoundError(f"Check {check_id} not found")
-            raise DraftNotFoundError("No draft to update")
+        if chk is None:
+            raise CheckNotFoundError(f"Check {check_id} not found")
+        raise DraftNotFoundError("No draft to update")
 
-        (
-            check_type, cur_tv, cur_tc, cur_thc, cur_sd, cur_sev, cur_notes, cur_rev,
-        ) = row
+    (
+        check_type, cur_tv, cur_tc, cur_thc, cur_sd, cur_sev, cur_notes, cur_rev,
+    ) = row
 
-        if expected_revision != cur_rev:
-            raise DraftConflictError(
-                f"Expected revision {expected_revision}, current is {cur_rev}"
-            )
-
-        new_tv = threshold_value if threshold_value is not None else Decimal(cur_tv)
-        new_tc = target_category if target_category is not None else cur_tc
-        new_thc = target_holding_category if target_holding_category is not None else cur_thc
-        new_sd = staleness_days if staleness_days is not None else cur_sd
-        new_sev = severity if severity is not None else cur_sev
-        new_notes = notes if notes is not None else cur_notes
-
-        _validate_draft_fields(check_type, new_tv, new_tc, new_thc, new_sd)
-
-        new_rev = cur_rev + 1
-        session.execute(
-            text(
-                "UPDATE guardian_check_drafts SET"
-                " threshold_value = :tv, target_category = :tc,"
-                " target_holding_category = :thc, staleness_days = :sd,"
-                " severity = :sev, notes = :notes, expected_revision = :rev,"
-                " updated_at = NOW()"
-                " WHERE check_id = :cid"
-            ),
-            {
-                "cid": check_id, "tv": str(new_tv), "tc": new_tc,
-                "thc": new_thc, "sd": new_sd, "sev": new_sev,
-                "notes": new_notes, "rev": new_rev,
-            },
+    if expected_revision != cur_rev:
+        raise DraftConflictError(
+            f"Expected revision {expected_revision}, current is {cur_rev}"
         )
-        result = _load_check_detail(session, check_id)
+
+    new_tv = threshold_value if threshold_value is not None else Decimal(cur_tv)
+    new_tc = target_category if target_category is not None else cur_tc
+    new_thc = target_holding_category if target_holding_category is not None else cur_thc
+    new_sd = staleness_days if staleness_days is not None else cur_sd
+    new_sev = severity if severity is not None else cur_sev
+    new_notes = notes if notes is not None else cur_notes
+
+    _validate_draft_fields(check_type, new_tv, new_tc, new_thc, new_sd)
+
+    new_rev = cur_rev + 1
+    session.execute(
+        text(
+            "UPDATE guardian_check_drafts SET"
+            " threshold_value = :tv, target_category = :tc,"
+            " target_holding_category = :thc, staleness_days = :sd,"
+            " severity = :sev, notes = :notes, expected_revision = :rev,"
+            " updated_at = NOW()"
+            " WHERE check_id = :cid"
+        ),
+        {
+            "cid": check_id, "tv": str(new_tv), "tc": new_tc,
+            "thc": new_thc, "sd": new_sd, "sev": new_sev,
+            "notes": new_notes, "rev": new_rev,
+        },
+    )
+    result = _load_check_detail(session, check_id)
     return result
 
 
@@ -265,101 +263,99 @@ def confirm_guardian_check(
     check_id: UUID,
     expected_revision: int,
 ) -> dict:
-    with session.begin():
-        row = session.execute(
-            text(
-                "SELECT c.id, c.household_id, c.check_type, d.threshold_value,"
-                " d.target_category, d.target_holding_category, d.staleness_days,"
-                " d.severity, d.notes, d.expected_revision"
-                " FROM guardian_checks c"
-                " JOIN guardian_check_drafts d ON d.check_id = c.id"
-                " WHERE c.id = :cid"
-            ),
-            {"cid": check_id},
-        ).fetchone()
-        if row is None:
-            raise ConfirmRequiresDraftError("No draft to confirm")
+    row = session.execute(
+        text(
+            "SELECT c.id, c.household_id, c.check_type, d.threshold_value,"
+            " d.target_category, d.target_holding_category, d.staleness_days,"
+            " d.severity, d.notes, d.expected_revision"
+            " FROM guardian_checks c"
+            " JOIN guardian_check_drafts d ON d.check_id = c.id"
+            " WHERE c.id = :cid"
+        ),
+        {"cid": check_id},
+    ).fetchone()
+    if row is None:
+        raise ConfirmRequiresDraftError("No draft to confirm")
 
-        (
-            cid, hid, ctype, tv, tc, thc, sd, sev, notes, rev,
-        ) = row
+    (
+        cid, hid, ctype, tv, tc, thc, sd, sev, notes, rev,
+    ) = row
 
-        if rev != expected_revision:
-            raise DraftConflictError(
-                f"Expected revision {expected_revision}, draft is at {rev}"
-            )
-
-        tv_dec = Decimal(tv)
-        _validate_draft_fields(ctype, tv_dec, tc, thc, sd)
-
-        # Get next version number
-        vrow = session.execute(
-            text(
-                "SELECT COALESCE(MAX(version_number), 0) + 1"
-                " FROM guardian_check_confirmed WHERE check_id = :cid"
-            ),
-            {"cid": cid},
-        ).fetchone()
-        next_ver = vrow[0]
-
-        ccid = uuid4()
-        session.execute(
-            text(
-                "INSERT INTO guardian_check_confirmed"
-                " (id, check_id, version_number, check_type, threshold_value,"
-                "  target_category, target_holding_category, staleness_days, severity, notes)"
-                " VALUES (:id, :cid, :ver, :ctype, :tv, :tc, :thc, :sd, :sev, :notes)"
-            ),
-            {
-                "id": ccid, "cid": cid, "ver": next_ver, "ctype": ctype,
-                "tv": str(tv_dec), "tc": tc, "thc": thc,
-                "sd": sd, "sev": sev, "notes": notes,
-            },
+    if rev != expected_revision:
+        raise DraftConflictError(
+            f"Expected revision {expected_revision}, draft is at {rev}"
         )
-        session.execute(
-            text("UPDATE guardian_checks SET status = 'confirmed', updated_at = NOW() WHERE id = :cid"),
-            {"cid": cid},
-        )
-        _audit(session, hid, "guardian.check.confirmed", str(cid),
-               {"version_number": next_ver, "check_type": ctype})
 
-        result = _load_check_detail(session, cid)
+    tv_dec = Decimal(tv)
+    _validate_draft_fields(ctype, tv_dec, tc, thc, sd)
+
+    # Get next version number
+    vrow = session.execute(
+        text(
+            "SELECT COALESCE(MAX(version_number), 0) + 1"
+            " FROM guardian_check_confirmed WHERE check_id = :cid"
+        ),
+        {"cid": cid},
+    ).fetchone()
+    next_ver = vrow[0]
+
+    ccid = uuid4()
+    session.execute(
+        text(
+            "INSERT INTO guardian_check_confirmed"
+            " (id, check_id, version_number, check_type, threshold_value,"
+            "  target_category, target_holding_category, staleness_days, severity, notes)"
+            " VALUES (:id, :cid, :ver, :ctype, :tv, :tc, :thc, :sd, :sev, :notes)"
+        ),
+        {
+            "id": ccid, "cid": cid, "ver": next_ver, "ctype": ctype,
+            "tv": str(tv_dec), "tc": tc, "thc": thc,
+            "sd": sd, "sev": sev, "notes": notes,
+        },
+    )
+    session.execute(
+        text("UPDATE guardian_checks SET status = 'confirmed', updated_at = NOW() WHERE id = :cid"),
+        {"cid": cid},
+    )
+    _audit(session, hid, "guardian.check.confirmed", str(cid),
+           {"version_number": next_ver, "check_type": ctype})
+
+    result = _load_check_detail(session, cid)
     return result
 
 
 def discard_guardian_check(session: Session, check_id: UUID) -> None:
-    with session.begin():
-        row = session.execute(
-            text(
-                "SELECT c.id, c.household_id,"
-                " EXISTS(SELECT 1 FROM guardian_check_confirmed WHERE check_id = c.id) AS has_confirmed"
-                " FROM guardian_checks c WHERE c.id = :cid"
-            ),
-            {"cid": check_id},
-        ).fetchone()
-        if row is None:
-            raise CheckNotFoundError(f"Check {check_id} not found")
+    row = session.execute(
+        text(
+            "SELECT c.id, c.household_id,"
+            " EXISTS(SELECT 1 FROM guardian_check_confirmed WHERE check_id = c.id) AS has_confirmed"
+            " FROM guardian_checks c WHERE c.id = :cid"
+        ),
+        {"cid": check_id},
+    ).fetchone()
+    if row is None:
+        raise CheckNotFoundError(f"Check {check_id} not found")
 
-        cid, hid, has_confirmed = row
+    cid, hid, has_confirmed = row
 
+    session.execute(
+        text("DELETE FROM guardian_check_drafts WHERE check_id = :cid"),
+        {"cid": cid},
+    )
+    if has_confirmed:
         session.execute(
-            text("DELETE FROM guardian_check_drafts WHERE check_id = :cid"),
+            text("UPDATE guardian_checks SET status = 'draft', updated_at = NOW() WHERE id = :cid"),
             {"cid": cid},
         )
-        if has_confirmed:
-            session.execute(
-                text("UPDATE guardian_checks SET status = 'draft', updated_at = NOW() WHERE id = :cid"),
-                {"cid": cid},
-            )
-            _audit(session, hid, "guardian.check.draft_discarded", str(cid),
-                   {"retained_confirmed": True})
-        else:
-            session.execute(
-                text("DELETE FROM guardian_checks WHERE id = :cid"),
-                {"cid": cid},
-            )
-            _audit(session, hid, "guardian.check.deleted", str(cid),
-                   {"had_confirmed": False})
+        _audit(session, hid, "guardian.check.draft_discarded", str(cid),
+               {"retained_confirmed": True})
+    else:
+        session.execute(
+            text("DELETE FROM guardian_checks WHERE id = :cid"),
+            {"cid": cid},
+        )
+        _audit(session, hid, "guardian.check.deleted", str(cid),
+               {"had_confirmed": False})
 
 
 # ---------------------------------------------------------------------------
@@ -397,164 +393,163 @@ def _evaluate(
     target_check_id: Optional[UUID] = None,
 ) -> dict:
     """Single transaction: lock, load, compute, write, return."""
-    with session.begin():
-        # Lock household
-        session.execute(
-            text("SELECT id FROM household_profiles WHERE id = :hid FOR UPDATE"),
-            {"hid": household_id},
+    # Lock household
+    session.execute(
+        text("SELECT id FROM household_profiles WHERE id = :hid FOR UPDATE"),
+        {"hid": household_id},
+    )
+
+    run_id = uuid4()
+
+    # --- Load Policy ---
+    prow = session.execute(
+        text(
+            "SELECT pv.id, pv.version_number"
+            " FROM investment_policy_versions pv"
+            " JOIN investment_policies p ON p.id = pv.policy_id"
+            " WHERE p.household_id = :hid"
+            " AND pv.status = 'published' AND pv.superseded_at IS NULL"
+        ),
+        {"hid": household_id},
+    ).fetchone()
+
+    if prow is None:
+        _insert_run(session, run_id, household_id, "skipped_no_published_policy",
+                    0, 0, as_of_date, "No published Policy version exists")
+        _audit_eval(session, household_id, run_id, "skipped",
+                     "no_published_policy", 0, 0)
+        return _load_eval_result(session, run_id)
+
+    policy_version_id, policy_version_number = prow
+    policy_version_id_str = str(policy_version_id)
+
+    # --- Load Policy allocations ---
+    arows = session.execute(
+        text(
+            "SELECT asset_class_name, normalized_asset_class_name, target_percentage"
+            " FROM investment_policy_version_allocations WHERE version_id = :vid"
+        ),
+        {"vid": policy_version_id},
+    ).fetchall()
+    allocations = [
+        PolicyAllocation(
+            asset_class_name=r[0],
+            normalized_name=r[1] or r[0],
+            target_percentage=Decimal(str(r[2])),
         )
+        for r in arows
+    ]
 
-        run_id = uuid4()
+    # --- Load Portfolio snapshot ---
+    srow = session.execute(
+        text(
+            "SELECT ps.id, ps.version_number, ps.valuation_date"
+            " FROM portfolio_snapshots ps"
+            " JOIN portfolios p ON p.id = ps.portfolio_id"
+            " WHERE p.household_id = :hid AND ps.status = 'current'"
+        ),
+        {"hid": household_id},
+    ).fetchone()
 
-        # --- Load Policy ---
-        prow = session.execute(
+    if srow is None:
+        _insert_run(session, run_id, household_id, "skipped_no_portfolio_snapshot",
+                    0, 0, as_of_date, "No Portfolio Snapshot exists")
+        _audit_eval(session, household_id, run_id, "skipped",
+                     "no_portfolio_snapshot", 0, 0)
+        return _load_eval_result(session, run_id)
+
+    snapshot_id, snapshot_version, snapshot_val_date = srow
+    portfolio_snapshot_id_str = str(snapshot_id)
+
+    # --- Load holdings ---
+    hrows = session.execute(
+        text(
+            "SELECT asset_category, total_value"
+            " FROM portfolio_snapshot_holdings WHERE snapshot_id = :sid"
+        ),
+        {"sid": snapshot_id},
+    ).fetchall()
+
+    holdings = [
+        PortfolioHolding(asset_category=r[0], total_value=Decimal(str(r[1])))
+        for r in hrows
+    ]
+    total_value = compute_total_value(holdings)
+
+    if total_value == Decimal("0") or len(hrows) == 0:
+        _insert_run(session, run_id, household_id, "skipped_zero_total_value",
+                    0, 0, as_of_date, "Portfolio Snapshot has zero total value")
+        _audit_eval(session, household_id, run_id, "skipped",
+                     "zero_total_value", 0, 0)
+        return _load_eval_result(session, run_id)
+
+    category_map = build_category_map(holdings)
+
+    # --- Load confirmed checks ---
+    if target_check_id is not None:
+        crows = session.execute(
             text(
-                "SELECT pv.id, pv.version_number"
-                " FROM investment_policy_versions pv"
-                " JOIN investment_policies p ON p.id = pv.policy_id"
-                " WHERE p.household_id = :hid"
-                " AND pv.status = 'published' AND pv.superseded_at IS NULL"
+                "SELECT cc.id, cc.check_id, cc.check_type, cc.threshold_value,"
+                " cc.severity, cc.target_category, cc.target_holding_category,"
+                " cc.staleness_days"
+                " FROM guardian_check_confirmed cc"
+                " JOIN guardian_checks gc ON gc.id = cc.check_id"
+                " WHERE cc.check_id = :cid AND gc.household_id = :hid"
             ),
-            {"hid": household_id},
-        ).fetchone()
-
-        if prow is None:
-            _insert_run(session, run_id, household_id, "skipped_no_published_policy",
-                        0, 0, as_of_date, "No published Policy version exists")
-            _audit_eval(session, household_id, run_id, "skipped",
-                         "no_published_policy", 0, 0)
-            return _load_eval_result(session, run_id)
-
-        policy_version_id, policy_version_number = prow
-        policy_version_id_str = str(policy_version_id)
-
-        # --- Load Policy allocations ---
-        arows = session.execute(
-            text(
-                "SELECT asset_class_name, normalized_asset_class_name, target_percentage"
-                " FROM investment_policy_version_allocations WHERE version_id = :vid"
-            ),
-            {"vid": policy_version_id},
+            {"cid": target_check_id, "hid": household_id},
         ).fetchall()
-        allocations = [
-            PolicyAllocation(
-                asset_class_name=r[0],
-                normalized_name=r[1] or r[0],
-                target_percentage=Decimal(str(r[2])),
-            )
-            for r in arows
-        ]
-
-        # --- Load Portfolio snapshot ---
-        srow = session.execute(
+    else:
+        crows = session.execute(
             text(
-                "SELECT ps.id, ps.version_number, ps.valuation_date"
-                " FROM portfolio_snapshots ps"
-                " JOIN portfolios p ON p.id = ps.portfolio_id"
-                " WHERE p.household_id = :hid AND ps.status = 'current'"
+                "SELECT cc.id, cc.check_id, cc.check_type, cc.threshold_value,"
+                " cc.severity, cc.target_category, cc.target_holding_category,"
+                " cc.staleness_days"
+                " FROM guardian_check_confirmed cc"
+                " JOIN guardian_checks gc ON gc.id = cc.check_id"
+                " WHERE gc.household_id = :hid"
             ),
             {"hid": household_id},
-        ).fetchone()
-
-        if srow is None:
-            _insert_run(session, run_id, household_id, "skipped_no_portfolio_snapshot",
-                        0, 0, as_of_date, "No Portfolio Snapshot exists")
-            _audit_eval(session, household_id, run_id, "skipped",
-                         "no_portfolio_snapshot", 0, 0)
-            return _load_eval_result(session, run_id)
-
-        snapshot_id, snapshot_version, snapshot_val_date = srow
-        portfolio_snapshot_id_str = str(snapshot_id)
-
-        # --- Load holdings ---
-        hrows = session.execute(
-            text(
-                "SELECT asset_category, total_value"
-                " FROM portfolio_snapshot_holdings WHERE snapshot_id = :sid"
-            ),
-            {"sid": snapshot_id},
         ).fetchall()
 
-        holdings = [
-            PortfolioHolding(asset_category=r[0], total_value=Decimal(str(r[1])))
-            for r in hrows
-        ]
-        total_value = compute_total_value(holdings)
-
-        if total_value == Decimal("0") or len(hrows) == 0:
-            _insert_run(session, run_id, household_id, "skipped_zero_total_value",
-                        0, 0, as_of_date, "Portfolio Snapshot has zero total value")
-            _audit_eval(session, household_id, run_id, "skipped",
-                         "zero_total_value", 0, 0)
-            return _load_eval_result(session, run_id)
-
-        category_map = build_category_map(holdings)
-
-        # --- Load confirmed checks ---
-        if target_check_id is not None:
-            crows = session.execute(
-                text(
-                    "SELECT cc.id, cc.check_id, cc.check_type, cc.threshold_value,"
-                    " cc.severity, cc.target_category, cc.target_holding_category,"
-                    " cc.staleness_days"
-                    " FROM guardian_check_confirmed cc"
-                    " JOIN guardian_checks gc ON gc.id = cc.check_id"
-                    " WHERE cc.check_id = :cid AND gc.household_id = :hid"
-                ),
-                {"cid": target_check_id, "hid": household_id},
-            ).fetchall()
-        else:
-            crows = session.execute(
-                text(
-                    "SELECT cc.id, cc.check_id, cc.check_type, cc.threshold_value,"
-                    " cc.severity, cc.target_category, cc.target_holding_category,"
-                    " cc.staleness_days"
-                    " FROM guardian_check_confirmed cc"
-                    " JOIN guardian_checks gc ON gc.id = cc.check_id"
-                    " WHERE gc.household_id = :hid"
-                ),
-                {"hid": household_id},
-            ).fetchall()
-
-        checks = [
-            CheckInput(
-                check_id=str(r[1]),
-                check_version_id=str(r[0]),
-                check_type=r[2],
-                threshold_value=Decimal(str(r[3])),
-                severity=r[4],
-                target_category_norm=r[5],
-                target_holding_category_norm=r[6],
-                staleness_days=r[7],
-            )
-            for r in crows
-        ]
-
-        # --- Evaluate ---
-        events_created = 0
-        for chk in checks:
-            evt_id = _evaluate_one_check(
-                session, chk, allocations, category_map, total_value,
-                snapshot_val_date, policy_version_id_str,
-                portfolio_snapshot_id_str, as_of_date, run_id,
-            )
-            if evt_id is not None:
-                events_created += 1
-
-        _insert_run(
-            session, run_id, household_id, "completed",
-            len(checks), events_created, as_of_date, None,
+    checks = [
+        CheckInput(
+            check_id=str(r[1]),
+            check_version_id=str(r[0]),
+            check_type=r[2],
+            threshold_value=Decimal(str(r[3])),
+            severity=r[4],
+            target_category_norm=r[5],
+            target_holding_category_norm=r[6],
+            staleness_days=r[7],
         )
-        _audit_eval(
-            session, household_id, run_id, "completed", None,
-            len(checks), events_created,
-            policy_version_id=policy_version_id_str,
-            policy_version_number=policy_version_number,
-            snapshot_id=portfolio_snapshot_id_str,
-            snapshot_version=snapshot_version,
-        )
+        for r in crows
+    ]
 
-        result = _load_eval_result(session, run_id)
+    # --- Evaluate ---
+    events_created = 0
+    for chk in checks:
+        evt_id = _evaluate_one_check(
+            session, chk, allocations, category_map, total_value,
+            snapshot_val_date, policy_version_id_str,
+            portfolio_snapshot_id_str, as_of_date, run_id,
+        )
+        if evt_id is not None:
+            events_created += 1
+
+    _insert_run(
+        session, run_id, household_id, "completed",
+        len(checks), events_created, as_of_date, None,
+    )
+    _audit_eval(
+        session, household_id, run_id, "completed", None,
+        len(checks), events_created,
+        policy_version_id=policy_version_id_str,
+        policy_version_number=policy_version_number,
+        snapshot_id=portfolio_snapshot_id_str,
+        snapshot_version=snapshot_version,
+    )
+
+    result = _load_eval_result(session, run_id)
     return result
 
 
