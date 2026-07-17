@@ -217,6 +217,10 @@ export default function GuardianClient() {
         />
       )}
 
+      <p aria-label="Local-only notice" style={{ fontSize: "0.8rem", color: "var(--muted)" }}>
+        CompoundOS runs locally. Your data stays on your machine.
+      </p>
+
       <hr />
       <AuditTimeline events={auditEvents} onLoad={loadAudit} />
     </div>
