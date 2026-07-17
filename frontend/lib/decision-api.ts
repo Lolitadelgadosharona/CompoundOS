@@ -142,7 +142,8 @@ export type ArchiveResponse = ConfirmResponse & {
   archive_reason: string | null;
 };
 
-const BASE = "/api/decisions";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+const BASE_PATH = "/api/decisions";
 
 class DecisionApiError extends Error {
   constructor(
@@ -169,7 +170,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export async function createDecision(title: string, signal?: AbortSignal): Promise<DecisionCreateResponse> {
-  return request<DecisionCreateResponse>(BASE, {
+  return request<DecisionCreateResponse>(`${API_BASE_URL}${BASE_PATH}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ title }),
@@ -181,7 +182,7 @@ export async function listDecisions(
   params?: { status?: DecisionStatus; limit?: number; cursor?: string },
   signal?: AbortSignal,
 ): Promise<DecisionListResponse> {
-  const url = new URL(BASE, window.location.origin);
+  const url = new URL(`${API_BASE_URL}${BASE_PATH}`, window.location.origin);
   if (params?.status) url.searchParams.set("status", params.status);
   if (params?.limit) url.searchParams.set("limit", String(params.limit));
   if (params?.cursor) url.searchParams.set("cursor", params.cursor);
@@ -189,7 +190,7 @@ export async function listDecisions(
 }
 
 export async function readDraft(decisionId: string, signal?: AbortSignal): Promise<DraftDetail> {
-  return request<DraftDetail>(`${BASE}/${decisionId}/draft`, { signal });
+  return request<DraftDetail>(`${API_BASE_URL}${BASE_PATH}/${decisionId}/draft`, { signal });
 }
 
 export async function updateDraft(
@@ -198,7 +199,7 @@ export async function updateDraft(
   fields: Partial<Record<DecisionTextField, string | null>> & { decision_date?: string | null; review_date?: string | null },
   signal?: AbortSignal,
 ): Promise<DraftDetail> {
-  return request<DraftDetail>(`${BASE}/${decisionId}/draft`, {
+  return request<DraftDetail>(`${API_BASE_URL}${BASE_PATH}/${decisionId}/draft`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ expected_revision: expectedRevision, ...fields }),
@@ -207,13 +208,11 @@ export async function updateDraft(
 }
 
 export async function discardDraft(decisionId: string, expectedRevision: number, signal?: AbortSignal): Promise<void> {
-  await fetch(`${BASE}/${decisionId}/draft/discard`, {
+  await request<unknown>(`${API_BASE_URL}${BASE_PATH}/${decisionId}/draft/discard`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ expected_revision: expectedRevision }),
     signal,
-  }).then((res) => {
-    if (!res.ok) throw new DecisionApiError("Discard failed", res.status, null);
   });
 }
 
@@ -222,7 +221,7 @@ export async function confirmDraft(
   expectedRevision: number,
   signal?: AbortSignal,
 ): Promise<ConfirmResponse> {
-  return request<ConfirmResponse>(`${BASE}/${decisionId}/draft/confirm`, {
+  return request<ConfirmResponse>(`${API_BASE_URL}${BASE_PATH}/${decisionId}/draft/confirm`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ expected_revision: expectedRevision, confirmation: true }),
@@ -231,7 +230,7 @@ export async function confirmDraft(
 }
 
 export async function readDecisionDetail(decisionId: string, signal?: AbortSignal): Promise<DecisionDetailResponse> {
-  return request<DecisionDetailResponse>(`${BASE}/${decisionId}`, { signal });
+  return request<DecisionDetailResponse>(`${API_BASE_URL}${BASE_PATH}/${decisionId}`, { signal });
 }
 
 export async function archiveDecision(
@@ -239,7 +238,7 @@ export async function archiveDecision(
   archiveReason?: string,
   signal?: AbortSignal,
 ): Promise<ArchiveResponse> {
-  return request<ArchiveResponse>(`${BASE}/${decisionId}/archive`, {
+  return request<ArchiveResponse>(`${API_BASE_URL}${BASE_PATH}/${decisionId}/archive`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ archive_reason: archiveReason ?? null }),
@@ -248,7 +247,7 @@ export async function archiveDecision(
 }
 
 export async function unarchiveDecision(decisionId: string, signal?: AbortSignal): Promise<ConfirmResponse> {
-  return request<ConfirmResponse>(`${BASE}/${decisionId}/unarchive`, {
+  return request<ConfirmResponse>(`${API_BASE_URL}${BASE_PATH}/${decisionId}/unarchive`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({}),
@@ -257,7 +256,7 @@ export async function unarchiveDecision(decisionId: string, signal?: AbortSignal
 }
 
 export async function readCorrections(decisionId: string, signal?: AbortSignal): Promise<CorrectionListResponse> {
-  return request<CorrectionListResponse>(`${BASE}/${decisionId}/corrections`, { signal });
+  return request<CorrectionListResponse>(`${API_BASE_URL}${BASE_PATH}/${decisionId}/corrections`, { signal });
 }
 
 export async function appendCorrection(
@@ -277,7 +276,7 @@ export async function appendCorrection(
   },
   signal?: AbortSignal,
 ): Promise<Correction> {
-  return request<Correction>(`${BASE}/${decisionId}/corrections`, {
+  return request<Correction>(`${API_BASE_URL}${BASE_PATH}/${decisionId}/corrections`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(fields),
@@ -290,7 +289,7 @@ export async function readDecisionAudit(
   params?: { before_sequence_number?: number; limit?: number },
   signal?: AbortSignal,
 ): Promise<DecisionAuditListResponse> {
-  const url = new URL(`${BASE}/${decisionId}/audit`, window.location.origin);
+  const url = new URL(`${API_BASE_URL}${BASE_PATH}/${decisionId}/audit`, window.location.origin);
   if (params?.before_sequence_number) url.searchParams.set("before_sequence_number", String(params.before_sequence_number));
   if (params?.limit) url.searchParams.set("limit", String(params.limit));
   return request<DecisionAuditListResponse>(url.toString(), { signal });

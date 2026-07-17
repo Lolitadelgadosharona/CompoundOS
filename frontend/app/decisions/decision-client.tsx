@@ -16,6 +16,7 @@ import {
   DECISION_STATUSES,
   DECISION_TEXT_FIELDS,
   DECISION_TEXT_LIMITS,
+  discardDraft,
   DraftDetail,
   listDecisions,
   readCorrections,
@@ -316,11 +317,13 @@ function DraftEditor({
   onDirtyChange,
   onReload,
   onSaved,
+  onDiscard,
 }: {
   draft: DraftDetail;
   onDirtyChange: (dirty: boolean) => void;
   onReload: () => void;
   onSaved: (draft: DraftDetail, message: string) => void;
+  onDiscard: () => void;
 }) {
   const [form, setForm] = useState<Record<DecisionTextField, string>>(() => textFromDraft(draft));
   const [decisionDate, setDecisionDate] = useState<string>(draft.decision_date ?? "");
@@ -480,6 +483,14 @@ function DraftEditor({
         <div className="actions">
           <button className="primary-button" disabled={submitting} type="submit">
             {submitting ? "Saving draft…" : "Save draft"}
+          </button>
+          <button
+            className="danger-button"
+            disabled={submitting}
+            onClick={onDiscard}
+            type="button"
+          >
+            Discard draft
           </button>
         </div>
       </form>
@@ -1308,6 +1319,19 @@ export function DecisionClient() {
     if (selectedId) void loadAudit(selectedId, true);
   }
 
+  async function handleDiscardDraft() {
+    if (!selectedId || !draft) return;
+    try {
+      await discardDraft(selectedId, draft.revision);
+      setDetail(null);
+      setDraftDirty(false);
+      setSavedMessage("Draft discarded.");
+      void loadList();
+    } catch (caught) {
+      setDetailError(neutralMessage(caught));
+    }
+  }
+
   /* ---- Correction saved callback ---- */
   function acceptCorrection(correction: Correction) {
     setCorrections((prev) => [correction, ...prev]);
@@ -1441,6 +1465,7 @@ export function DecisionClient() {
           draft={draft}
           key={`draft-${draft.decision_id}-${draft.revision}`}
           onDirtyChange={setDraftDirty}
+          onDiscard={handleDiscardDraft}
           onReload={requestReload}
           onSaved={acceptDraft}
         />
