@@ -18,7 +18,7 @@
 | OD-S4-008 | Drift: percentage points or percent-of-target? | A: Absolute percentage points `abs(actual - target)`. Equal-to-threshold NOT exceeded. | B, C | All Decimal with ROUND_HALF_EVEN. target=20%, actual=0% → drift=20pp. |
 | OD-S4-009 | Severity: Owner or system? | A: Owner-defined | B | System never auto-upgrades severity. |
 | OD-S4-010 | Discard semantics | A: Pattern match — identity deletion if never confirmed, draft-only if confirmed exists | B | Matches Policy/Decision pattern. |
-| OD-S4-011 | Event deduplication | A: Deterministic input fingerprint | B | Drift/exposure: (check_version_id, policy_version_id, portfolio_snapshot_id). Staleness: + `as_of_date`. UNIQUE with ON CONFLICT DO NOTHING. |
+| OD-S4-011 | Event deduplication | A: Deterministic input fingerprint | B | Drift/exposure: (check_version_id, policy_version_id, portfolio_snapshot_id). Staleness: + `as_of_date`. `as_of_date` stored on guardian_events (copied from evaluation run). UNIQUE with ON CONFLICT DO NOTHING. |
 | OD-S4-012 | UI: separate page or inline? | A: Separate `/guardian` page | B | Guardian must not be coupled into Portfolio mutation workflow. |
 | OD-S4-013 | Evaluation response format | C: Both — summary + events with `evaluation_run_id`, `status`, `skip_reason` | A, B | Machine-readable status, human-readable skip_reason, checks_evaluated, events_created, events array. |
 

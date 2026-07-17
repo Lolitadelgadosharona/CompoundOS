@@ -214,7 +214,7 @@ non-advisory Guardian Events.
 - No notification delivery (email, SMS, push) — events are viewable in the
   local UI only.
 - No scheduled/cron-based evaluation in Sprint 004 — evaluation is
-  manual (Owner triggers) or on-demand (after Portfolio Confirm).
+  manual (Owner triggers explicitly from the Guardian UI).
 - No authentication or public deployment.
 - No hard-delete or retirement lifecycle for Confirmed Checks — once
   confirmed, a Check identity persists indefinitely, matching the
@@ -336,6 +336,7 @@ guardian_events
   exposure_pct NUMERIC(5,2) — for category_exposure checks
   staleness_days_actual INTEGER — for staleness checks, the actual age in calendar days
   exceeded BOOLEAN NOT NULL DEFAULT TRUE — always TRUE for events (only exceeded thresholds are recorded)
+  as_of_date DATE NOT NULL — copied from parent evaluation run, enables staleness dedup
   — BEFORE INSERT/UPDATE/DELETE trigger prohibits all modification
   — UNIQUE fingerprint on (check_version_id, policy_version_id, portfolio_snapshot_id, as_of_date)
     for staleness; (check_version_id, policy_version_id, portfolio_snapshot_id) for drift/exposure
@@ -636,10 +637,11 @@ No financial values (quantities, prices, total_values) in audit metadata.
 
 ### Sprint 004 Slice A: Guardian Persistence Foundation (R2)
 - Alembic revision 0007: guardian_checks, guardian_check_drafts,
-  guardian_check_confirmed, guardian_events
+  guardian_check_confirmed, guardian_evaluation_runs, guardian_events
 - Named CHECK, UNIQUE, FK constraints
-- Immutability triggers on confirmed and events
-- SQLAlchemy ORM models
+- Immutability triggers on confirmed, evaluation_runs, and events
+- Deduplication fingerprint UNIQUE constraints on events
+- SQLAlchemy ORM models for all five tables
 - Real PostgreSQL tests only (drift computation tested with raw SQL)
 - No service, repository, API, router, or frontend
 
