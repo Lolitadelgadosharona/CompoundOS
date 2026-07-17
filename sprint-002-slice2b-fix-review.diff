@@ -1,0 +1,939 @@
+diff --git a/apps/api/policy_schemas.py b/apps/api/policy_schemas.py
+index 72a344d..06b2b9a 100644
+--- a/apps/api/policy_schemas.py
++++ b/apps/api/policy_schemas.py
+@@ -49,6 +49,10 @@ class PolicyTextFields(BaseModel):
+     notes: str = Field(default="", max_length=8_000)
+ 
+ 
++class EmptyPolicyCreateRequest(BaseModel):
++    model_config = ConfigDict(extra="forbid")
++
++
+ class PolicyDraftUpdate(BaseModel):
+     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+ 
+diff --git a/apps/api/routers/policies.py b/apps/api/routers/policies.py
+index 8661f26..f9931d8 100644
+--- a/apps/api/routers/policies.py
++++ b/apps/api/routers/policies.py
+@@ -10,6 +10,7 @@ from apps.api.policy_schemas import (
+     AllocationReplaceRequest,
+     AllocationResponse,
+     CreatePolicyDraftRequest,
++    EmptyPolicyCreateRequest,
+     ExpectedRevisionRequest,
+     PolicyAuditEventResponse,
+     PolicyCreateResponse,
+@@ -97,7 +98,10 @@ def _translate(exc: Exception) -> HTTPException:
+ 
+ 
+ @router.post("", response_model=PolicyCreateResponse, status_code=status.HTTP_201_CREATED)
+-def create(session: DatabaseSession) -> PolicyCreateResponse:
++def create(
++    session: DatabaseSession,
++    _payload: EmptyPolicyCreateRequest = Body(default_factory=EmptyPolicyCreateRequest),
++) -> PolicyCreateResponse:
+     try:
+         policy, draft, allocations = create_policy(session)
+         return PolicyCreateResponse(
+@@ -128,8 +132,7 @@ def get_draft(session: DatabaseSession) -> PolicyDraftResponse:
+ @router.patch("/current/draft", response_model=PolicyDraftResponse)
+ def patch_draft(payload: PolicyDraftUpdate, session: DatabaseSession) -> PolicyDraftResponse:
+     try:
+-        draft, allocations = update_draft_text(session, payload)
+-        return _draft_response(draft, allocations)
++        return update_draft_text(session, payload)
+     except Exception as exc:
+         raise _translate(exc) from exc
+ 
+diff --git a/apps/api/services/policies.py b/apps/api/services/policies.py
+index cce3e47..d712f76 100644
+--- a/apps/api/services/policies.py
++++ b/apps/api/services/policies.py
+@@ -19,7 +19,9 @@ from apps.api.models import (
+ from apps.api.policy_schemas import (
+     POLICY_TEXT_FIELDS,
+     AllocationReplaceRequest,
++    AllocationResponse,
+     CreatePolicyDraftRequest,
++    PolicyDraftResponse,
+     PolicyDraftUpdate,
+     PublishPolicyDraftRequest,
+     normalize_asset_class_name,
+@@ -168,7 +170,7 @@ def read_current_draft(
+ 
+ def update_draft_text(
+     session: Session, payload: PolicyDraftUpdate
+-) -> tuple[InvestmentPolicyDraft, list[InvestmentPolicyDraftAllocation]]:
++) -> PolicyDraftResponse:
+     submitted = payload.model_dump(exclude={"expected_revision"}, exclude_unset=True)
+     if not submitted:
+         raise NoPolicyChangesError
+@@ -198,7 +200,17 @@ def update_draft_text(
+             action="policy.draft.updated",
+             metadata={"changed_fields": changed, "draft_revision": draft.revision},
+         )
+-    return draft, list_draft_allocations(session, draft.id)
++        allocations = list_draft_allocations(session, draft.id)
++        snapshot_values = {
++            name: getattr(draft, name)
++            for name in PolicyDraftResponse.model_fields
++            if name != "allocations"
++        }
++        snapshot_values["allocations"] = [
++            AllocationResponse.model_validate(item) for item in allocations
++        ]
++        snapshot = PolicyDraftResponse.model_validate(snapshot_values)
++    return snapshot
+ 
+ 
+ def _allocation_values(payload: AllocationReplaceRequest) -> list[dict[str, object]]:
+diff --git a/docs/ADR/0004-investment-policy-backend-transactions.md b/docs/ADR/0004-investment-policy-backend-transactions.md
+index 7a193e3..fb0bd1c 100644
+--- a/docs/ADR/0004-investment-policy-backend-transactions.md
++++ b/docs/ADR/0004-investment-policy-backend-transactions.md
+@@ -28,6 +28,11 @@ contracts without implementing a frontend or investment decision logic.
+   constraints to 409. Propagate unrelated database errors.
+ - Allow Audit metadata only for changed field names, Draft revision, source or
+   published/superseded version number, and allocation item count.
++- Materialize mutation response snapshots from scalar values inside the locked
++  transaction, commit, and then return without post-commit Draft/allocation reads
++  or lazy loading.
++- Model Policy creation as an optional strict empty-object request so omitted and
++  `{}` bodies are accepted while extra fields and non-object JSON are rejected.
+ 
+ ## Consequences
+ 
+@@ -38,3 +43,6 @@ contracts without implementing a frontend or investment decision logic.
+   user experience without separately authorized Slice 2C frontend work.
+ - Real PostgreSQL tests remain required for locking, triggers, rollback, and
+   concurrency behavior; mocks and SQLite cannot replace them.
++- Deterministic barriers and transaction-stage failure injection cover lifecycle
++  races, response snapshots, rollback completeness, and connection reuse without
++  adding test-only production behavior.
+diff --git a/docs/ARCHITECTURE.md b/docs/ARCHITECTURE.md
+index 4c32875..19b0aea 100644
+--- a/docs/ARCHITECTURE.md
++++ b/docs/ARCHITECTURE.md
+@@ -65,6 +65,12 @@ Slice 2A schema:
+   Python, and `NUMERIC(5,2)` in PostgreSQL.
+ - Policy audit reads select the newest limited window by descending database
+   sequence and return that window ascending.
++- Draft text updates materialize a complete scalar response snapshot while the
++  Policy-then-Draft transaction remains locked. The service commits before
++  returning that snapshot and performs no Draft or allocation query after commit.
++- Policy creation uses a strict empty-object request contract: the body may be
++  omitted or `{}`, while non-empty objects and non-object JSON are rejected before
++  persistence.
+ 
+ No frontend, authentication, recommendation, Guardian, AI, Broker, trading, or
+ Decision Journal module is introduced in Slice 2B.
+diff --git a/docs/CHANGELOG.md b/docs/CHANGELOG.md
+index 096cdaf..575c4ab 100644
+--- a/docs/CHANGELOG.md
++++ b/docs/CHANGELOG.md
+@@ -12,6 +12,12 @@
+   Draft revisions, named-conflict mapping, and atomic non-sensitive AuditEvents
+ - Real PostgreSQL API, rollback, immutable publication, concurrency, and race tests
+ - ADR 0004 documenting the Policy backend transaction and API boundary
++- Transaction-scoped PATCH response snapshots that perform no Draft/allocation
++  read after commit
++- Strict optional empty-object validation for Policy creation requests
++- Expanded required PostgreSQL coverage for lifecycle races, replacement and
++  allocation rollback, unrelated integrity failures, audit windows, text
++  boundaries, and exact publication totals
+ 
+ ### Boundaries
+ 
+@@ -26,6 +32,11 @@
+ - Sprint 002 remains In Progress.
+ - Slice 2A remains Done.
+ - Slice 2B is in Review and is not a production-readiness claim.
++- Independent review initially concluded REQUEST CHANGES for M-1, M-2, and L-1.
++  The focused fixes are implemented and await independent incremental review;
++  PR #8 remains Draft and no final approval is claimed.
++- Full Docker/browser runtime validation and the Alembic `path_separator = os`
++  warning remain non-blocking Backlog items.
+ 
+ ## [Unreleased] - Sprint 002 Slice 2A Complete
+ 
+diff --git a/docs/MASTER_PLAN.md b/docs/MASTER_PLAN.md
+index a4c2d66..d360a0b 100644
+--- a/docs/MASTER_PLAN.md
++++ b/docs/MASTER_PLAN.md
+@@ -108,6 +108,20 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+   Policy-filtered AuditEvent reads.
+ - Slice 2B adds no frontend, recommendation, Guardian, AI, Broker, trading,
+   authentication, Slice 2C, or Slice 3 behavior.
++- Sprint 002 Slice 2B independent review conclusion: REQUEST CHANGES, with two
++  MEDIUM findings (post-commit PATCH response snapshot race and blocking test
++  coverage) and one LOW finding (non-empty Policy-create bodies were ignored).
++- M-1 is addressed by constructing the complete Draft response snapshot while
++  the Policy-then-Draft transaction is still locked, then returning only the
++  scalar DTO after a successful commit with no post-commit query.
++- M-2 is addressed with deterministic independent-session concurrency tests,
++  transaction-stage rollback tests, audit-window and ownership filtering tests,
++  complete Policy text boundaries, exact publish totals, and error/session reuse
++  coverage against real PostgreSQL.
++- L-1 is addressed with an optional strict empty-object request contract that
++  rejects extra fields and non-object JSON without creating Policy state.
++- These fixes await independent incremental review. Pull request #8 remains
++  Draft; no final review approval is claimed.
+ 
+ ## Done
+ 
+@@ -265,3 +279,11 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+   and Policy-filtered audit reads.
+ - 2026-07-14: Slice 2B enters Review; Slice 2C and Slice 3 remain unauthorized and
+   Not Started.
++- 2026-07-14: Slice 2B independent review concluded REQUEST CHANGES for M-1
++  response snapshot atomicity, M-2 blocking test coverage, and L-1 strict Policy
++  creation body validation.
++- 2026-07-14: M-1, M-2, and L-1 review fixes were implemented for independent
++  incremental review; pull request #8 remains Draft and is not approved for merge.
++- 2026-07-14: Docker/browser runtime validation and the Alembic
++  `path_separator = os` warning remain non-blocking Backlog items; Slice 2C and
++  Slice 3 remain unauthorized and Not Started.
+diff --git a/tests/api/test_policy_api.py b/tests/api/test_policy_api.py
+index bd35bdc..44652f6 100644
+--- a/tests/api/test_policy_api.py
++++ b/tests/api/test_policy_api.py
+@@ -1,21 +1,32 @@
+ from __future__ import annotations
+ 
+ from concurrent.futures import ThreadPoolExecutor
++from threading import Barrier, Event
+ from uuid import uuid4
+ 
+ import pytest
+ from fastapi.testclient import TestClient
+-from sqlalchemy import func, select
++from sqlalchemy import delete, event, func, select
++from sqlalchemy.exc import IntegrityError
+ from sqlalchemy.orm import Session, sessionmaker
+ 
++from apps.api.main import app
+ from apps.api.models import (
+     AuditEvent,
+     HouseholdProfile,
+     InvestmentPolicy,
+     InvestmentPolicyDraft,
++    InvestmentPolicyDraftAllocation,
+     InvestmentPolicyVersion,
++    InvestmentPolicyVersionAllocation,
++)
++from apps.api.policy_schemas import (
++    POLICY_TEXT_LIMITS,
++    AllocationReplaceRequest,
++    CreatePolicyDraftRequest,
++    PolicyDraftUpdate,
++    PublishPolicyDraftRequest,
+ )
+-from apps.api.policy_schemas import AllocationReplaceRequest, PublishPolicyDraftRequest
+ from apps.api.services import policies as policy_service
+ 
+ pytestmark = pytest.mark.postgres
+@@ -87,6 +98,19 @@ def allocation_content(items: list[dict]) -> list[dict]:
+     ]
+ 
+ 
++def policy_state_counts(session: Session) -> dict[str, int]:
++    return {
++        "drafts": session.scalar(select(func.count()).select_from(InvestmentPolicyDraft)),
++        "draft_allocations": session.scalar(
++            select(func.count()).select_from(InvestmentPolicyDraftAllocation)
++        ),
++        "versions": session.scalar(select(func.count()).select_from(InvestmentPolicyVersion)),
++        "version_allocations": session.scalar(
++            select(func.count()).select_from(InvestmentPolicyVersionAllocation)
++        ),
++    }
++
++
+ def test_policy_create_read_singleton_and_audit_redaction(api_client: TestClient) -> None:
+     assert api_client.post("/api/policies").status_code == 404
+     create_household(api_client)
+@@ -107,6 +131,33 @@ def test_policy_create_read_singleton_and_audit_redaction(api_client: TestClient
+     assert all(event["actor"] == "local-owner" for event in events)
+ 
+ 
++def test_policy_create_accepts_explicit_empty_object(api_client: TestClient) -> None:
++    create_household(api_client)
++    response = api_client.post("/api/policies", json={})
++    assert response.status_code == 201
++
++
++@pytest.mark.parametrize(
++    "invalid_body",
++    [
++        {"unexpected": "secret-marker"},
++        "secret-marker",
++        42,
++        ["secret-marker"],
++    ],
++)
++def test_policy_create_rejects_nonempty_or_nonobject_body_without_writes(
++    api_client: TestClient, db_session: Session, invalid_body
++) -> None:
++    create_household(api_client)
++    response = api_client.post("/api/policies", json=invalid_body)
++    assert response.status_code == 422
++    assert "secret-marker" not in response.text
++    assert db_session.scalar(select(func.count()).select_from(InvestmentPolicy)) == 0
++    assert db_session.scalar(select(func.count()).select_from(InvestmentPolicyDraft)) == 0
++    assert db_session.scalar(select(func.count()).select_from(AuditEvent)) == 1
++
++
+ def test_draft_text_revision_noop_stale_and_validation(api_client: TestClient) -> None:
+     create_household(api_client)
+     create_policy(api_client)
+@@ -142,6 +193,29 @@ def test_draft_text_revision_noop_stale_and_validation(api_client: TestClient) -
+     assert "Owner objective" not in str(events)
+ 
+ 
++@pytest.mark.parametrize("field_name,maximum", POLICY_TEXT_LIMITS.items())
++def test_policy_text_unicode_boundaries_reach_real_postgresql(
++    api_client: TestClient, field_name: str, maximum: int
++) -> None:
++    create_household(api_client)
++    create_policy(api_client)
++    accepted = api_client.patch(
++        "/api/policies/current/draft",
++        json={
++            "expected_revision": 1,
++            field_name: f"  {'界' * maximum}\u2003",
++        },
++    )
++    assert accepted.status_code == 200, accepted.text
++    assert accepted.json()[field_name] == "界" * maximum
++    rejected = api_client.patch(
++        "/api/policies/current/draft",
++        json={"expected_revision": 2, field_name: "界" * (maximum + 1)},
++    )
++    assert rejected.status_code == 422
++    assert api_client.get("/api/policies/current/draft").json()["revision"] == 2
++
++
+ def test_allocation_replace_is_atomic_revisioned_and_validated(api_client: TestClient) -> None:
+     create_household(api_client)
+     create_policy(api_client)
+@@ -226,6 +300,74 @@ def test_publish_requires_complete_record_and_exposes_immutable_reads(
+     assert api_client.get("/api/policies/current/versions/2").status_code == 404
+ 
+ 
++@pytest.mark.parametrize(
++    "items",
++    [
++        [{"asset_class_name": "Cash", "target_percentage": "99.99"}],
++        [
++            {"asset_class_name": "Equity", "target_percentage": "50.00"},
++            {"asset_class_name": "Cash", "target_percentage": "50.01"},
++        ],
++    ],
++)
++def test_publish_rejects_totals_below_or_above_100_without_consuming_draft(
++    api_client: TestClient, db_session: Session, items: list[dict[str, str]]
++) -> None:
++    create_household(api_client)
++    create_policy(api_client)
++    updated = api_client.patch(
++        "/api/policies/current/draft", json={"expected_revision": 1, **READY_TEXT}
++    ).json()
++    saved = api_client.put(
++        "/api/policies/current/draft/allocations",
++        json={"expected_revision": updated["revision"], "items": items},
++    )
++    assert saved.status_code == 200
++    response = api_client.post(
++        "/api/policies/current/draft/publish",
++        json={"expected_revision": saved.json()["revision"], "confirmation": True},
++    )
++    assert response.status_code == 400
++    assert api_client.get("/api/policies/current/draft").status_code == 200
++    assert db_session.scalar(select(func.count()).select_from(InvestmentPolicyVersion)) == 0
++    assert "policy.published" not in list(db_session.scalars(select(AuditEvent.action)))
++
++
++def test_publish_uses_exact_decimal_sum_and_allows_empty_optional_text(
++    api_client: TestClient,
++) -> None:
++    create_household(api_client)
++    create_policy(api_client)
++    updated = api_client.patch(
++        "/api/policies/current/draft",
++        json={
++            "expected_revision": 1,
++            "objectives": "x",
++            "time_horizon": "y",
++            "decision_process": "z",
++        },
++    ).json()
++    saved = api_client.put(
++        "/api/policies/current/draft/allocations",
++        json={
++            "expected_revision": updated["revision"],
++            "items": [
++                {"asset_class_name": "One", "target_percentage": "33.33"},
++                {"asset_class_name": "Two", "target_percentage": "33.33"},
++                {"asset_class_name": "Three", "target_percentage": "33.34"},
++            ],
++        },
++    ).json()
++    published = publish(api_client, saved["revision"])
++    assert [item["target_percentage"] for item in published["allocations"]] == [
++        "33.33",
++        "33.33",
++        "33.34",
++    ]
++    for optional_field in set(POLICY_TEXT_LIMITS) - set(READY_TEXT):
++        assert published[optional_field] == ""
++
++
+ def test_replacement_publish_copy_provenance_history_and_audit_order(
+     api_client: TestClient,
+ ) -> None:
+@@ -278,6 +420,92 @@ def test_replacement_publish_copy_provenance_history_and_audit_order(
+     assert "60.00" not in str(events)
+ 
+ 
++def test_policy_audit_latest_window_limits_order_filters_and_redacts(
++    api_client: TestClient, db_session: Session
++) -> None:
++    create_household(api_client)
++    create_policy(api_client)
++    policy = db_session.scalar(select(InvestmentPolicy))
++    assert policy is not None
++
++    gap = AuditEvent(
++        household_id=policy.household_id,
++        actor="local-owner",
++        action="policy.draft.updated",
++        entity_type="InvestmentPolicy",
++        entity_id=policy.id,
++        event_metadata={"draft_revision": 999},
++    )
++    db_session.add(gap)
++    db_session.flush()
++    db_session.rollback()
++
++    for index in range(120):
++        db_session.add(
++            AuditEvent(
++                household_id=policy.household_id,
++                actor="local-owner",
++                action="policy.draft.updated",
++                entity_type="InvestmentPolicy",
++                entity_id=policy.id,
++                event_metadata={"draft_revision": index + 2},
++            )
++        )
++        if index % 20 == 0:
++            db_session.add_all(
++                [
++                    AuditEvent(
++                        household_id=policy.household_id,
++                        actor="local-owner",
++                        action="household.updated",
++                        entity_type="HouseholdProfile",
++                        entity_id=policy.household_id,
++                        event_metadata={"changed_fields": ["secret-marker"]},
++                    ),
++                    AuditEvent(
++                        household_id=policy.household_id,
++                        actor="local-owner",
++                        action="policy.draft.updated",
++                        entity_type="InvestmentPolicy",
++                        entity_id=uuid4(),
++                        event_metadata={"draft_revision": 999},
++                    ),
++                ]
++            )
++    db_session.commit()
++
++    matching_desc = list(
++        db_session.scalars(
++            select(AuditEvent.sequence_number)
++            .where(
++                AuditEvent.household_id == policy.household_id,
++                AuditEvent.entity_type == "InvestmentPolicy",
++                AuditEvent.entity_id == policy.id,
++            )
++            .order_by(AuditEvent.sequence_number.desc())
++        )
++    )
++    default_response = api_client.get("/api/policies/current/audit-events")
++    assert default_response.status_code == 200
++    assert [event["sequence_number"] for event in default_response.json()] == list(
++        reversed(matching_desc[:50])
++    )
++    maximum_response = api_client.get("/api/policies/current/audit-events?limit=100")
++    assert [event["sequence_number"] for event in maximum_response.json()] == list(
++        reversed(matching_desc[:100])
++    )
++    assert set(matching_desc[100:]).isdisjoint(
++        {event["sequence_number"] for event in maximum_response.json()}
++    )
++    assert "secret-marker" not in maximum_response.text
++    assert "asset_class_name" not in maximum_response.text
++    assert "target_percentage" not in maximum_response.text
++    for invalid_limit in (0, -1, 101):
++        assert api_client.get(
++            f"/api/policies/current/audit-events?limit={invalid_limit}"
++        ).status_code == 422
++
++
+ def test_audit_failure_rolls_back_policy_create(
+     db_session: Session, monkeypatch: pytest.MonkeyPatch
+ ) -> None:
+@@ -327,6 +555,198 @@ def test_publish_failure_rolls_back_snapshot_draft_and_audit(
+     assert "policy.published" not in actions
+ 
+ 
++def test_replacement_publish_failure_restores_superseded_version_and_draft(
++    api_client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    create_household(api_client)
++    create_policy(api_client)
++    first = publish(api_client, prepare_draft(api_client)["revision"])
++    copied = api_client.post(
++        "/api/policies/current/draft", json={"source_version_id": first["id"]}
++    ).json()
++    actions_before = list(
++        db_session.scalars(
++            select(AuditEvent.action).order_by(AuditEvent.sequence_number)
++        )
++    )
++    db_session.rollback()
++    real_add = policy_service.add_policy_audit_event
++
++    def fail_after_supersession(*args, **kwargs):
++        if kwargs.get("action") == "policy.published":
++            raise RuntimeError("simulated replacement publish failure")
++        return real_add(*args, **kwargs)
++
++    with monkeypatch.context() as scoped_patch:
++        scoped_patch.setattr(
++            policy_service, "add_policy_audit_event", fail_after_supersession
++        )
++        with pytest.raises(RuntimeError, match="replacement publish failure"):
++            policy_service.publish_draft(
++                db_session,
++                PublishPolicyDraftRequest(
++                    expected_revision=copied["revision"], confirmation=True
++                ),
++            )
++
++    version = db_session.scalar(select(InvestmentPolicyVersion))
++    assert version is not None
++    assert version.status == "published"
++    assert version.superseded_at is None
++    assert policy_state_counts(db_session) == {
++        "drafts": 1,
++        "draft_allocations": 2,
++        "versions": 1,
++        "version_allocations": 2,
++    }
++    assert list(
++        db_session.scalars(
++            select(AuditEvent.action).order_by(AuditEvent.sequence_number)
++        )
++    ) == actions_before
++    assert db_session.scalar(select(func.count()).select_from(InvestmentPolicy)) == 1
++
++
++def test_allocation_database_failure_restores_collection_revision_and_audit(
++    api_client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    create_household(api_client)
++    create_policy(api_client)
++    draft = prepare_draft(api_client)
++    draft_id = draft["id"]
++    original_content = allocation_content(draft["allocations"])
++    original_actions = list(
++        db_session.scalars(
++            select(AuditEvent.action).order_by(AuditEvent.sequence_number)
++        )
++    )
++    db_session.rollback()
++
++    def fail_after_delete(
++        session: Session, target_draft_id, _items
++    ) -> list[InvestmentPolicyDraftAllocation]:
++        session.execute(
++            delete(InvestmentPolicyDraftAllocation).where(
++                InvestmentPolicyDraftAllocation.draft_id == target_draft_id
++            )
++        )
++        session.flush()
++        session.add(
++            InvestmentPolicyDraftAllocation(
++                draft_id=target_draft_id,
++                asset_class_name="Invalid",
++                normalized_asset_class_name="invalid",
++                target_percentage="0.00",
++                sort_order=0,
++            )
++        )
++        session.flush()
++        raise AssertionError("database constraint should reject zero percentage")
++
++    replacement = AllocationReplaceRequest(
++        expected_revision=draft["revision"],
++        items=[{"asset_class_name": "Cash", "target_percentage": "100.00"}],
++    )
++    with monkeypatch.context() as scoped_patch:
++        scoped_patch.setattr(
++            policy_service, "replace_draft_allocations", fail_after_delete
++        )
++        with pytest.raises(IntegrityError):
++            policy_service.replace_allocations(db_session, replacement)
++
++    restored = policy_service.read_current_draft(db_session)
++    assert str(restored[0].id) == draft_id
++    assert restored[0].revision == draft["revision"]
++    assert allocation_content(
++        [
++            {
++                "asset_class_name": item.asset_class_name,
++                "target_percentage": f"{item.target_percentage:.2f}",
++                "sort_order": item.sort_order,
++            }
++            for item in restored[1]
++        ]
++    ) == original_content
++    assert list(
++        db_session.scalars(
++            select(AuditEvent.action).order_by(AuditEvent.sequence_number)
++        )
++    ) == original_actions
++    db_session.rollback()
++
++    updated_draft, updated_allocations = policy_service.replace_allocations(
++        db_session, replacement
++    )
++    assert updated_draft.revision == draft["revision"] + 1
++    assert [item.target_percentage for item in updated_allocations] == [100]
++
++
++def test_unrelated_integrity_error_propagates_rolls_back_and_session_is_reusable(
++    db_session: Session, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    db_session.add(HouseholdProfile(**HOUSEHOLD))
++    db_session.commit()
++    real_add = policy_service.add_policy_audit_event
++
++    def add_invalid_unrelated_row(session: Session, **_kwargs):
++        session.add(
++            InvestmentPolicyDraftAllocation(
++                draft_id=uuid4(),
++                asset_class_name="secret-marker",
++                normalized_asset_class_name="secret-marker",
++                target_percentage="10.00",
++                sort_order=0,
++            )
++        )
++        session.flush()
++
++    with monkeypatch.context() as scoped_patch:
++        scoped_patch.setattr(
++            policy_service, "add_policy_audit_event", add_invalid_unrelated_row
++        )
++        with pytest.raises(IntegrityError) as exc_info:
++            policy_service.create_policy(db_session)
++        assert policy_service._constraint_name(exc_info.value) != (
++            "uq_investment_policies_household_id"
++        )
++
++    assert db_session.scalar(select(func.count()).select_from(InvestmentPolicy)) == 0
++    assert db_session.scalar(select(func.count()).select_from(InvestmentPolicyDraft)) == 0
++    db_session.rollback()
++    monkeypatch.setattr(policy_service, "add_policy_audit_event", real_add)
++    policy, draft, allocations = policy_service.create_policy(db_session)
++    assert policy.id and draft.id and allocations == []
++
++
++def test_unrelated_integrity_error_returns_redacted_generic_500(
++    api_client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    create_household(api_client)
++
++    def add_invalid_unrelated_row(session: Session, **_kwargs):
++        session.add(
++            InvestmentPolicyDraftAllocation(
++                draft_id=uuid4(),
++                asset_class_name="secret-marker",
++                normalized_asset_class_name="secret-marker",
++                target_percentage="10.00",
++                sort_order=0,
++            )
++        )
++        session.flush()
++
++    monkeypatch.setattr(
++        policy_service, "add_policy_audit_event", add_invalid_unrelated_row
++    )
++    with TestClient(app, raise_server_exceptions=False) as redacted_client:
++        response = redacted_client.post("/api/policies")
++    assert response.status_code == 500
++    assert response.text == "Internal Server Error"
++    assert "secret-marker" not in response.text
++    assert db_session.scalar(select(func.count()).select_from(InvestmentPolicy)) == 0
++    assert db_session.scalar(select(func.count()).select_from(InvestmentPolicyDraft)) == 0
++
++
+ def test_concurrent_policy_create_has_one_winner(postgres_engine, db_session: Session) -> None:
+     del db_session
+     with Session(postgres_engine) as setup:
+@@ -347,6 +767,187 @@ def test_concurrent_policy_create_has_one_winner(postgres_engine, db_session: Se
+     assert sorted(results) == ["conflict", "created"]
+ 
+ 
++def test_concurrent_new_draft_creation_has_one_winner(
++    api_client: TestClient, postgres_engine
++) -> None:
++    create_household(api_client)
++    create_policy(api_client)
++    published = publish(api_client, prepare_draft(api_client)["revision"])
++    factory = sessionmaker(bind=postgres_engine, expire_on_commit=False)
++    start = Barrier(2)
++
++    def attempt() -> str:
++        with factory() as session:
++            start.wait()
++            try:
++                policy_service.create_new_draft(
++                    session,
++                    CreatePolicyDraftRequest(source_version_id=published["id"]),
++                )
++                return "created"
++            except policy_service.DraftAlreadyExistsError:
++                return "conflict"
++
++    with ThreadPoolExecutor(max_workers=2) as executor:
++        outcomes = sorted(executor.map(lambda _index: attempt(), range(2)))
++    assert outcomes == ["conflict", "created"]
++    with Session(postgres_engine) as session:
++        assert policy_state_counts(session)["drafts"] == 1
++        assert policy_state_counts(session)["draft_allocations"] == 2
++        actions = list(session.scalars(select(AuditEvent.action)))
++        assert actions.count("policy.draft.created") == 2
++
++
++def test_discard_and_new_draft_race_is_linearizable(
++    api_client: TestClient, postgres_engine
++) -> None:
++    create_household(api_client)
++    create_policy(api_client)
++    draft = prepare_draft(api_client)
++    factory = sessionmaker(bind=postgres_engine, expire_on_commit=False)
++    start = Barrier(2)
++
++    def discard_attempt() -> str:
++        with factory() as session:
++            start.wait()
++            policy_service.discard_draft(session, draft["revision"])
++            return "discarded"
++
++    def create_attempt() -> str:
++        with factory() as session:
++            start.wait()
++            try:
++                policy_service.create_new_draft(session, CreatePolicyDraftRequest())
++                return "created"
++            except policy_service.DraftAlreadyExistsError:
++                return "conflict"
++
++    with ThreadPoolExecutor(max_workers=2) as executor:
++        futures = [executor.submit(discard_attempt), executor.submit(create_attempt)]
++        outcomes = sorted(future.result() for future in futures)
++    assert outcomes in (["conflict", "discarded"], ["created", "discarded"])
++    with Session(postgres_engine) as session:
++        counts = policy_state_counts(session)
++        assert counts["drafts"] in (0, 1)
++        assert counts["draft_allocations"] == 0
++        actions = list(session.scalars(select(AuditEvent.action)))
++        assert actions.count("policy.draft.discarded") == 1
++        assert actions.count("policy.draft.created") == 1 + counts["drafts"]
++
++
++def test_publish_and_new_draft_race_is_linearizable(
++    api_client: TestClient, postgres_engine
++) -> None:
++    create_household(api_client)
++    create_policy(api_client)
++    draft = prepare_draft(api_client)
++    factory = sessionmaker(bind=postgres_engine, expire_on_commit=False)
++    start = Barrier(2)
++
++    def publish_attempt() -> str:
++        with factory() as session:
++            start.wait()
++            policy_service.publish_draft(
++                session,
++                PublishPolicyDraftRequest(
++                    expected_revision=draft["revision"], confirmation=True
++                ),
++            )
++            return "published"
++
++    def create_attempt() -> str:
++        with factory() as session:
++            start.wait()
++            try:
++                policy_service.create_new_draft(session, CreatePolicyDraftRequest())
++                return "created"
++            except policy_service.DraftAlreadyExistsError:
++                return "conflict"
++
++    with ThreadPoolExecutor(max_workers=2) as executor:
++        futures = [executor.submit(publish_attempt), executor.submit(create_attempt)]
++        outcomes = sorted(future.result() for future in futures)
++    assert outcomes in (["conflict", "published"], ["created", "published"])
++    with Session(postgres_engine) as session:
++        counts = policy_state_counts(session)
++        assert counts["versions"] == 1
++        assert counts["version_allocations"] == 2
++        assert counts["drafts"] in (0, 1)
++        assert counts["draft_allocations"] == 0
++        assert session.scalar(
++            select(func.count())
++            .select_from(InvestmentPolicyVersion)
++            .where(InvestmentPolicyVersion.status == "published")
++        ) == 1
++        actions = list(session.scalars(select(AuditEvent.action)))
++        assert actions.count("policy.published") == 1
++        assert actions.count("policy.draft.created") == 1 + counts["drafts"]
++
++
++def test_patch_response_uses_precommit_snapshot_and_never_queries_after_commit(
++    api_client: TestClient, postgres_engine
++) -> None:
++    create_household(api_client)
++    create_policy(api_client)
++    draft = prepare_draft(api_client)
++    factory = sessionmaker(bind=postgres_engine, expire_on_commit=False)
++    commit_reached = Event()
++    release_return = Event()
++    post_commit_selects: list[str] = []
++
++    with factory() as patch_session:
++        def hold_after_commit(_session: Session) -> None:
++            commit_reached.set()
++            assert release_return.wait(timeout=10)
++
++        def record_post_commit_select(orm_execute_state) -> None:
++            if commit_reached.is_set() and orm_execute_state.is_select:
++                post_commit_selects.append(str(orm_execute_state.statement))
++
++        event.listen(patch_session, "after_commit", hold_after_commit)
++        event.listen(patch_session, "do_orm_execute", record_post_commit_select)
++        try:
++            with ThreadPoolExecutor(max_workers=1) as executor:
++                future = executor.submit(
++                    policy_service.update_draft_text,
++                    patch_session,
++                    PolicyDraftUpdate(
++                        expected_revision=draft["revision"], notes="patched snapshot"
++                    ),
++                )
++                assert commit_reached.wait(timeout=10)
++                with factory() as concurrent_session:
++                    concurrent_draft, _ = policy_service.replace_allocations(
++                        concurrent_session,
++                        AllocationReplaceRequest(
++                            expected_revision=draft["revision"] + 1,
++                            items=[
++                                {
++                                    "asset_class_name": "Cash",
++                                    "target_percentage": "100.00",
++                                }
++                            ],
++                        ),
++                    )
++                    assert concurrent_draft.revision == draft["revision"] + 2
++                release_return.set()
++                snapshot = future.result(timeout=10)
++        finally:
++            release_return.set()
++            event.remove(patch_session, "after_commit", hold_after_commit)
++            event.remove(patch_session, "do_orm_execute", record_post_commit_select)
++
++    assert snapshot.revision == draft["revision"] + 1
++    assert snapshot.notes == "patched snapshot"
++    assert allocation_content(
++        [allocation.model_dump(mode="json") for allocation in snapshot.allocations]
++    ) == allocation_content(draft["allocations"])
++    assert post_commit_selects == []
++    assert api_client.get("/api/policies/current/draft").json()["revision"] == (
++        draft["revision"] + 2
++    )
++
++
+ def test_concurrent_publish_has_one_winner(api_client: TestClient, postgres_engine) -> None:
+     create_household(api_client)
+     create_policy(api_client)
+diff --git a/tests/api/test_policy_schemas.py b/tests/api/test_policy_schemas.py
+index 71ee397..7834584 100644
+--- a/tests/api/test_policy_schemas.py
++++ b/tests/api/test_policy_schemas.py
+@@ -6,10 +6,13 @@ import pytest
+ from pydantic import ValidationError
+ 
+ from apps.api.policy_schemas import (
++    POLICY_TEXT_LIMITS,
+     AllocationItemInput,
+     AllocationReplaceRequest,
+     AllocationResponse,
++    EmptyPolicyCreateRequest,
+     PolicyDraftUpdate,
++    PolicyTextFields,
+     PolicyVersionResponse,
+     normalize_asset_class_name,
+ )
+@@ -32,6 +35,14 @@ def test_allocation_normalizes_decimal_string_without_binary_float() -> None:
+     assert item.target_percentage == "12.50"
+ 
+ 
++@pytest.mark.parametrize(
++    "value", ["1e2", "Infinity", "+10.00", "10.", ".50", " 10.00 "]
++)
++def test_allocation_rejects_unapproved_decimal_string_forms(value: str) -> None:
++    with pytest.raises(ValidationError):
++        AllocationItemInput(asset_class_name="Cash", target_percentage=value)
++
++
+ def test_unicode_name_normalization_is_nfkc_whitespace_collapsed_and_casefolded() -> None:
+     display, canonical = normalize_asset_class_name("  Ｇlobal\u2003EQUITY  ")
+     assert display == "Global EQUITY"
+@@ -58,6 +69,30 @@ def test_policy_patch_trims_text_and_rejects_extra_or_null_fields() -> None:
+         PolicyDraftUpdate(expected_revision=1, objectives=None)
+ 
+ 
++@pytest.mark.parametrize("field_name,maximum", POLICY_TEXT_LIMITS.items())
++def test_policy_text_boundaries_use_trimmed_unicode_characters(
++    field_name: str, maximum: int
++) -> None:
++    accepted = PolicyDraftUpdate(
++        expected_revision=1,
++        **{field_name: f"  {'界' * maximum}\u2003"},
++    )
++    assert getattr(accepted, field_name) == "界" * maximum
++    with pytest.raises(ValidationError):
++        PolicyDraftUpdate(
++            expected_revision=1,
++            **{field_name: "界" * (maximum + 1)},
++        )
++
++
++def test_blank_policy_text_is_allowed_and_create_body_model_is_strict() -> None:
++    assert all(getattr(PolicyTextFields(), name) == "" for name in POLICY_TEXT_LIMITS)
++    assert EmptyPolicyCreateRequest.model_validate({}).model_dump() == {}
++    for invalid in ({"unexpected": "secret-marker"}, [], "scalar", 1, None):
++        with pytest.raises(ValidationError):
++            EmptyPolicyCreateRequest.model_validate(invalid)
++
++
+ def test_response_serializes_percentage_as_decimal_string_and_hides_internal_fields() -> None:
+     allocation = AllocationResponse.model_validate(
+         {

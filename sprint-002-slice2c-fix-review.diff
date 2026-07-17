@@ -1,0 +1,1274 @@
+diff --git a/docs/ARCHITECTURE.md b/docs/ARCHITECTURE.md
+index 1c37cbd..395807b 100644
+--- a/docs/ARCHITECTURE.md
++++ b/docs/ARCHITECTURE.md
+@@ -83,24 +83,31 @@ Slice 2A persistence design:
+ - `frontend/app/policy/page.tsx` defines the App Router boundary and delegates all
+   interactive behavior to a client component.
+ - `frontend/app/policy/policy-client.tsx` keeps the saved server snapshot separate
+-  from local Draft text and allocation edits, with independent loading, mutation,
+-  history, and audit states.
++  from local Draft text and allocation edits. The core workspace, Version history,
++  selected detail, and audit timeline have independent loading and error states.
+ - `frontend/lib/policy-api.ts` is the typed browser boundary for the approved
+   Policy endpoints. Reads may be aborted to prevent stale responses from replacing
+   newer state; mutations are never automatically retried.
+-- Initial Household and Policy reads run in parallel. Draft, current Published,
+-  history, and audit reads run in parallel after Policy presence is known.
++- Initial Household and Policy reads run in parallel. After Policy presence is
++  known, core Draft/Published reads are isolated from auxiliary history/audit
++  failures. History and audit each use abort plus monotonic generation guards;
++  paginated history additionally validates its requested cursor before merging.
+ - Target percentages stay as decimal strings at the browser/API boundary. Display
+   totals use strict parsing into integer hundredths and integer addition, with no
+   `Number`, `parseFloat`, rounding, recommendation, or evaluation step.
+ - Explicit saves send only changed Draft text fields or the full ordered allocation
+   collection with the current expected revision. Successful responses become the
+   new saved snapshot; failed mutations retain local edits.
++- The workspace owns semantic text/allocation dirty flags. Publication is disabled
++  while either editor differs from its latest server snapshot, and any reload that
++  would replace dirty editor state requires explicit page-level confirmation.
+ - Publication is a read-only review of the saved Draft snapshot followed by an
+   explicit confirmation. The server remains authoritative for completeness,
+   revision, and publication success.
+-- Version history is read-only and cursor-paginated newest first. Audit events are
+-  rendered in server-returned sequence order and use an independent GET-only retry.
++- Version history is read-only and cursor-paginated newest first using stable
++  Version identity deduplication. Audit events retain server-returned sequence
++  order. Both auxiliary resources have GET-only recovery that never replays a
++  mutation. Network and HTTP server failures use distinct neutral error classes.
+ 
+ Slice 2C adds no backend module, database change, authentication, recommendation,
+ Guardian, AI, Broker, trading, actual-holdings, or Decision Journal behavior.
+diff --git a/docs/CHANGELOG.md b/docs/CHANGELOG.md
+index eb789e0..7cfe6df 100644
+--- a/docs/CHANGELOG.md
++++ b/docs/CHANGELOG.md
+@@ -17,6 +17,17 @@
+   approved non-advisory and local-only boundary
+ - Frontend component and API-client coverage for state transitions, conflicts,
+   decimal handling, immutable history, audit recovery, safety copy, and request cleanup
++- Independent core, Version-history, and Policy-audit resource states so auxiliary
++  read failures cannot hide a successfully loaded Draft or Published Version
++- Workspace-level semantic dirty tracking that blocks publication of a stale saved
++  snapshot and requires explicit confirmation before reload discards local edits
++- Generation- and AbortController-guarded audit/history reads, including guarded
++  cursor merges, stable Version identity deduplication, and stale-result rejection
++- Case-preserving allocation display-name comparison, Unicode code-point length
++  validation, and row-specific accessible allocation action names
++- Safe distinction between connection failures and unexpected HTTP server errors,
++  without displaying response bodies or request payloads
++- A compact immutable current Published Version summary when a Draft is also open
+ 
+ ### Boundaries
+ 
+@@ -34,6 +45,8 @@
+ - Slice 2A and Slice 2B remain Done.
+ - Slice 2C implementation is complete and is in Review; this is not a
+   production-readiness claim or completion of Sprint 002.
++- PR #9 remains Draft after its initial REQUEST CHANGES review. M-1 through M-4
++  and L-1 through L-6 have been addressed and await independent incremental review.
+ - Sprint 002 remains In Progress.
+ 
+ ## [Unreleased] - Sprint 002 Slice 2B Complete
+diff --git a/docs/MASTER_PLAN.md b/docs/MASTER_PLAN.md
+index 05757d4..b260884 100644
+--- a/docs/MASTER_PLAN.md
++++ b/docs/MASTER_PLAN.md
+@@ -141,6 +141,16 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+   suitability, score, rebalancing, or automated decision behavior.
+ - Policy mutation success and audit refresh failure remain separate outcomes;
+   audit retry performs only the audit GET and never replays a mutation.
++- PR #9 independent review conclusion was REQUEST CHANGES. M-1 through M-4 are
++  addressed by independent core/history/audit resource states, workspace-level
++  text and allocation dirty tracking with a publication gate, explicit protected
++  reload confirmation, and generation-guarded AuditEvent refreshes.
++- L-1 through L-6 are addressed by generation- and cursor-guarded history reads,
++  case-preserving allocation display normalization, Unicode code-point limits,
++  distinct safe network/server errors, an explicit current Published summary
++  beside a Draft, and row-specific accessible allocation controls.
++- Slice 2C remains in Review and PR #9 remains Draft pending independent
++  incremental review. These fixes do not constitute approval or completion.
+ - Slice 2C adds no backend behavior, migration, dependency, authentication,
+   Decision Journal, Guardian, AI, Broker, market, holding, recommendation, or
+   trading behavior.
+diff --git a/docs/PRD.md b/docs/PRD.md
+index 1d5278e..eb8a9a7 100644
+--- a/docs/PRD.md
++++ b/docs/PRD.md
+@@ -56,12 +56,18 @@ the content or providing investment advice.
+ - The allocation editor supports local add, remove, and accessible reordering, then
+   explicitly replaces the complete ordered collection. It supplies no default asset
+   classes or target percentages.
++- Allocation display-name no-op comparison preserves case after NFKC, trim, and
++  whitespace normalization. Names use a 200 Unicode code-point technical limit,
++  and every row action has a row-specific accessible name.
+ - Allocation inputs remain decimal strings. The displayed total uses integer
+   hundredths and reports only mechanical equality with `100.00`; it never scores or
+   evaluates the allocation.
+ - Publication shows a read-only saved Draft snapshot, required-field presence,
+   exact total, and current revision. It requires explicit confirmation and sends
+   `confirmation: true`; the server remains authoritative.
++- Publication review is unavailable while either editor contains semantic local
++  changes. Reloading a dirty workspace requires an explicit choice to discard both
++  editors' local changes or keep editing; a failed reload retains local state.
+ - Published and historical Versions are immutable and read-only. New Drafts may be
+   blank or copied only from the current Published Version; historical restore/copy,
+   Published editing, and product deletion are absent.
+@@ -88,6 +94,9 @@ the content or providing investment advice.
+   confirmation while remaining subject to server validation.
+ - Version history paginates newest first without duplicate entries, remains
+   immutable, and offers no restore or historical-copy action.
++- Core Draft/Published state remains usable when history or audit fails. History
++  and audit retries are isolated GETs, and stale auxiliary responses cannot replace
++  the result of a newer reload, refresh, publication, or cursor request.
+ - Policy audit failures never recast a completed Policy mutation as failed, and
+   the retry cannot replay that mutation.
+ - UI and API-client tests cover the approved flows, error classes, request payloads,
+diff --git a/frontend/app/policy/page.test.tsx b/frontend/app/policy/page.test.tsx
+index 55e47df..5888609 100644
+--- a/frontend/app/policy/page.test.tsx
++++ b/frontend/app/policy/page.test.tsx
+@@ -80,7 +80,7 @@ const auditEvents = [
+ type ServerState = {
+   household: boolean;
+   policy: typeof policy | null;
+-  draft: typeof draft | null;
++  draft: (Omit<typeof draft, "source_version_id"> & { source_version_id: string | null }) | null;
+   published: typeof version | null;
+   history: Array<{
+     id: string;
+@@ -100,6 +100,16 @@ function jsonResponse(body: unknown, status = 200) {
+   });
+ }
+ 
++function deferred<T>() {
++  let resolve!: (value: T) => void;
++  let reject!: (reason?: unknown) => void;
++  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
++    resolve = resolvePromise;
++    reject = rejectPromise;
++  });
++  return { promise, reject, resolve };
++}
++
+ function defaultState(overrides: Partial<ServerState> = {}): ServerState {
+   return {
+     household: true,
+@@ -153,13 +163,19 @@ function serverFetch(
+     }
+     if (url.endsWith("/api/policies/current/draft") && method === "PATCH") {
+       const payload = JSON.parse(String(init?.body));
+-      state.draft = { ...draft, ...payload, revision: payload.expected_revision + 1 };
++      const { expected_revision, ...changed } = payload;
++      state.draft = {
++        ...(state.draft ?? draft),
++        ...changed,
++        revision: expected_revision + 1,
++        updated_at: "2026-07-14T04:00:00Z",
++      };
+       return jsonResponse(state.draft);
+     }
+     if (url.endsWith("/api/policies/current/draft/allocations") && method === "PUT") {
+       const payload = JSON.parse(String(init?.body));
+       state.draft = {
+-        ...draft,
++        ...(state.draft ?? draft),
+         revision: payload.expected_revision + 1,
+         allocations: payload.items.map((item: { asset_class_name: string; target_percentage: string }, index: number) => ({
+           ...item,
+@@ -320,8 +336,8 @@ describe("PolicyClient", () => {
+     await userEvent.type(names[2], "Third user class");
+     await userEvent.type(percentages[2], "0.25");
+     expect(screen.getByText("Draft allocation total: 100.25%")).toBeTruthy();
+-    await userEvent.click(screen.getAllByRole("button", { name: "Move up" })[2]);
+-    await userEvent.click(screen.getAllByRole("button", { name: "Remove" })[0]);
++    await userEvent.click(screen.getByRole("button", { name: "Move Third user class up" }));
++    await userEvent.click(screen.getByRole("button", { name: "Remove First user class" }));
+     await userEvent.click(screen.getByRole("button", { name: "Save allocations" }));
+ 
+     await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(1));
+@@ -354,6 +370,351 @@ describe("PolicyClient", () => {
+     expect(screen.getByRole("alert").textContent).not.toContain("secret-marker");
+   });
+ 
++  it("keeps the core Draft usable when initial history loading fails", async () => {
++    const fetchMock = serverFetch(defaultState(), (url, method) =>
++      url.includes("/api/policies/current/versions") && method === "GET"
++        ? jsonResponse({}, 503)
++        : undefined,
++    );
++    vi.stubGlobal("fetch", fetchMock);
++    render(<PolicyClient />);
++
++    expect(await screen.findByRole("heading", { name: "Policy text" })).toBeTruthy();
++    expect(await screen.findByText("The Policy service returned an unexpected server error.")).toBeTruthy();
++    expect(screen.getByRole("button", { name: "Save policy text" })).toBeTruthy();
++  });
++
++  it("keeps Published visible and retries only history after history failure", async () => {
++    const state = defaultState({ draft: null, published: version });
++    let failHistory = true;
++    const fetchMock = serverFetch(state, (url, method) => {
++      if (url.includes("/versions") && !url.includes("/versions/") && method === "GET" && failHistory) {
++        failHistory = false;
++        return jsonResponse({}, 503);
++      }
++    });
++    vi.stubGlobal("fetch", fetchMock);
++    render(<PolicyClient />);
++    expect(await screen.findByRole("heading", { name: /Current Published Version · Version 2/ })).toBeTruthy();
++    const callsBeforeRetry = fetchMock.mock.calls.length;
++    await userEvent.click(await screen.findByRole("button", { name: "Retry Version history" }));
++    await waitFor(() => expect(fetchMock.mock.calls.length).toBe(callsBeforeRetry + 1));
++    expect(String(fetchMock.mock.calls.at(-1)?.[0])).toContain("/versions");
++    expect(screen.queryByRole("button", { name: "Retry Version history" })).toBeNull();
++  });
++
++  it("keeps the Draft usable when audit fails and retries only audit", async () => {
++    let failAudit = true;
++    const fetchMock = serverFetch(defaultState(), (url) => {
++      if (url.endsWith("/audit-events") && failAudit) {
++        failAudit = false;
++        return jsonResponse({}, 503);
++      }
++    });
++    vi.stubGlobal("fetch", fetchMock);
++    render(<PolicyClient />);
++    expect(await screen.findByRole("heading", { name: "Policy text" })).toBeTruthy();
++    const callsBeforeRetry = fetchMock.mock.calls.length;
++    await userEvent.click(await screen.findByRole("button", { name: "Retry audit timeline" }));
++    await waitFor(() => expect(fetchMock.mock.calls.length).toBe(callsBeforeRetry + 1));
++    expect(String(fetchMock.mock.calls.at(-1)?.[0])).toContain("/audit-events");
++  });
++
++  it("shows a core error when the Draft request fails", async () => {
++    vi.stubGlobal("fetch", serverFetch(defaultState(), (url, method) =>
++      url.endsWith("/api/policies/current/draft") && method === "GET" ? jsonResponse({}, 500) : undefined,
++    ));
++    render(<PolicyClient />);
++    expect(await screen.findByText("The Policy service returned an unexpected server error.")).toBeTruthy();
++    expect(screen.queryByRole("heading", { name: "Policy text" })).toBeNull();
++  });
++
++  it("blocks publication until both text and allocation edits are saved", async () => {
++    const state = defaultState({ draft: { ...draft, objectives: "Goal", time_horizon: "Long", decision_process: "Review" } });
++    vi.stubGlobal("fetch", serverFetch(state));
++    render(<PolicyClient />);
++    await screen.findByRole("heading", { name: "Policy text" });
++
++    await userEvent.type(screen.getByLabelText("Notes"), "Local note");
++    const allocationName = screen.getAllByLabelText("Asset-class name")[0];
++    await userEvent.clear(allocationName);
++    await userEvent.type(allocationName, "First User Class");
++    expect((screen.getByRole("button", { name: "Review for publication" }) as HTMLButtonElement).disabled).toBe(true);
++
++    await userEvent.click(screen.getByRole("button", { name: "Save policy text" }));
++    await screen.findByText("Policy text saved.");
++    expect((screen.getByRole("button", { name: "Review for publication" }) as HTMLButtonElement).disabled).toBe(true);
++
++    await userEvent.click(screen.getByRole("button", { name: "Save allocations" }));
++    await screen.findByText("Draft allocations saved.");
++    await waitFor(() => expect((screen.getByRole("button", { name: "Review for publication" }) as HTMLButtonElement).disabled).toBe(false));
++  });
++
++  it("returns to clean when text and allocation order are restored", async () => {
++    const state = defaultState({ draft: { ...draft, objectives: "Goal", time_horizon: "Long", decision_process: "Review" } });
++    vi.stubGlobal("fetch", serverFetch(state));
++    render(<PolicyClient />);
++    await screen.findByRole("heading", { name: "Policy text" });
++    const review = screen.getByRole("button", { name: "Review for publication" }) as HTMLButtonElement;
++    expect(review.disabled).toBe(false);
++
++    await userEvent.type(screen.getByLabelText("Notes"), "temporary");
++    expect(review.disabled).toBe(true);
++    await userEvent.clear(screen.getByLabelText("Notes"));
++    await waitFor(() => expect(review.disabled).toBe(false));
++
++    await userEvent.click(screen.getByRole("button", { name: "Move Second user class up" }));
++    expect(review.disabled).toBe(true);
++    await userEvent.click(screen.getByRole("button", { name: "Move Second user class down" }));
++    await waitFor(() => expect(review.disabled).toBe(false));
++  });
++
++  it("protects both editors from a reload and preserves them when the reload fails", async () => {
++    let failReload = false;
++    const fetchMock = serverFetch(defaultState(), (url, method) =>
++      failReload && url.endsWith("/api/policies/current/draft") && method === "GET"
++        ? jsonResponse({}, 503)
++        : undefined,
++    );
++    vi.stubGlobal("fetch", fetchMock);
++    render(<PolicyClient />);
++    await screen.findByRole("heading", { name: "Policy text" });
++    await userEvent.type(screen.getByLabelText("Notes"), "Unsaved text");
++    const allocationName = screen.getAllByLabelText("Asset-class name")[0];
++    await userEvent.clear(allocationName);
++    await userEvent.type(allocationName, "Unsaved allocation");
++    const before = fetchMock.mock.calls.length;
++
++    await userEvent.click(screen.getByRole("button", { name: "Reload workspace" }));
++    expect(screen.getByText(/Both Policy text and Draft allocation/)).toBeTruthy();
++    await userEvent.click(screen.getByRole("button", { name: "Keep editing" }));
++    expect(fetchMock.mock.calls).toHaveLength(before);
++
++    failReload = true;
++    await userEvent.click(screen.getByRole("button", { name: "Reload workspace" }));
++    await userEvent.click(screen.getByRole("button", { name: "Discard local changes and reload" }));
++    expect(await screen.findByText("The Policy service returned an unexpected server error.")).toBeTruthy();
++    expect((screen.getByLabelText("Notes") as HTMLTextAreaElement).value).toBe("Unsaved text");
++    expect((screen.getAllByLabelText("Asset-class name")[0] as HTMLInputElement).value).toBe("Unsaved allocation");
++  });
++
++  it("lets only the newest audit refresh update the timeline", async () => {
++    const first = deferred<Response>();
++    const second = deferred<Response>();
++    let requests = 0;
++    const fetchMock = serverFetch(defaultState(), (url) => {
++      if (url.endsWith("/audit-events")) {
++        requests += 1;
++        return requests === 1 ? first.promise : second.promise;
++      }
++    });
++    vi.stubGlobal("fetch", fetchMock);
++    render(<PolicyClient />);
++    await screen.findByRole("heading", { name: "Policy text" });
++    await userEvent.click(screen.getByRole("button", { name: "Reload workspace" }));
++    await waitFor(() => expect(requests).toBe(2));
++    second.resolve(jsonResponse([{ ...auditEvents[1], id: "new-audit", action: "policy.newest", sequence_number: 20 }]));
++    expect(await screen.findByText("policy.newest")).toBeTruthy();
++    first.resolve(jsonResponse([{ ...auditEvents[0], id: "old-audit", action: "policy.stale", sequence_number: 1 }]));
++    await waitFor(() => expect(screen.queryByText("policy.stale")).toBeNull());
++  });
++
++  it("aborts an old audit request and ignores its later rejection", async () => {
++    const first = deferred<Response>();
++    const captured: { firstSignal?: AbortSignal } = {};
++    let requests = 0;
++    const fetchMock = serverFetch(defaultState(), (url, _method, init) => {
++      if (url.endsWith("/audit-events")) {
++        requests += 1;
++        if (requests === 1) {
++          captured.firstSignal = init?.signal as AbortSignal;
++          return first.promise;
++        }
++        return jsonResponse([{ ...auditEvents[1], id: "latest", action: "policy.latest" }]);
++      }
++    });
++    vi.stubGlobal("fetch", fetchMock);
++    render(<PolicyClient />);
++    await screen.findByRole("heading", { name: "Policy text" });
++    await userEvent.click(screen.getByRole("button", { name: "Reload workspace" }));
++    expect(await screen.findByText("policy.latest")).toBeTruthy();
++    expect(captured.firstSignal?.aborted).toBe(true);
++    first.reject(new TypeError("stale failure"));
++    await waitFor(() => expect(screen.queryByText(/audit timeline could not/)).toBeNull());
++  });
++
++  it("lets only the newest history refresh update the collection", async () => {
++    const first = deferred<Response>();
++    const second = deferred<Response>();
++    let requests = 0;
++    const newest = { ...version, id: "newest", version_number: 9 };
++    const stale = { ...version, id: "stale", version_number: 1 };
++    const fetchMock = serverFetch(defaultState({ published: version }), (url, method) => {
++      if (url.includes("/versions") && !url.includes("/versions/") && method === "GET") {
++        requests += 1;
++        return requests === 1 ? first.promise : second.promise;
++      }
++    });
++    vi.stubGlobal("fetch", fetchMock);
++    render(<PolicyClient />);
++    await screen.findByRole("heading", { name: "Policy text" });
++    await userEvent.click(screen.getByRole("button", { name: "Reload workspace" }));
++    await waitFor(() => expect(requests).toBe(2));
++    second.resolve(jsonResponse({ items: [newest, newest], next_before_version_number: null }));
++    expect(await screen.findByText("Version 9")).toBeTruthy();
++    first.resolve(jsonResponse({ items: [stale], next_before_version_number: null }));
++    await waitFor(() => expect(screen.queryByText("Version 1")).toBeNull());
++    expect(screen.getAllByText("Version 9")).toHaveLength(1);
++  });
++
++  it("invalidates a pending Load more when workspace history refreshes", async () => {
++    const oldPage = deferred<Response>();
++    const version3 = { ...version, id: "version-3", version_number: 3 };
++    const version4 = { ...version, id: "version-4", version_number: 4 };
++    const version1 = { ...version, id: "version-1", version_number: 1 };
++    const state = defaultState({ history: [version3], nextCursor: 3 });
++    let pageRequests = 0;
++    const fetchMock = serverFetch(state, (url, method) => {
++      if (url.includes("before_version_number=3") && method === "GET") {
++        pageRequests += 1;
++        return oldPage.promise;
++      }
++    });
++    vi.stubGlobal("fetch", fetchMock);
++    render(<PolicyClient />);
++    await screen.findByText("Version 3");
++    await userEvent.dblClick(screen.getByRole("button", { name: "Load more Versions" }));
++    expect(pageRequests).toBe(1);
++    state.history = [version4];
++    state.nextCursor = null;
++    await userEvent.click(screen.getByRole("button", { name: "Reload workspace" }));
++    expect(await screen.findByText("Version 4")).toBeTruthy();
++    oldPage.resolve(jsonResponse({ items: [version1], next_before_version_number: null }));
++    await waitFor(() => expect(screen.queryByText("Version 1")).toBeNull());
++    expect(screen.queryByText("Version 3")).toBeNull();
++  });
++
++  it("validates allocation names by normalized Unicode code points without native truncation", async () => {
++    const fetchMock = serverFetch(defaultState());
++    vi.stubGlobal("fetch", fetchMock);
++    render(<PolicyClient />);
++    await screen.findByRole("heading", { name: "Draft allocation" });
++    const name = screen.getAllByLabelText("Asset-class name")[0] as HTMLInputElement;
++    expect(name.maxLength).toBe(-1);
++    await userEvent.clear(name);
++    await userEvent.type(name, "😀".repeat(201));
++    await userEvent.click(screen.getByRole("button", { name: "Save allocations" }));
++    expect(screen.getByText(/200 characters or fewer/)).toBeTruthy();
++    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(0);
++  });
++
++  it("enforces the 200-code-point boundary for ASCII and mixed astral text", async () => {
++    const fetchMock = serverFetch(defaultState());
++    vi.stubGlobal("fetch", fetchMock);
++    render(<PolicyClient />);
++    await screen.findByRole("heading", { name: "Draft allocation" });
++    const name = screen.getAllByLabelText("Asset-class name")[0];
++    await userEvent.clear(name);
++    await userEvent.type(name, "a".repeat(199) + "😀");
++    await userEvent.click(screen.getByRole("button", { name: "Save allocations" }));
++    await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(1));
++
++    const adopted = screen.getAllByLabelText("Asset-class name")[0];
++    await userEvent.clear(adopted);
++    await userEvent.type(adopted, "a".repeat(201));
++    await userEvent.click(screen.getByRole("button", { name: "Save allocations" }));
++    expect(screen.getByText(/200 characters or fewer/)).toBeTruthy();
++    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(1);
++  });
++
++  it("allows exactly 200 emoji and treats a case-only display edit as a save", async () => {
++    const state = defaultState();
++    const fetchMock = serverFetch(state);
++    vi.stubGlobal("fetch", fetchMock);
++    render(<PolicyClient />);
++    await screen.findByRole("heading", { name: "Draft allocation" });
++    const name = screen.getAllByLabelText("Asset-class name")[0];
++    await userEvent.clear(name);
++    await userEvent.type(name, "😀".repeat(200));
++    await userEvent.click(screen.getByRole("button", { name: "Save allocations" }));
++    await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(1));
++
++    const savedName = screen.getAllByLabelText("Asset-class name")[0];
++    await userEvent.clear(savedName);
++    await userEvent.type(savedName, "CASH");
++    await userEvent.click(screen.getByRole("button", { name: "Save allocations" }));
++    await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(2));
++  });
++
++  it("treats trim and collapsed Unicode whitespace as allocation no-ops", async () => {
++    const state = defaultState({ draft: {
++      ...draft,
++      allocations: [{ ...draft.allocations[0], asset_class_name: "Cash Reserve" }],
++    } });
++    const fetchMock = serverFetch(state);
++    vi.stubGlobal("fetch", fetchMock);
++    render(<PolicyClient />);
++    await screen.findByRole("heading", { name: "Draft allocation" });
++    const name = screen.getByLabelText("Asset-class name");
++    await userEvent.clear(name);
++    await userEvent.type(name, "  Cash\u00a0  Reserve  ");
++    await userEvent.click(screen.getByRole("button", { name: "Save allocations" }));
++    expect(screen.getByText(/no allocation changes/)).toBeTruthy();
++    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(0);
++  });
++
++  it("shows current Published provenance beside an editable Draft", async () => {
++    vi.stubGlobal("fetch", serverFetch(defaultState({ draft: { ...draft, source_version_id: version.id }, published: version })));
++    render(<PolicyClient />);
++    expect(await screen.findByRole("heading", { name: "Current Published Version · Version 2" })).toBeTruthy();
++    expect(screen.getByText("This Draft started from current Published.")).toBeTruthy();
++    expect(screen.queryByRole("button", { name: /edit|delete|restore/i })).toBeNull();
++  });
++
++  it("labels blank Draft provenance without mixing it into Published content", async () => {
++    vi.stubGlobal("fetch", serverFetch(defaultState({ published: version })));
++    render(<PolicyClient />);
++    await screen.findByRole("heading", { name: "Current Published Version · Version 2" });
++    expect(screen.getByText("This Draft started blank.")).toBeTruthy();
++  });
++
++  it("gives row controls unique names that update with the row name", async () => {
++    vi.stubGlobal("fetch", serverFetch(defaultState()));
++    render(<PolicyClient />);
++    await screen.findByRole("heading", { name: "Draft allocation" });
++    expect(screen.getByRole("button", { name: "Move First user class down" })).toBeTruthy();
++    expect((screen.getByRole("button", { name: "Move First user class up" }) as HTMLButtonElement).disabled).toBe(true);
++    await userEvent.click(screen.getByRole("button", { name: "Add allocation row" }));
++    expect(screen.getByRole("button", { name: "Remove allocation row 3" })).toBeTruthy();
++    await userEvent.type(screen.getAllByLabelText("Asset-class name")[2], "Owner category");
++    expect(screen.getByRole("button", { name: "Remove Owner category" })).toBeTruthy();
++    expect((screen.getByRole("button", { name: "Move Owner category down" }) as HTMLButtonElement).disabled).toBe(true);
++  });
++
++  it.each(["network", "server"])("recovers the text mutation button after a %s failure", async (kind) => {
++    const state = defaultState();
++    let failed = false;
++    const fetchMock = serverFetch(state, (url, method) => {
++      if (!failed && url.endsWith("/api/policies/current/draft") && method === "PATCH") {
++        failed = true;
++        if (kind === "network") return Promise.reject(new TypeError("private connection detail"));
++        return jsonResponse({ detail: "secret-marker" }, 500);
++      }
++    });
++    vi.stubGlobal("fetch", fetchMock);
++    render(<PolicyClient />);
++    await screen.findByRole("heading", { name: "Policy text" });
++    await userEvent.type(screen.getByLabelText("Notes"), "Owner note");
++    await userEvent.click(screen.getByRole("button", { name: "Save policy text" }));
++    expect(await screen.findByText(kind === "network"
++      ? "The Policy service connection is unavailable."
++      : "The Policy service returned an unexpected server error.")).toBeTruthy();
++    const save = screen.getByRole("button", { name: "Save policy text" }) as HTMLButtonElement;
++    expect(save.disabled).toBe(false);
++    await userEvent.click(save);
++    expect(await screen.findByText("Policy text saved.")).toBeTruthy();
++  });
++
+   it("requires explicit publication confirmation and sends the exact saved revision once", async () => {
+     const readyDraft = {
+       ...draft,
+diff --git a/frontend/app/policy/policy-client.tsx b/frontend/app/policy/policy-client.tsx
+index 22c0ebe..2c151ea 100644
+--- a/frontend/app/policy/policy-client.tsx
++++ b/frontend/app/policy/policy-client.tsx
+@@ -17,10 +17,12 @@ import {
+   getVersion,
+   getVersionHistory,
+   hasCurrentHousehold,
++  normalizeAllocationDisplayName,
+   POLICY_TEXT_FIELDS,
+   POLICY_TEXT_LIMITS,
+   Policy,
+   PolicyApiError,
++  PolicyNetworkError,
+   PolicyAuditEvent,
+   PolicyDraft,
+   PolicyText,
+@@ -61,6 +63,7 @@ function conflictMessage(error: unknown): string | null {
+ }
+ 
+ function neutralMessage(error: unknown): string {
++  if (error instanceof PolicyNetworkError) return error.message;
+   return error instanceof PolicyApiError
+     ? error.message
+     : "The Policy request could not be completed.";
+@@ -94,10 +97,12 @@ function ConflictPanel({ message, onReload }: { message: string; onReload: () =>
+ 
+ function DraftTextEditor({
+   draft,
++  onDirtyChange,
+   onReload,
+   onSaved,
+ }: {
+   draft: PolicyDraft;
++  onDirtyChange: (dirty: boolean) => void;
+   onReload: () => void;
+   onSaved: DraftMutationResult;
+ }) {
+@@ -105,6 +110,12 @@ function DraftTextEditor({
+   const [submitting, setSubmitting] = useState(false);
+   const [error, setError] = useState<string | null>(null);
+   const [conflict, setConflict] = useState<string | null>(null);
++  const dirty = useMemo(
++    () => POLICY_TEXT_FIELDS.some((field) => form[field].trim() !== draft[field]),
++    [draft, form],
++  );
++
++  useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
+ 
+   async function save(event: FormEvent<HTMLFormElement>) {
+     event.preventDefault();
+@@ -134,6 +145,7 @@ function DraftTextEditor({
+     try {
+       const saved = await updateDraftText(draft.revision, changed);
+       setForm(textFromDraft(saved));
++      onDirtyChange(false);
+       onSaved(saved, "Policy text saved.");
+     } catch (caught) {
+       const message = conflictMessage(caught);
+@@ -204,10 +216,12 @@ function editableAllocations(draft: PolicyDraft): EditableAllocation[] {
+ 
+ function AllocationEditor({
+   draft,
++  onDirtyChange,
+   onReload,
+   onSaved,
+ }: {
+   draft: PolicyDraft;
++  onDirtyChange: (dirty: boolean) => void;
+   onReload: () => void;
+   onSaved: DraftMutationResult;
+ }) {
+@@ -222,6 +236,9 @@ function AllocationEditor({
+     [rows],
+   );
+   const total = allocationTotal(inputs);
++  const dirty = !allocationsEqual(draft.allocations, inputs);
++
++  useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
+ 
+   function updateRow(index: number, field: keyof AllocationInput, value: string) {
+     setRows((current) =>
+@@ -241,10 +258,18 @@ function AllocationEditor({
+ 
+   async function save() {
+     if (submitting) return;
+-    if (inputs.some((item) => !item.asset_class_name.trim())) {
++    if (inputs.some((item) => !normalizeAllocationDisplayName(item.asset_class_name))) {
+       setError("Each allocation row needs an asset-class name before saving.");
+       return;
+     }
++    if (
++      inputs.some(
++        (item) => unicodeLength(normalizeAllocationDisplayName(item.asset_class_name)) > 200,
++      )
++    ) {
++      setError("Asset-class names must be 200 characters or fewer.");
++      return;
++    }
+     if (total.hundredths === null && inputs.length > 0) {
+       setError("Percentages must be integers or decimal strings with at most two places, greater than 0 and no more than 100.");
+       return;
+@@ -260,6 +285,7 @@ function AllocationEditor({
+     try {
+       const saved = await replaceDraftAllocations(draft.revision, inputs);
+       setRows(editableAllocations(saved));
++      onDirtyChange(false);
+       onSaved(saved, "Draft allocations saved.");
+     } catch (caught) {
+       const message = conflictMessage(caught);
+@@ -299,7 +325,6 @@ function AllocationEditor({
+             <label>
+               Asset-class name
+               <input
+-                maxLength={200}
+                 onChange={(event) => updateRow(index, "asset_class_name", event.target.value)}
+                 value={row.asset_class_name}
+               />
+@@ -312,10 +337,11 @@ function AllocationEditor({
+                 value={row.target_percentage}
+               />
+             </label>
+-            <div className="row-actions" aria-label={`Reorder allocation row ${index + 1}`}>
+-              <button disabled={index === 0} onClick={() => move(index, -1)} type="button">Move up</button>
+-              <button disabled={index === rows.length - 1} onClick={() => move(index, 1)} type="button">Move down</button>
++            <div className="row-actions" role="group" aria-label={`Allocation row ${index + 1} actions`}>
++              <button aria-label={`Move ${row.asset_class_name.trim() || `allocation row ${index + 1}`} up`} disabled={index === 0} onClick={() => move(index, -1)} type="button">Move up</button>
++              <button aria-label={`Move ${row.asset_class_name.trim() || `allocation row ${index + 1}`} down`} disabled={index === rows.length - 1} onClick={() => move(index, 1)} type="button">Move down</button>
+               <button
++                aria-label={`Remove ${row.asset_class_name.trim() || `allocation row ${index + 1}`}`}
+                 onClick={() => setRows((current) => current.filter((_, rowIndex) => rowIndex !== index))}
+                 type="button"
+               >
+@@ -377,10 +403,12 @@ function AllocationReadOnly({ items }: { items: AllocationInput[] }) {
+ 
+ function PublishReview({
+   draft,
++  dirty,
+   onPublished,
+   onReload,
+ }: {
+   draft: PolicyDraft;
++  dirty: boolean;
+   onPublished: (version: PolicyVersion) => void;
+   onReload: () => void;
+ }) {
+@@ -392,7 +420,7 @@ function PublishReview({
+   const total = allocationTotal(allocationInputs(draft));
+ 
+   async function publish() {
+-    if (!confirmed || submitting) return;
++    if (dirty || !confirmed || submitting) return;
+     setSubmitting(true);
+     setError(null);
+     setConflict(null);
+@@ -414,8 +442,9 @@ function PublishReview({
+           <p className="eyebrow">Explicit confirmation</p>
+           <h2 id="publish-heading">Publish review</h2>
+         </div>
+-        {!reviewing ? <button onClick={() => setReviewing(true)} type="button">Review for publication</button> : null}
++        {!reviewing ? <button disabled={dirty} onClick={() => setReviewing(true)} type="button">Review for publication</button> : null}
+       </div>
++      {dirty ? <p className="notice" role="status">Save or discard local text and allocation changes before publication. Publication uses only the saved server Draft.</p> : null}
+       {!reviewing ? <p>Review the saved server snapshot before creating an immutable Version.</p> : null}
+       {reviewing ? (
+         <div className="publish-review">
+@@ -445,7 +474,7 @@ function PublishReview({
+           <div className="actions">
+             <button
+               className="primary-button"
+-              disabled={!confirmed || submitting}
++              disabled={dirty || !confirmed || submitting}
+               onClick={() => void publish()}
+               type="button"
+             >
+@@ -480,12 +509,14 @@ function VersionHistory({
+   error,
+   nextCursor,
+   onLoadMore,
++  onRetry,
+ }: {
+   items: PolicyVersionSummary[];
+   loading: boolean;
+   error: string | null;
+   nextCursor: number | null;
+   onLoadMore: () => void;
++  onRetry: () => void;
+ }) {
+   const detailController = useRef<AbortController | null>(null);
+   const [detail, setDetail] = useState<PolicyVersion | null>(null);
+@@ -515,7 +546,12 @@ function VersionHistory({
+         <p className="eyebrow">Newest first · Read-only</p>
+         <h2 id="history-heading">Version history</h2>
+       </div>
+-      {error ? <p className="error" role="alert">{error}</p> : null}
++      {error ? (
++        <div className="error-panel" role="alert">
++          <p>{error}</p>
++          <button disabled={loading} onClick={onRetry} type="button">Retry Version history</button>
++        </div>
++      ) : null}
+       {items.length === 0 && !loading ? <p>No published Versions yet.</p> : null}
+       <ol className="version-list">
+         {items.map((item) => (
+@@ -590,11 +626,28 @@ function AuditTimeline({
+   );
+ }
+ 
++function CurrentPublishedSummary({ draft, published }: { draft: PolicyDraft; published: PolicyVersion }) {
++  return (
++    <section className="panel" aria-labelledby="current-published-summary-heading">
++      <p className="eyebrow">Current immutable record</p>
++      <h2 id="current-published-summary-heading">Current Published Version · Version {published.version_number}</h2>
++      <p>Published {new Date(published.published_at).toLocaleString()} · Published versions cannot be edited.</p>
++      <p>{draft.source_version_id === published.id ? "This Draft started from current Published." : "This Draft started blank."}</p>
++    </section>
++  );
++}
++
+ export function PolicyClient() {
+   const loadController = useRef<AbortController | null>(null);
+   const auditController = useRef<AbortController | null>(null);
++  const historyController = useRef<AbortController | null>(null);
+   const loadSequence = useRef(0);
++  const auditGeneration = useRef(0);
++  const historyGeneration = useRef(0);
++  const historyLoadingRef = useRef(false);
++  const historyCursorRef = useRef<number | null>(null);
+   const [initialLoading, setInitialLoading] = useState(true);
++  const [workspaceReady, setWorkspaceReady] = useState(false);
+   const [loadError, setLoadError] = useState<string | null>(null);
+   const [hasHousehold, setHasHousehold] = useState<boolean | null>(null);
+   const [policy, setPolicy] = useState<Policy | null>(null);
+@@ -611,14 +664,66 @@ export function PolicyClient() {
+   const [mutationError, setMutationError] = useState<string | null>(null);
+   const [savedMessage, setSavedMessage] = useState<string | null>(null);
+   const [discardConfirmation, setDiscardConfirmation] = useState(false);
++  const [reloadConfirmation, setReloadConfirmation] = useState(false);
++  const [textDirty, setTextDirty] = useState(false);
++  const [allocationsDirty, setAllocationsDirty] = useState(false);
+   const [workspaceEpoch, setWorkspaceEpoch] = useState(0);
++  const dirty = textDirty || allocationsDirty;
++
++  const refreshAudit = useCallback(async (afterMutation = false) => {
++    auditController.current?.abort();
++    const controller = new AbortController();
++    auditController.current = controller;
++    const generation = ++auditGeneration.current;
++    setAuditLoading(true);
++    setAuditError(null);
++    try {
++      const events = await getPolicyAuditEvents(controller.signal);
++      if (generation === auditGeneration.current && !controller.signal.aborted) {
++        setAuditEvents(events);
++      }
++    } catch (caught) {
++      if (!isAbort(caught) && generation === auditGeneration.current) {
++        setAuditError(afterMutation
++          ? "The Policy mutation succeeded, but the audit timeline could not be refreshed."
++          : "The Policy audit timeline could not be loaded.");
++      }
++    } finally {
++      if (generation === auditGeneration.current && !controller.signal.aborted) setAuditLoading(false);
++    }
++  }, []);
++
++  const refreshHistory = useCallback(async () => {
++    historyController.current?.abort();
++    const controller = new AbortController();
++    historyController.current = controller;
++    const generation = ++historyGeneration.current;
++    historyLoadingRef.current = true;
++    setHistoryLoading(true);
++    setHistoryError(null);
++    try {
++      const page = await getVersionHistory(undefined, controller.signal);
++      if (generation === historyGeneration.current && !controller.signal.aborted) {
++        const unique = new Map(page.items.map((item) => [item.id, item]));
++        setHistory([...unique.values()].sort((left, right) => right.version_number - left.version_number));
++        historyCursorRef.current = page.next_before_version_number;
++        setNextHistoryCursor(page.next_before_version_number);
++      }
++    } catch (caught) {
++      if (!isAbort(caught) && generation === historyGeneration.current) setHistoryError(neutralMessage(caught));
++    } finally {
++      if (generation === historyGeneration.current && !controller.signal.aborted) {
++        historyLoadingRef.current = false;
++        setHistoryLoading(false);
++      }
++    }
++  }, []);
+ 
+   const loadWorkspace = useCallback(async () => {
+     loadController.current?.abort();
+     const controller = new AbortController();
+     loadController.current = controller;
+-    loadSequence.current += 1;
+-    const sequence = loadSequence.current;
++    const sequence = ++loadSequence.current;
+     setInitialLoading(true);
+     setLoadError(null);
+     setMutationError(null);
+@@ -628,70 +733,52 @@ export function PolicyClient() {
+         getCurrentPolicy(controller.signal),
+       ]);
+       if (controller.signal.aborted || sequence !== loadSequence.current) return;
+-      setHasHousehold(householdExists);
+-      setPolicy(currentPolicy);
+ 
+       if (!householdExists || !currentPolicy) {
++        historyController.current?.abort();
++        auditController.current?.abort();
++        ++historyGeneration.current;
++        ++auditGeneration.current;
++        historyLoadingRef.current = false;
++        historyCursorRef.current = null;
++        setHasHousehold(householdExists);
++        setPolicy(currentPolicy);
+         setDraft(null);
+         setPublished(null);
+         setHistory([]);
+         setNextHistoryCursor(null);
+         setAuditEvents([]);
++        setHistoryError(null);
+         setAuditError(null);
+-        return;
++      } else {
++        const core = Promise.all([
++          getCurrentDraft(controller.signal),
++          getCurrentPublished(controller.signal),
++        ]);
++        void refreshHistory();
++        void refreshAudit();
++        const [draftResult, publishedResult] = await core;
++        if (controller.signal.aborted || sequence !== loadSequence.current) return;
++        setHasHousehold(true);
++        setPolicy(currentPolicy);
++        setDraft(draftResult);
++        setPublished(publishedResult);
+       }
+-
+-      const [draftResult, publishedResult, historyResult, auditResult] = await Promise.all([
+-        getCurrentDraft(controller.signal),
+-        getCurrentPublished(controller.signal),
+-        getVersionHistory(undefined, controller.signal),
+-        getPolicyAuditEvents(controller.signal).then(
+-          (events) => ({ ok: true as const, events }),
+-          (error: unknown) => ({ ok: false as const, error }),
+-        ),
+-      ]);
+-      if (controller.signal.aborted || sequence !== loadSequence.current) return;
+-      setDraft(draftResult);
+-      setPublished(publishedResult);
+-      setHistory(historyResult.items);
+-      setNextHistoryCursor(historyResult.next_before_version_number);
++      setTextDirty(false);
++      setAllocationsDirty(false);
+       setWorkspaceEpoch((current) => current + 1);
+-      if (auditResult.ok) {
+-        setAuditEvents(auditResult.events);
+-        setAuditError(null);
+-      } else if (!isAbort(auditResult.error)) {
+-        setAuditError("Policy data is available, but the audit timeline could not be loaded.");
+-      }
++      setWorkspaceReady(true);
+     } catch (caught) {
+       if (!isAbort(caught)) setLoadError(neutralMessage(caught));
+     } finally {
+-      if (!controller.signal.aborted && sequence === loadSequence.current) {
+-        setInitialLoading(false);
+-        setAuditLoading(false);
+-      }
++      if (!controller.signal.aborted && sequence === loadSequence.current) setInitialLoading(false);
+     }
+-  }, []);
++  }, [refreshAudit, refreshHistory]);
+ 
+-  const refreshAudit = useCallback(async (afterMutation = false) => {
+-    auditController.current?.abort();
+-    const controller = new AbortController();
+-    auditController.current = controller;
+-    setAuditLoading(true);
+-    setAuditError(null);
+-    try {
+-      setAuditEvents(await getPolicyAuditEvents(controller.signal));
+-    } catch (caught) {
+-      if (!isAbort(caught)) {
+-        setAuditError(
+-          afterMutation
+-            ? "The Policy mutation succeeded, but the audit timeline could not be refreshed."
+-            : "The Policy audit timeline could not be loaded.",
+-        );
+-      }
+-    } finally {
+-      if (!controller.signal.aborted) setAuditLoading(false);
+-    }
+-  }, []);
++  const requestWorkspaceReload = useCallback(() => {
++    if (dirty) setReloadConfirmation(true);
++    else void loadWorkspace();
++  }, [dirty, loadWorkspace]);
+ 
+   useEffect(() => {
+     const timer = window.setTimeout(() => void loadWorkspace(), 0);
+@@ -699,6 +786,7 @@ export function PolicyClient() {
+       window.clearTimeout(timer);
+       loadController.current?.abort();
+       auditController.current?.abort();
++      historyController.current?.abort();
+     };
+   }, [loadWorkspace]);
+ 
+@@ -721,10 +809,11 @@ export function PolicyClient() {
+       setPublished(null);
+       setHistory([]);
+       setNextHistoryCursor(null);
++      historyCursorRef.current = null;
+       setSavedMessage("Investment Policy and initial Draft created.");
+       void refreshAudit(true);
+     } catch (caught) {
+-      if (caught instanceof PolicyApiError && caught.status === 409) await loadWorkspace();
++      if (caught instanceof PolicyApiError && caught.status === 409) requestWorkspaceReload();
+       else setMutationError(neutralMessage(caught));
+     } finally {
+       setMutation(null);
+@@ -741,7 +830,7 @@ export function PolicyClient() {
+       setSavedMessage(sourceVersionId ? "Draft copied from the current Published Version." : "Blank Draft created.");
+       void refreshAudit(true);
+     } catch (caught) {
+-      if (caught instanceof PolicyApiError && caught.status === 409) await loadWorkspace();
++      if (caught instanceof PolicyApiError && caught.status === 409) requestWorkspaceReload();
+       else setMutationError(neutralMessage(caught));
+     } finally {
+       setMutation(null);
+@@ -765,39 +854,43 @@ export function PolicyClient() {
+   }
+ 
+   async function loadMoreHistory() {
+-    if (nextHistoryCursor === null || historyLoading) return;
++    const requestedCursor = historyCursorRef.current;
++    if (requestedCursor === null || historyLoadingRef.current) return;
++    historyController.current?.abort();
++    const controller = new AbortController();
++    historyController.current = controller;
++    const generation = ++historyGeneration.current;
++    historyLoadingRef.current = true;
+     setHistoryLoading(true);
+     setHistoryError(null);
+     try {
+-      const page = await getVersionHistory(nextHistoryCursor);
+-      setHistory((current) => {
+-        const byNumber = new Map(current.map((item) => [item.version_number, item]));
+-        page.items.forEach((item) => byNumber.set(item.version_number, item));
+-        return [...byNumber.values()].sort((left, right) => right.version_number - left.version_number);
+-      });
+-      setNextHistoryCursor(page.next_before_version_number);
++      const page = await getVersionHistory(requestedCursor, controller.signal);
++      if (generation === historyGeneration.current && historyCursorRef.current === requestedCursor && !controller.signal.aborted) {
++        setHistory((current) => {
++          const byId = new Map(current.map((item) => [item.id, item]));
++          page.items.forEach((item) => byId.set(item.id, item));
++          return [...byId.values()].sort((left, right) => right.version_number - left.version_number);
++        });
++        historyCursorRef.current = page.next_before_version_number;
++        setNextHistoryCursor(page.next_before_version_number);
++      }
+     } catch (caught) {
+-      setHistoryError(neutralMessage(caught));
++      if (!isAbort(caught) && generation === historyGeneration.current) setHistoryError(neutralMessage(caught));
+     } finally {
+-      setHistoryLoading(false);
++      if (generation === historyGeneration.current && !controller.signal.aborted) {
++        historyLoadingRef.current = false;
++        setHistoryLoading(false);
++      }
+     }
+   }
+ 
+   async function handlePublished(version: PolicyVersion) {
+     setPublished(version);
+     setDraft(null);
++    setTextDirty(false);
++    setAllocationsDirty(false);
+     setSavedMessage(`Version ${version.version_number} published.`);
+-    setHistoryLoading(true);
+-    try {
+-      const refreshed = await getVersionHistory();
+-      setHistory(refreshed.items);
+-      setNextHistoryCursor(refreshed.next_before_version_number);
+-      setHistoryError(null);
+-    } catch (caught) {
+-      setHistoryError(neutralMessage(caught));
+-    } finally {
+-      setHistoryLoading(false);
+-    }
++    void refreshHistory();
+     void refreshAudit(true);
+   }
+ 
+@@ -823,13 +916,23 @@ export function PolicyClient() {
+       {loadError ? (
+         <div className="error-panel" role="alert">
+           <p>{loadError}</p>
+-          <button onClick={() => void loadWorkspace()} type="button">Try again</button>
++          <button onClick={requestWorkspaceReload} type="button">Try again</button>
+         </div>
+       ) : null}
+       {savedMessage ? <p className="success-message" role="status">{savedMessage}</p> : null}
+-      {mutationError ? <ConflictPanel message={mutationError} onReload={() => void loadWorkspace()} /> : null}
++      {mutationError ? <ConflictPanel message={mutationError} onReload={requestWorkspaceReload} /> : null}
++      {reloadConfirmation ? (
++        <section className="confirmation-panel" role="alertdialog" aria-label="Discard local changes and reload">
++          <p><strong>Reloading replaces unsaved text and allocation edits.</strong></p>
++          <p>Both Policy text and Draft allocation local changes will be lost.</p>
++          <div className="actions">
++            <button onClick={() => { setReloadConfirmation(false); void loadWorkspace(); }} type="button">Discard local changes and reload</button>
++            <button onClick={() => setReloadConfirmation(false)} type="button">Keep editing</button>
++          </div>
++        </section>
++      ) : null}
+ 
+-      {!initialLoading && !loadError && hasHousehold === false ? (
++      {workspaceReady && hasHousehold === false ? (
+         <section className="panel" aria-labelledby="missing-household-heading">
+           <p className="eyebrow">Household prerequisite</p>
+           <h2 id="missing-household-heading">Create the Household profile first</h2>
+@@ -838,7 +941,7 @@ export function PolicyClient() {
+         </section>
+       ) : null}
+ 
+-      {!initialLoading && !loadError && hasHousehold && !policy ? (
++      {workspaceReady && hasHousehold && !policy ? (
+         <section className="panel" aria-labelledby="empty-policy-heading">
+           <p className="eyebrow">Empty Policy workspace</p>
+           <h2 id="empty-policy-heading">No Investment Policy record yet</h2>
+@@ -854,15 +957,17 @@ export function PolicyClient() {
+         </section>
+       ) : null}
+ 
+-      {!initialLoading && !loadError && policy && draft ? (
++      {workspaceReady && policy && draft ? (
+         <>
+           <section className="workspace-status" aria-label="Draft status">
+             <span>Editable Draft</span>
+             <strong>Server revision {draft.revision}</strong>
++            <button onClick={requestWorkspaceReload} type="button">Reload workspace</button>
+           </section>
+-          <DraftTextEditor key={`text-${draft.id}-${workspaceEpoch}`} draft={draft} onReload={() => void loadWorkspace()} onSaved={acceptDraft} />
+-          <AllocationEditor key={`allocations-${draft.id}-${workspaceEpoch}`} draft={draft} onReload={() => void loadWorkspace()} onSaved={acceptDraft} />
+-          <PublishReview draft={draft} onPublished={(version) => void handlePublished(version)} onReload={() => void loadWorkspace()} />
++          {published ? <CurrentPublishedSummary draft={draft} published={published} /> : null}
++          <DraftTextEditor key={`text-${draft.id}-${workspaceEpoch}`} draft={draft} onDirtyChange={setTextDirty} onReload={requestWorkspaceReload} onSaved={acceptDraft} />
++          <AllocationEditor key={`allocations-${draft.id}-${workspaceEpoch}`} draft={draft} onDirtyChange={setAllocationsDirty} onReload={requestWorkspaceReload} onSaved={acceptDraft} />
++          <PublishReview dirty={dirty} draft={draft} onPublished={(version) => void handlePublished(version)} onReload={requestWorkspaceReload} />
+           <section className="panel" aria-labelledby="discard-heading">
+             <p className="eyebrow">Draft lifecycle</p>
+             <h2 id="discard-heading">Discard Draft</h2>
+@@ -884,7 +989,7 @@ export function PolicyClient() {
+         </>
+       ) : null}
+ 
+-      {!initialLoading && !loadError && policy && !draft ? (
++      {workspaceReady && policy && !draft ? (
+         <>
+           {published ? <VersionView version={published} /> : (
+             <section className="panel">
+@@ -909,14 +1014,16 @@ export function PolicyClient() {
+         </>
+       ) : null}
+ 
+-      {!initialLoading && !loadError && policy ? (
++      {workspaceReady && policy ? (
+         <>
+           <VersionHistory
+             error={historyError}
+             items={history}
++            key={`history-${workspaceEpoch}`}
+             loading={historyLoading}
+             nextCursor={nextHistoryCursor}
+             onLoadMore={() => void loadMoreHistory()}
++            onRetry={() => void refreshHistory()}
+           />
+           <AuditTimeline
+             error={auditError}
+diff --git a/frontend/lib/policy-api.test.ts b/frontend/lib/policy-api.test.ts
+index 2033c2e..6c5d22e 100644
+--- a/frontend/lib/policy-api.test.ts
++++ b/frontend/lib/policy-api.test.ts
+@@ -2,12 +2,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
+ 
+ import {
+   allocationTotal,
++  allocationsEqual,
+   createDraft,
+   createPolicy,
+   getPolicyAuditEvents,
+   getVersionHistory,
+   percentageToHundredths,
+   PolicyApiError,
++  PolicyNetworkError,
+   publishDraft,
+   replaceDraftAllocations,
+   updateDraftText,
+@@ -90,6 +92,33 @@ describe("Policy API client", () => {
+     expect((error as Error).message).not.toContain("secret-marker");
+   });
+ 
++  it.each([
++    [500, null],
++    [500, "not-json"],
++    [503, { detail: "secret-marker owner payload" }],
++  ])("uses a neutral message for HTTP %s without reading the response body", async (status, body) => {
++    vi.stubGlobal(
++      "fetch",
++      vi.fn(async () => new Response(body === null ? null : typeof body === "string" ? body : JSON.stringify(body), { status })),
++    );
++
++    const error = await getPolicyAuditEvents().catch((caught: unknown) => caught);
++
++    expect(error).toBeInstanceOf(PolicyApiError);
++    expect((error as Error).message).toBe("The Policy service returned an unexpected server error.");
++    expect((error as Error).message).not.toContain("secret-marker");
++  });
++
++  it("distinguishes a network failure and preserves AbortError", async () => {
++    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("private network detail"); }));
++    await expect(getPolicyAuditEvents()).rejects.toBeInstanceOf(PolicyNetworkError);
++    await expect(getPolicyAuditEvents()).rejects.toThrow("connection is unavailable");
++
++    const abort = new DOMException("Aborted", "AbortError");
++    vi.stubGlobal("fetch", vi.fn(async () => { throw abort; }));
++    await expect(getPolicyAuditEvents()).rejects.toBe(abort);
++  });
++
+   it("does not retry a failed mutation", async () => {
+     const fetchMock = vi.fn(async () => jsonResponse({ detail: "Conflict" }, 409));
+     vi.stubGlobal("fetch", fetchMock);
+@@ -122,4 +151,10 @@ describe("Policy API client", () => {
+       display: "Invalid input",
+     });
+   });
++
++  it("treats display case as meaningful while normalizing Unicode whitespace and percentages", () => {
++    const saved = [{ id: "1", asset_class_name: "Cash Reserve", target_percentage: "40.00", sort_order: 0 }];
++    expect(allocationsEqual(saved, [{ asset_class_name: "  Cash\u00a0 Reserve  ", target_percentage: "40" }])).toBe(true);
++    expect(allocationsEqual(saved, [{ asset_class_name: "CASH RESERVE", target_percentage: "40.00" }])).toBe(false);
++  });
+ });
+diff --git a/frontend/lib/policy-api.ts b/frontend/lib/policy-api.ts
+index 5505157..86de7ad 100644
+--- a/frontend/lib/policy-api.ts
++++ b/frontend/lib/policy-api.ts
+@@ -105,6 +105,13 @@ export class PolicyApiError extends Error {
+   }
+ }
+ 
++export class PolicyNetworkError extends Error {
++  constructor() {
++    super("The Policy service connection is unavailable.");
++    this.name = "PolicyNetworkError";
++  }
++}
++
+ function neutralErrorMessage(status: number): string {
+   if (status === 400) {
+     return "The request could not be completed because the record is mechanically incomplete or unchanged.";
+@@ -116,11 +123,25 @@ function neutralErrorMessage(status: number): string {
+   if (status === 422) {
+     return "The request was not accepted. Check field formats, limits, and duplicate asset-class names.";
+   }
++  if (status >= 500) return "The Policy service returned an unexpected server error.";
+   return "The Policy request could not be completed.";
+ }
+ 
++function isAbortError(error: unknown): boolean {
++  return error instanceof DOMException && error.name === "AbortError";
++}
++
++async function fetchResponse(path: string, init: RequestInit = {}): Promise<Response> {
++  try {
++    return await fetch(`${API_BASE_URL}${path}`, init);
++  } catch (error) {
++    if (isAbortError(error)) throw error;
++    throw new PolicyNetworkError();
++  }
++}
++
+ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+-  const response = await fetch(`${API_BASE_URL}${path}`, init);
++  const response = await fetchResponse(path, init);
+   if (!response.ok) throw new PolicyApiError(neutralErrorMessage(response.status), response.status);
+   if (response.status === 204) return undefined as T;
+   return (await response.json()) as T;
+@@ -136,7 +157,7 @@ function jsonRequest(method: string, payload: unknown, signal?: AbortSignal): Re
+ }
+ 
+ export async function hasCurrentHousehold(signal?: AbortSignal): Promise<boolean> {
+-  const response = await fetch(`${API_BASE_URL}/api/households/current`, {
++  const response = await fetchResponse("/api/households/current", {
+     cache: "no-store",
+     signal,
+   });
+@@ -146,7 +167,7 @@ export async function hasCurrentHousehold(signal?: AbortSignal): Promise<boolean
+ }
+ 
+ export async function getCurrentPolicy(signal?: AbortSignal): Promise<Policy | null> {
+-  const response = await fetch(`${API_BASE_URL}/api/policies/current`, {
++  const response = await fetchResponse("/api/policies/current", {
+     cache: "no-store",
+     signal,
+   });
+@@ -280,8 +301,8 @@ export function allocationTotal(items: AllocationInput[]): {
+   return { hundredths: total, display: formatHundredths(total) };
+ }
+ 
+-function normalizedName(value: string): string {
+-  return value.normalize("NFKC").trim().replace(/\s+/gu, " ").toLocaleLowerCase();
++export function normalizeAllocationDisplayName(value: string): string {
++  return value.normalize("NFKC").trim().replace(/\s+/gu, " ");
+ }
+ 
+ function normalizedPercentage(value: string): string | null {
+@@ -294,7 +315,8 @@ export function allocationsEqual(saved: Allocation[], edited: AllocationInput[])
+   return saved.every((item, index) => {
+     const candidate = edited[index];
+     return (
+-      normalizedName(item.asset_class_name) === normalizedName(candidate.asset_class_name) &&
++      normalizeAllocationDisplayName(item.asset_class_name) ===
++        normalizeAllocationDisplayName(candidate.asset_class_name) &&
+       item.target_percentage === normalizedPercentage(candidate.target_percentage)
+     );
+   });

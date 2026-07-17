@@ -1,0 +1,4283 @@
+
+===== FILE: frontend/app/policy/page.tsx =====
+import { PolicyClient } from "./policy-client";
+
+export default function PolicyPage() {
+  return <PolicyClient />;
+}
+
+===== FILE: frontend/app/policy/policy-client.tsx =====
+"use client";
+
+import Link from "next/link";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+import {
+  AllocationInput,
+  allocationTotal,
+  allocationsEqual,
+  createDraft,
+  createPolicy,
+  discardDraft,
+  getCurrentDraft,
+  getCurrentPolicy,
+  getCurrentPublished,
+  getPolicyAuditEvents,
+  getVersion,
+  getVersionHistory,
+  hasCurrentHousehold,
+  POLICY_TEXT_FIELDS,
+  POLICY_TEXT_LIMITS,
+  Policy,
+  PolicyApiError,
+  PolicyAuditEvent,
+  PolicyDraft,
+  PolicyText,
+  PolicyTextField,
+  PolicyVersion,
+  PolicyVersionSummary,
+  publishDraft,
+  replaceDraftAllocations,
+  REQUIRED_PUBLISH_FIELDS,
+  updateDraftText,
+} from "../../lib/policy-api";
+
+const LOCAL_ONLY_NOTICE =
+  "This Sprint 002 build is local-only and non-production. It has no authentication and must not be publicly exposed.";
+
+const NON_ADVISORY_NOTICE =
+  "CompoundOS records information you enter. It does not evaluate whether an investment policy or decision is suitable, appropriate, or likely to succeed. Policy links and validations are for recordkeeping only and do not constitute investment, tax, or legal advice.";
+
+const FIELD_LABELS: Record<PolicyTextField, string> = {
+  objectives: "Objectives",
+  time_horizon: "Time horizon",
+  liquidity: "Liquidity",
+  diversification: "Diversification",
+  contribution_policy: "Contribution policy",
+  rebalancing_policy: "Rebalancing policy",
+  prohibited_assets: "Prohibited assets",
+  leverage_policy: "Leverage policy",
+  decision_process: "Decision process",
+  notes: "Notes",
+};
+
+function isAbort(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+function conflictMessage(error: unknown): string | null {
+  return error instanceof PolicyApiError && error.status === 409 ? error.message : null;
+}
+
+function neutralMessage(error: unknown): string {
+  return error instanceof PolicyApiError
+    ? error.message
+    : "The Policy request could not be completed.";
+}
+
+function textFromDraft(draft: PolicyDraft): PolicyText {
+  return Object.fromEntries(POLICY_TEXT_FIELDS.map((field) => [field, draft[field]])) as PolicyText;
+}
+
+function allocationInputs(draft: PolicyDraft): AllocationInput[] {
+  return draft.allocations.map(({ asset_class_name, target_percentage }) => ({
+    asset_class_name,
+    target_percentage,
+  }));
+}
+
+function unicodeLength(value: string): number {
+  return Array.from(value).length;
+}
+
+type DraftMutationResult = (draft: PolicyDraft, message: string) => void;
+
+function ConflictPanel({ message, onReload }: { message: string; onReload: () => void }) {
+  return (
+    <div className="error-panel" role="alert">
+      <p>{message}</p>
+      <button onClick={onReload} type="button">Reload server data</button>
+    </div>
+  );
+}
+
+function DraftTextEditor({
+  draft,
+  onReload,
+  onSaved,
+}: {
+  draft: PolicyDraft;
+  onReload: () => void;
+  onSaved: DraftMutationResult;
+}) {
+  const [form, setForm] = useState<PolicyText>(() => textFromDraft(draft));
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [conflict, setConflict] = useState<string | null>(null);
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (submitting) return;
+    const tooLong = POLICY_TEXT_FIELDS.find(
+      (field) => unicodeLength(form[field].trim()) > POLICY_TEXT_LIMITS[field],
+    );
+    if (tooLong) {
+      setError(`${FIELD_LABELS[tooLong]} exceeds its character limit.`);
+      return;
+    }
+
+    const changed = Object.fromEntries(
+      POLICY_TEXT_FIELDS.flatMap((field) => {
+        const value = form[field].trim();
+        return value === draft[field] ? [] : [[field, value]];
+      }),
+    ) as Partial<PolicyText>;
+    if (Object.keys(changed).length === 0) {
+      setError("There are no text changes to save.");
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+    setConflict(null);
+    try {
+      const saved = await updateDraftText(draft.revision, changed);
+      setForm(textFromDraft(saved));
+      onSaved(saved, "Policy text saved.");
+    } catch (caught) {
+      const message = conflictMessage(caught);
+      if (message) setConflict(message);
+      else setError(neutralMessage(caught));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <section className="panel" aria-labelledby="policy-text-heading">
+      <div className="section-heading">
+        <p className="eyebrow">User-entered record</p>
+        <h2 id="policy-text-heading">Policy text</h2>
+        <p className="hint">Fields are saved only when you choose Save policy text.</p>
+      </div>
+      <form className="policy-form" onSubmit={save} noValidate>
+        {POLICY_TEXT_FIELDS.map((field) => {
+          const required = REQUIRED_PUBLISH_FIELDS.includes(
+            field as (typeof REQUIRED_PUBLISH_FIELDS)[number],
+          );
+          const length = unicodeLength(form[field]);
+          return (
+            <label key={field}>
+              <span className="label-row">
+                <span>{FIELD_LABELS[field]}</span>
+                <span className="field-badge">
+                  {required ? "Required to publish" : "Optional"}
+                </span>
+              </span>
+              <textarea
+                aria-label={FIELD_LABELS[field]}
+                aria-describedby={`${field}-hint`}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, [field]: event.target.value }))
+                }
+                value={form[field]}
+              />
+              <span className="hint" id={`${field}-hint`}>
+                {length.toLocaleString()} / {POLICY_TEXT_LIMITS[field].toLocaleString()} characters.
+                {required ? " Publication checks presence only." : " Optional for publication."}
+              </span>
+            </label>
+          );
+        })}
+        {error ? <p className="error" role="alert">{error}</p> : null}
+        {conflict ? <ConflictPanel message={conflict} onReload={onReload} /> : null}
+        <div className="actions">
+          <button className="primary-button" disabled={submitting} type="submit">
+            {submitting ? "Saving policy text…" : "Save policy text"}
+          </button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
+type EditableAllocation = AllocationInput & { localId: string };
+
+function editableAllocations(draft: PolicyDraft): EditableAllocation[] {
+  return draft.allocations.map((item) => ({
+    localId: item.id,
+    asset_class_name: item.asset_class_name,
+    target_percentage: item.target_percentage,
+  }));
+}
+
+function AllocationEditor({
+  draft,
+  onReload,
+  onSaved,
+}: {
+  draft: PolicyDraft;
+  onReload: () => void;
+  onSaved: DraftMutationResult;
+}) {
+  const nextId = useRef(0);
+  const [rows, setRows] = useState<EditableAllocation[]>(() => editableAllocations(draft));
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [conflict, setConflict] = useState<string | null>(null);
+
+  const inputs = useMemo<AllocationInput[]>(
+    () => rows.map(({ asset_class_name, target_percentage }) => ({ asset_class_name, target_percentage })),
+    [rows],
+  );
+  const total = allocationTotal(inputs);
+
+  function updateRow(index: number, field: keyof AllocationInput, value: string) {
+    setRows((current) =>
+      current.map((row, rowIndex) => (rowIndex === index ? { ...row, [field]: value } : row)),
+    );
+  }
+
+  function move(index: number, direction: -1 | 1) {
+    setRows((current) => {
+      const target = index + direction;
+      if (target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }
+
+  async function save() {
+    if (submitting) return;
+    if (inputs.some((item) => !item.asset_class_name.trim())) {
+      setError("Each allocation row needs an asset-class name before saving.");
+      return;
+    }
+    if (total.hundredths === null && inputs.length > 0) {
+      setError("Percentages must be integers or decimal strings with at most two places, greater than 0 and no more than 100.");
+      return;
+    }
+    if (allocationsEqual(draft.allocations, inputs)) {
+      setError("There are no allocation changes to save.");
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+    setConflict(null);
+    try {
+      const saved = await replaceDraftAllocations(draft.revision, inputs);
+      setRows(editableAllocations(saved));
+      onSaved(saved, "Draft allocations saved.");
+    } catch (caught) {
+      const message = conflictMessage(caught);
+      if (message) setConflict(message);
+      else setError(neutralMessage(caught));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <section className="panel" aria-labelledby="allocation-heading">
+      <div className="section-heading section-heading-row">
+        <div>
+          <p className="eyebrow">User-entered target record</p>
+          <h2 id="allocation-heading">Draft allocation</h2>
+          <p className="hint">Integer or at most two decimal places. No value is rounded.</p>
+        </div>
+        <button
+          onClick={() => {
+            nextId.current += 1;
+            setRows((current) => [
+              ...current,
+              { localId: `new-${nextId.current}`, asset_class_name: "", target_percentage: "" },
+            ]);
+          }}
+          type="button"
+        >
+          Add allocation row
+        </button>
+      </div>
+
+      {rows.length === 0 ? <p>No allocation rows in this Draft.</p> : null}
+      <ol className="allocation-editor">
+        {rows.map((row, index) => (
+          <li key={row.localId}>
+            <label>
+              Asset-class name
+              <input
+                maxLength={200}
+                onChange={(event) => updateRow(index, "asset_class_name", event.target.value)}
+                value={row.asset_class_name}
+              />
+            </label>
+            <label>
+              Target percentage
+              <input
+                inputMode="decimal"
+                onChange={(event) => updateRow(index, "target_percentage", event.target.value)}
+                value={row.target_percentage}
+              />
+            </label>
+            <div className="row-actions" aria-label={`Reorder allocation row ${index + 1}`}>
+              <button disabled={index === 0} onClick={() => move(index, -1)} type="button">Move up</button>
+              <button disabled={index === rows.length - 1} onClick={() => move(index, 1)} type="button">Move down</button>
+              <button
+                onClick={() => setRows((current) => current.filter((_, rowIndex) => rowIndex !== index))}
+                type="button"
+              >
+                Remove
+              </button>
+            </div>
+          </li>
+        ))}
+      </ol>
+
+      <div className="total-panel" role="status">
+        <strong>Draft allocation total: {total.display}%</strong>
+        <span>
+          {total.hundredths === 10000
+            ? "Mechanically complete at exactly 100.00%. This is not system approval."
+            : "A Draft may remain incomplete; publication requires exactly 100.00%."}
+        </span>
+      </div>
+      {error ? <p className="error" role="alert">{error}</p> : null}
+      {conflict ? <ConflictPanel message={conflict} onReload={onReload} /> : null}
+      <div className="actions">
+        <button className="primary-button" disabled={submitting} onClick={() => void save()} type="button">
+          {submitting ? "Saving allocations…" : "Save allocations"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function PolicyTextReadOnly({ value }: { value: PolicyText }) {
+  return (
+    <dl className="summary-grid policy-summary">
+      {POLICY_TEXT_FIELDS.map((field) => (
+        <div key={field}>
+          <dt>{FIELD_LABELS[field]}</dt>
+          <dd>{value[field] || "Not provided"}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function AllocationReadOnly({ items }: { items: AllocationInput[] }) {
+  const total = allocationTotal(items);
+  return (
+    <div>
+      <ul className="allocation-readonly">
+        {items.map((item, index) => (
+          <li key={`${item.asset_class_name}-${index}`}>
+            <span>{item.asset_class_name}</span>
+            <strong>{item.target_percentage}%</strong>
+          </li>
+        ))}
+      </ul>
+      <p><strong>Exact total: {total.display}%</strong></p>
+    </div>
+  );
+}
+
+function PublishReview({
+  draft,
+  onPublished,
+  onReload,
+}: {
+  draft: PolicyDraft;
+  onPublished: (version: PolicyVersion) => void;
+  onReload: () => void;
+}) {
+  const [reviewing, setReviewing] = useState(false);
+  const [confirmed, setConfirmed] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [conflict, setConflict] = useState<string | null>(null);
+  const total = allocationTotal(allocationInputs(draft));
+
+  async function publish() {
+    if (!confirmed || submitting) return;
+    setSubmitting(true);
+    setError(null);
+    setConflict(null);
+    try {
+      onPublished(await publishDraft(draft.revision));
+    } catch (caught) {
+      const message = conflictMessage(caught);
+      if (message) setConflict(message);
+      else setError(neutralMessage(caught));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <section className="panel" aria-labelledby="publish-heading">
+      <div className="section-heading section-heading-row">
+        <div>
+          <p className="eyebrow">Explicit confirmation</p>
+          <h2 id="publish-heading">Publish review</h2>
+        </div>
+        {!reviewing ? <button onClick={() => setReviewing(true)} type="button">Review for publication</button> : null}
+      </div>
+      {!reviewing ? <p>Review the saved server snapshot before creating an immutable Version.</p> : null}
+      {reviewing ? (
+        <div className="publish-review">
+          <p>Current saved revision: {draft.revision}</p>
+          <ul className="mechanical-checks">
+            {REQUIRED_PUBLISH_FIELDS.map((field) => (
+              <li key={field}>{FIELD_LABELS[field]}: {draft[field].trim() ? "Present" : "Missing"}</li>
+            ))}
+            <li>Allocation total: {total.display}%</li>
+          </ul>
+          <PolicyTextReadOnly value={draft} />
+          <AllocationReadOnly items={allocationInputs(draft)} />
+          <aside className="notice" aria-label="Publication non-advisory notice">
+            <strong>Recordkeeping only</strong>
+            <p>{NON_ADVISORY_NOTICE}</p>
+          </aside>
+          <label className="confirmation-row">
+            <input
+              checked={confirmed}
+              onChange={(event) => setConfirmed(event.target.checked)}
+              type="checkbox"
+            />
+            I confirm that I want to publish this saved Draft as an immutable Version.
+          </label>
+          {error ? <p className="error" role="alert">{error}</p> : null}
+          {conflict ? <ConflictPanel message={conflict} onReload={onReload} /> : null}
+          <div className="actions">
+            <button
+              className="primary-button"
+              disabled={!confirmed || submitting}
+              onClick={() => void publish()}
+              type="button"
+            >
+              {submitting ? "Publishing…" : "Publish immutable Version"}
+            </button>
+            <button disabled={submitting} onClick={() => setReviewing(false)} type="button">Close review</button>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function VersionView({ version, heading = "Current Published Version" }: { version: PolicyVersion; heading?: string }) {
+  return (
+    <section className="panel" aria-labelledby={`version-${version.version_number}-heading`}>
+      <div className="section-heading">
+        <p className="eyebrow">Immutable · {version.status === "published" ? "Published" : "Superseded"}</p>
+        <h2 id={`version-${version.version_number}-heading`}>{heading} · Version {version.version_number}</h2>
+        <p className="hint">Published {new Date(version.published_at).toLocaleString()}</p>
+      </div>
+      <p><strong>Published versions cannot be edited.</strong> Changes require a new Draft and publication.</p>
+      <PolicyTextReadOnly value={version} />
+      <AllocationReadOnly items={version.allocations} />
+    </section>
+  );
+}
+
+function VersionHistory({
+  items,
+  loading,
+  error,
+  nextCursor,
+  onLoadMore,
+}: {
+  items: PolicyVersionSummary[];
+  loading: boolean;
+  error: string | null;
+  nextCursor: number | null;
+  onLoadMore: () => void;
+}) {
+  const detailController = useRef<AbortController | null>(null);
+  const [detail, setDetail] = useState<PolicyVersion | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+
+  useEffect(() => () => detailController.current?.abort(), []);
+
+  async function selectVersion(versionNumber: number) {
+    detailController.current?.abort();
+    const controller = new AbortController();
+    detailController.current = controller;
+    setDetailLoading(true);
+    setDetailError(null);
+    try {
+      setDetail(await getVersion(versionNumber, controller.signal));
+    } catch (caught) {
+      if (!isAbort(caught)) setDetailError(neutralMessage(caught));
+    } finally {
+      if (!controller.signal.aborted) setDetailLoading(false);
+    }
+  }
+
+  return (
+    <section className="panel" aria-labelledby="history-heading">
+      <div className="section-heading">
+        <p className="eyebrow">Newest first · Read-only</p>
+        <h2 id="history-heading">Version history</h2>
+      </div>
+      {error ? <p className="error" role="alert">{error}</p> : null}
+      {items.length === 0 && !loading ? <p>No published Versions yet.</p> : null}
+      <ol className="version-list">
+        {items.map((item) => (
+          <li key={item.id}>
+            <div>
+              <strong>Version {item.version_number}</strong>
+              <span>{item.status === "published" ? "Published" : "Superseded"}</span>
+              <span>{new Date(item.published_at).toLocaleString()}</span>
+            </div>
+            <button onClick={() => void selectVersion(item.version_number)} type="button">View immutable detail</button>
+          </li>
+        ))}
+      </ol>
+      {nextCursor !== null ? (
+        <button disabled={loading} onClick={onLoadMore} type="button">
+          {loading ? "Loading more Versions…" : "Load more Versions"}
+        </button>
+      ) : null}
+      {detailLoading ? <p role="status">Loading Version detail…</p> : null}
+      {detailError ? <p className="error" role="alert">{detailError}</p> : null}
+      {detail ? <VersionView heading="Historical Version" version={detail} /> : null}
+    </section>
+  );
+}
+
+function AuditTimeline({
+  events,
+  loading,
+  error,
+  onRetry,
+}: {
+  events: PolicyAuditEvent[];
+  loading: boolean;
+  error: string | null;
+  onRetry: () => void;
+}) {
+  return (
+    <section className="panel" aria-labelledby="policy-audit-heading">
+      <div className="section-heading">
+        <p className="eyebrow">Latest server window · Read-only</p>
+        <h2 id="policy-audit-heading">Policy audit timeline</h2>
+        <p className="hint">
+          Events are shown in the server-provided sequence order. This Slice exposes only the latest window and has no cursor for earlier events.
+        </p>
+      </div>
+      {error ? (
+        <div className="error-panel" role="alert">
+          <p>{error}</p>
+          <button disabled={loading} onClick={onRetry} type="button">
+            {loading ? "Retrying audit timeline…" : "Retry audit timeline"}
+          </button>
+        </div>
+      ) : null}
+      {loading && !error ? <p role="status">Loading Policy audit timeline…</p> : null}
+      {!loading && events.length === 0 ? <p>No Policy audit events yet.</p> : null}
+      {!loading && events.length > 0 ? (
+        <ol className="timeline">
+          {events.map((event) => (
+            <li key={event.id}>
+              <strong>{event.action}</strong>
+              <span>{new Date(event.occurred_at).toLocaleString()}</span>
+              <span>Actor: {event.actor}</span>
+              <span>Sequence: {event.sequence_number}</span>
+              {Object.entries(event.metadata).map(([key, value]) => (
+                <span key={key}>{key}: {Array.isArray(value) ? value.join(", ") : value}</span>
+              ))}
+            </li>
+          ))}
+        </ol>
+      ) : null}
+    </section>
+  );
+}
+
+export function PolicyClient() {
+  const loadController = useRef<AbortController | null>(null);
+  const auditController = useRef<AbortController | null>(null);
+  const loadSequence = useRef(0);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [hasHousehold, setHasHousehold] = useState<boolean | null>(null);
+  const [policy, setPolicy] = useState<Policy | null>(null);
+  const [draft, setDraft] = useState<PolicyDraft | null>(null);
+  const [published, setPublished] = useState<PolicyVersion | null>(null);
+  const [history, setHistory] = useState<PolicyVersionSummary[]>([]);
+  const [nextHistoryCursor, setNextHistoryCursor] = useState<number | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [auditEvents, setAuditEvents] = useState<PolicyAuditEvent[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState<string | null>(null);
+  const [mutation, setMutation] = useState<string | null>(null);
+  const [mutationError, setMutationError] = useState<string | null>(null);
+  const [savedMessage, setSavedMessage] = useState<string | null>(null);
+  const [discardConfirmation, setDiscardConfirmation] = useState(false);
+  const [workspaceEpoch, setWorkspaceEpoch] = useState(0);
+
+  const loadWorkspace = useCallback(async () => {
+    loadController.current?.abort();
+    const controller = new AbortController();
+    loadController.current = controller;
+    loadSequence.current += 1;
+    const sequence = loadSequence.current;
+    setInitialLoading(true);
+    setLoadError(null);
+    setMutationError(null);
+    try {
+      const [householdExists, currentPolicy] = await Promise.all([
+        hasCurrentHousehold(controller.signal),
+        getCurrentPolicy(controller.signal),
+      ]);
+      if (controller.signal.aborted || sequence !== loadSequence.current) return;
+      setHasHousehold(householdExists);
+      setPolicy(currentPolicy);
+
+      if (!householdExists || !currentPolicy) {
+        setDraft(null);
+        setPublished(null);
+        setHistory([]);
+        setNextHistoryCursor(null);
+        setAuditEvents([]);
+        setAuditError(null);
+        return;
+      }
+
+      const [draftResult, publishedResult, historyResult, auditResult] = await Promise.all([
+        getCurrentDraft(controller.signal),
+        getCurrentPublished(controller.signal),
+        getVersionHistory(undefined, controller.signal),
+        getPolicyAuditEvents(controller.signal).then(
+          (events) => ({ ok: true as const, events }),
+          (error: unknown) => ({ ok: false as const, error }),
+        ),
+      ]);
+      if (controller.signal.aborted || sequence !== loadSequence.current) return;
+      setDraft(draftResult);
+      setPublished(publishedResult);
+      setHistory(historyResult.items);
+      setNextHistoryCursor(historyResult.next_before_version_number);
+      setWorkspaceEpoch((current) => current + 1);
+      if (auditResult.ok) {
+        setAuditEvents(auditResult.events);
+        setAuditError(null);
+      } else if (!isAbort(auditResult.error)) {
+        setAuditError("Policy data is available, but the audit timeline could not be loaded.");
+      }
+    } catch (caught) {
+      if (!isAbort(caught)) setLoadError(neutralMessage(caught));
+    } finally {
+      if (!controller.signal.aborted && sequence === loadSequence.current) {
+        setInitialLoading(false);
+        setAuditLoading(false);
+      }
+    }
+  }, []);
+
+  const refreshAudit = useCallback(async (afterMutation = false) => {
+    auditController.current?.abort();
+    const controller = new AbortController();
+    auditController.current = controller;
+    setAuditLoading(true);
+    setAuditError(null);
+    try {
+      setAuditEvents(await getPolicyAuditEvents(controller.signal));
+    } catch (caught) {
+      if (!isAbort(caught)) {
+        setAuditError(
+          afterMutation
+            ? "The Policy mutation succeeded, but the audit timeline could not be refreshed."
+            : "The Policy audit timeline could not be loaded.",
+        );
+      }
+    } finally {
+      if (!controller.signal.aborted) setAuditLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void loadWorkspace(), 0);
+    return () => {
+      window.clearTimeout(timer);
+      loadController.current?.abort();
+      auditController.current?.abort();
+    };
+  }, [loadWorkspace]);
+
+  function acceptDraft(saved: PolicyDraft, message: string) {
+    setDraft(saved);
+    setSavedMessage(message);
+    setMutationError(null);
+    void refreshAudit(true);
+  }
+
+  async function handleCreatePolicy() {
+    if (mutation) return;
+    setMutation("create-policy");
+    setMutationError(null);
+    setSavedMessage(null);
+    try {
+      const created = await createPolicy();
+      setPolicy(created.policy);
+      setDraft(created.draft);
+      setPublished(null);
+      setHistory([]);
+      setNextHistoryCursor(null);
+      setSavedMessage("Investment Policy and initial Draft created.");
+      void refreshAudit(true);
+    } catch (caught) {
+      if (caught instanceof PolicyApiError && caught.status === 409) await loadWorkspace();
+      else setMutationError(neutralMessage(caught));
+    } finally {
+      setMutation(null);
+    }
+  }
+
+  async function handleCreateDraft(sourceVersionId?: string) {
+    if (mutation) return;
+    setMutation(sourceVersionId ? "copy-draft" : "blank-draft");
+    setMutationError(null);
+    try {
+      const created = await createDraft(sourceVersionId);
+      setDraft(created);
+      setSavedMessage(sourceVersionId ? "Draft copied from the current Published Version." : "Blank Draft created.");
+      void refreshAudit(true);
+    } catch (caught) {
+      if (caught instanceof PolicyApiError && caught.status === 409) await loadWorkspace();
+      else setMutationError(neutralMessage(caught));
+    } finally {
+      setMutation(null);
+    }
+  }
+
+  async function handleDiscard() {
+    if (!draft || mutation) return;
+    setMutation("discard");
+    setMutationError(null);
+    try {
+      await discardDraft(draft.revision);
+      setSavedMessage("Draft discarded. Published Versions were not changed.");
+      setDiscardConfirmation(false);
+      await loadWorkspace();
+    } catch (caught) {
+      setMutationError(neutralMessage(caught));
+    } finally {
+      setMutation(null);
+    }
+  }
+
+  async function loadMoreHistory() {
+    if (nextHistoryCursor === null || historyLoading) return;
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const page = await getVersionHistory(nextHistoryCursor);
+      setHistory((current) => {
+        const byNumber = new Map(current.map((item) => [item.version_number, item]));
+        page.items.forEach((item) => byNumber.set(item.version_number, item));
+        return [...byNumber.values()].sort((left, right) => right.version_number - left.version_number);
+      });
+      setNextHistoryCursor(page.next_before_version_number);
+    } catch (caught) {
+      setHistoryError(neutralMessage(caught));
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  async function handlePublished(version: PolicyVersion) {
+    setPublished(version);
+    setDraft(null);
+    setSavedMessage(`Version ${version.version_number} published.`);
+    setHistoryLoading(true);
+    try {
+      const refreshed = await getVersionHistory();
+      setHistory(refreshed.items);
+      setNextHistoryCursor(refreshed.next_before_version_number);
+      setHistoryError(null);
+    } catch (caught) {
+      setHistoryError(neutralMessage(caught));
+    } finally {
+      setHistoryLoading(false);
+    }
+    void refreshAudit(true);
+  }
+
+  return (
+    <main className="policy-shell">
+      <header className="page-header">
+        <p className="eyebrow">CompoundOS · Sprint 002 Slice 2C</p>
+        <h1>Investment Policy</h1>
+        <p className="lede">Record user-authored Policy text and target percentages through explicit, reviewable saves.</p>
+      </header>
+
+      <aside className="notice notice-warning" aria-label="Local-only limitation">
+        <strong>Local-only, non-production limitation</strong>
+        <p>{LOCAL_ONLY_NOTICE}</p>
+      </aside>
+      <aside className="notice" aria-label="Non-advisory notice">
+        <strong>Recordkeeping only</strong>
+        <p>{NON_ADVISORY_NOTICE}</p>
+        <p>CompoundOS does not provide investment advice, recommendations, or trade instructions.</p>
+      </aside>
+
+      {initialLoading ? <p role="status">Loading Household and Policy state…</p> : null}
+      {loadError ? (
+        <div className="error-panel" role="alert">
+          <p>{loadError}</p>
+          <button onClick={() => void loadWorkspace()} type="button">Try again</button>
+        </div>
+      ) : null}
+      {savedMessage ? <p className="success-message" role="status">{savedMessage}</p> : null}
+      {mutationError ? <ConflictPanel message={mutationError} onReload={() => void loadWorkspace()} /> : null}
+
+      {!initialLoading && !loadError && hasHousehold === false ? (
+        <section className="panel" aria-labelledby="missing-household-heading">
+          <p className="eyebrow">Household prerequisite</p>
+          <h2 id="missing-household-heading">Create the Household profile first</h2>
+          <p>The sole HouseholdProfile must exist before an Investment Policy record can be created.</p>
+          <Link className="primary-link" href="/household">Open Household profile</Link>
+        </section>
+      ) : null}
+
+      {!initialLoading && !loadError && hasHousehold && !policy ? (
+        <section className="panel" aria-labelledby="empty-policy-heading">
+          <p className="eyebrow">Empty Policy workspace</p>
+          <h2 id="empty-policy-heading">No Investment Policy record yet</h2>
+          <p>Create the stable Policy and an empty Draft. CompoundOS will not add text, asset classes, or percentages for you.</p>
+          <button
+            className="primary-button"
+            disabled={mutation !== null}
+            onClick={() => void handleCreatePolicy()}
+            type="button"
+          >
+            {mutation === "create-policy" ? "Creating policy draft…" : "Create policy draft"}
+          </button>
+        </section>
+      ) : null}
+
+      {!initialLoading && !loadError && policy && draft ? (
+        <>
+          <section className="workspace-status" aria-label="Draft status">
+            <span>Editable Draft</span>
+            <strong>Server revision {draft.revision}</strong>
+          </section>
+          <DraftTextEditor key={`text-${draft.id}-${workspaceEpoch}`} draft={draft} onReload={() => void loadWorkspace()} onSaved={acceptDraft} />
+          <AllocationEditor key={`allocations-${draft.id}-${workspaceEpoch}`} draft={draft} onReload={() => void loadWorkspace()} onSaved={acceptDraft} />
+          <PublishReview draft={draft} onPublished={(version) => void handlePublished(version)} onReload={() => void loadWorkspace()} />
+          <section className="panel" aria-labelledby="discard-heading">
+            <p className="eyebrow">Draft lifecycle</p>
+            <h2 id="discard-heading">Discard Draft</h2>
+            <p>Discarding removes only this editable Draft. It does not delete the Policy or any Published Version.</p>
+            {!discardConfirmation ? (
+              <button onClick={() => setDiscardConfirmation(true)} type="button">Discard Draft…</button>
+            ) : (
+              <div className="confirmation-panel">
+                <p><strong>Confirm Draft discard?</strong></p>
+                <div className="actions">
+                  <button disabled={mutation !== null} onClick={() => void handleDiscard()} type="button">
+                    {mutation === "discard" ? "Discarding Draft…" : "Confirm discard Draft"}
+                  </button>
+                  <button disabled={mutation !== null} onClick={() => setDiscardConfirmation(false)} type="button">Cancel</button>
+                </div>
+              </div>
+            )}
+          </section>
+        </>
+      ) : null}
+
+      {!initialLoading && !loadError && policy && !draft ? (
+        <>
+          {published ? <VersionView version={published} /> : (
+            <section className="panel">
+              <h2>No Draft is open</h2>
+              <p>The stable Policy exists, but it has no editable Draft or Published Version.</p>
+            </section>
+          )}
+          <section className="panel" aria-labelledby="new-draft-heading">
+            <p className="eyebrow">Explicit new work</p>
+            <h2 id="new-draft-heading">Create a new Draft</h2>
+            <div className="actions">
+              <button disabled={mutation !== null} onClick={() => void handleCreateDraft()} type="button">
+                {mutation === "blank-draft" ? "Creating blank Draft…" : "Start blank"}
+              </button>
+              {published ? (
+                <button disabled={mutation !== null} onClick={() => void handleCreateDraft(published.id)} type="button">
+                  {mutation === "copy-draft" ? "Copying current Published…" : "Copy current Published"}
+                </button>
+              ) : null}
+            </div>
+          </section>
+        </>
+      ) : null}
+
+      {!initialLoading && !loadError && policy ? (
+        <>
+          <VersionHistory
+            error={historyError}
+            items={history}
+            loading={historyLoading}
+            nextCursor={nextHistoryCursor}
+            onLoadMore={() => void loadMoreHistory()}
+          />
+          <AuditTimeline
+            error={auditError}
+            events={auditEvents}
+            loading={auditLoading}
+            onRetry={() => void refreshAudit()}
+          />
+        </>
+      ) : null}
+    </main>
+  );
+}
+
+===== FILE: frontend/app/policy/page.test.tsx =====
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { PolicyClient } from "./policy-client";
+
+const emptyText = {
+  objectives: "",
+  time_horizon: "",
+  liquidity: "",
+  diversification: "",
+  contribution_policy: "",
+  rebalancing_policy: "",
+  prohibited_assets: "",
+  leverage_policy: "",
+  decision_process: "",
+  notes: "",
+};
+
+const policy = {
+  id: "policy-1",
+  household_id: "household-1",
+  created_at: "2026-07-14T00:00:00Z",
+  updated_at: "2026-07-14T00:00:00Z",
+};
+
+const draft = {
+  ...emptyText,
+  id: "draft-1",
+  policy_id: policy.id,
+  source_version_id: null,
+  revision: 3,
+  created_at: "2026-07-14T00:00:00Z",
+  updated_at: "2026-07-14T00:00:00Z",
+  allocations: [
+    { id: "allocation-1", asset_class_name: "First user class", target_percentage: "60.00", sort_order: 0 },
+    { id: "allocation-2", asset_class_name: "Second user class", target_percentage: "40.00", sort_order: 1 },
+  ],
+};
+
+const version = {
+  ...emptyText,
+  objectives: "Owner objective",
+  time_horizon: "Owner horizon",
+  decision_process: "Owner process",
+  id: "version-id-2",
+  policy_id: policy.id,
+  version_number: 2,
+  status: "published" as const,
+  published_at: "2026-07-14T02:00:00Z",
+  superseded_at: null,
+  allocations: draft.allocations,
+};
+
+const auditEvents = [
+  {
+    id: "audit-10",
+    household_id: "household-1",
+    actor: "local-owner",
+    action: "policy.created",
+    entity_type: "InvestmentPolicy",
+    entity_id: policy.id,
+    occurred_at: "2026-07-14T03:00:00Z",
+    sequence_number: 10,
+    metadata: {},
+  },
+  {
+    id: "audit-11",
+    household_id: "household-1",
+    actor: "local-owner",
+    action: "policy.draft.updated",
+    entity_type: "InvestmentPolicy",
+    entity_id: policy.id,
+    occurred_at: "2026-07-14T01:00:00Z",
+    sequence_number: 11,
+    metadata: { draft_revision: 3 },
+  },
+];
+
+type ServerState = {
+  household: boolean;
+  policy: typeof policy | null;
+  draft: typeof draft | null;
+  published: typeof version | null;
+  history: Array<{
+    id: string;
+    version_number: number;
+    status: "published" | "superseded";
+    published_at: string;
+    superseded_at: string | null;
+  }>;
+  nextCursor: number | null;
+  audit: typeof auditEvents;
+};
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(status === 204 ? null : JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function defaultState(overrides: Partial<ServerState> = {}): ServerState {
+  return {
+    household: true,
+    policy,
+    draft,
+    published: null,
+    history: [],
+    nextCursor: null,
+    audit: auditEvents,
+    ...overrides,
+  };
+}
+
+function serverFetch(
+  state: ServerState,
+  intercept?: (
+    url: string,
+    method: string,
+    init?: RequestInit,
+  ) => Response | Promise<Response> | undefined,
+) {
+  return vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    const method = init?.method ?? "GET";
+    const intercepted = intercept?.(url, method, init);
+    if (intercepted) return await intercepted;
+
+    if (url.endsWith("/api/households/current")) {
+      return state.household ? jsonResponse({ id: "household-1" }) : jsonResponse({}, 404);
+    }
+    if (url.endsWith("/api/policies/current") && method === "GET") {
+      return state.policy ? jsonResponse(state.policy) : jsonResponse({}, 404);
+    }
+    if (url.endsWith("/api/policies/current/draft") && method === "GET") {
+      return state.draft ? jsonResponse(state.draft) : jsonResponse({}, 404);
+    }
+    if (url.endsWith("/api/policies/current/published")) {
+      return state.published ? jsonResponse(state.published) : jsonResponse({}, 404);
+    }
+    if (url.includes("/api/policies/current/versions/") && method === "GET") {
+      return jsonResponse(state.published ?? version);
+    }
+    if (url.includes("/api/policies/current/versions") && method === "GET") {
+      return jsonResponse({ items: state.history, next_before_version_number: state.nextCursor });
+    }
+    if (url.endsWith("/api/policies/current/audit-events")) return jsonResponse(state.audit);
+    if (url.endsWith("/api/policies") && method === "POST") {
+      state.policy = policy;
+      state.draft = draft;
+      return jsonResponse({ policy, draft }, 201);
+    }
+    if (url.endsWith("/api/policies/current/draft") && method === "PATCH") {
+      const payload = JSON.parse(String(init?.body));
+      state.draft = { ...draft, ...payload, revision: payload.expected_revision + 1 };
+      return jsonResponse(state.draft);
+    }
+    if (url.endsWith("/api/policies/current/draft/allocations") && method === "PUT") {
+      const payload = JSON.parse(String(init?.body));
+      state.draft = {
+        ...draft,
+        revision: payload.expected_revision + 1,
+        allocations: payload.items.map((item: { asset_class_name: string; target_percentage: string }, index: number) => ({
+          ...item,
+          id: `saved-${index}`,
+          sort_order: index,
+        })),
+      };
+      return jsonResponse(state.draft);
+    }
+    if (url.endsWith("/api/policies/current/draft/publish") && method === "POST") {
+      state.draft = null;
+      state.published = version;
+      return jsonResponse(version, 201);
+    }
+    if (url.endsWith("/api/policies/current/draft/discard") && method === "POST") {
+      state.draft = null;
+      return jsonResponse(null, 204);
+    }
+    if (url.endsWith("/api/policies/current/draft") && method === "POST") {
+      state.draft = { ...draft, source_version_id: JSON.parse(String(init?.body)).source_version_id ?? null };
+      return jsonResponse(state.draft, 201);
+    }
+    return jsonResponse({ detail: "Unhandled test request" }, 500);
+  });
+}
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+describe("PolicyClient", () => {
+  it("shows accessible loading then the missing-Household prerequisite without creating Policy", async () => {
+    const state = defaultState({ household: false, policy: null, draft: null, audit: [] });
+    const fetchMock = serverFetch(state);
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PolicyClient />);
+
+    expect(screen.getByRole("status").textContent).toContain("Loading Household and Policy");
+    expect(await screen.findByRole("heading", { name: "Create the Household profile first" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open Household profile" }).getAttribute("href")).toBe("/household");
+    expect(fetchMock.mock.calls.some(([url, init]) => String(url).endsWith("/api/policies") && init?.method === "POST")).toBe(false);
+  });
+
+  it("creates an empty Policy once and adopts its server Draft", async () => {
+    const state = defaultState({ policy: null, draft: null, audit: [] });
+    const fetchMock = serverFetch(state);
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PolicyClient />);
+
+    await userEvent.dblClick(await screen.findByRole("button", { name: "Create policy draft" }));
+    expect(await screen.findByText("Server revision 3")).toBeTruthy();
+    expect(fetchMock.mock.calls.filter(([url, init]) => String(url).endsWith("/api/policies") && init?.method === "POST")).toHaveLength(1);
+    const createInit = fetchMock.mock.calls.find(([url, init]) => String(url).endsWith("/api/policies") && init?.method === "POST")?.[1];
+    expect(createInit?.body).toBeUndefined();
+  });
+
+  it("reloads server state after a create conflict", async () => {
+    const state = defaultState({ policy: null, draft: null });
+    let conflict = true;
+    const fetchMock = serverFetch(state, (url, method) => {
+      if (url.endsWith("/api/policies") && method === "POST" && conflict) {
+        conflict = false;
+        state.policy = policy;
+        state.draft = draft;
+        return jsonResponse({}, 409);
+      }
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PolicyClient />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Create policy draft" }));
+    expect(await screen.findByText("Server revision 3")).toBeTruthy();
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/api/policies/current")).length).toBeGreaterThan(1);
+  });
+
+  it("renders ten neutral fields with three required and seven optional publication markers", async () => {
+    vi.stubGlobal("fetch", serverFetch(defaultState()));
+    render(<PolicyClient />);
+
+    await screen.findByRole("heading", { name: "Policy text" });
+    expect(screen.getAllByRole("textbox")).toHaveLength(10 + 4);
+    expect(screen.getAllByText("Required to publish")).toHaveLength(3);
+    expect(screen.getAllByText("Optional")).toHaveLength(7);
+    expect(screen.getByLabelText("Objectives").getAttribute("placeholder")).toBeNull();
+  });
+
+  it("does not send a no-op and sends only changed text with expected revision", async () => {
+    const state = defaultState();
+    const fetchMock = serverFetch(state);
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PolicyClient />);
+    await screen.findByRole("heading", { name: "Policy text" });
+
+    await userEvent.click(screen.getByRole("button", { name: "Save policy text" }));
+    expect(screen.getByRole("alert").textContent).toContain("no text changes");
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(0);
+
+    await userEvent.type(screen.getByLabelText("Notes"), "Owner note");
+    await userEvent.click(screen.getByRole("button", { name: "Save policy text" }));
+    expect(await screen.findByText("Server revision 4")).toBeTruthy();
+    const patchCall = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH");
+    expect(JSON.parse(String(patchCall?.[1]?.body))).toEqual({
+      expected_revision: 3,
+      notes: "Owner note",
+    });
+  });
+
+  it("keeps local text on 409 and offers a server reload", async () => {
+    const state = defaultState();
+    const fetchMock = serverFetch(state, (url, method) =>
+      url.endsWith("/api/policies/current/draft") && method === "PATCH"
+        ? jsonResponse({ detail: "secret-marker" }, 409)
+        : undefined,
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PolicyClient />);
+    await screen.findByRole("heading", { name: "Policy text" });
+
+    await userEvent.type(screen.getByLabelText("Objectives"), "Local owner input");
+    await userEvent.click(screen.getByRole("button", { name: "Save policy text" }));
+    expect(await screen.findByRole("button", { name: "Reload server data" })).toBeTruthy();
+    expect((screen.getByLabelText("Objectives") as HTMLTextAreaElement).value).toBe("Local owner input");
+    expect(screen.getByRole("alert").textContent).not.toContain("secret-marker");
+  });
+
+  it("keeps unsaved allocation edits when policy text is saved", async () => {
+    const state = defaultState();
+    vi.stubGlobal("fetch", serverFetch(state));
+    render(<PolicyClient />);
+    await screen.findByRole("heading", { name: "Policy text" });
+
+    const allocationName = screen.getAllByLabelText("Asset-class name")[0];
+    await userEvent.clear(allocationName);
+    await userEvent.type(allocationName, "Unsaved allocation edit");
+    await userEvent.type(screen.getByLabelText("Notes"), "Saved text edit");
+    await userEvent.click(screen.getByRole("button", { name: "Save policy text" }));
+
+    expect(await screen.findByText("Server revision 4")).toBeTruthy();
+    expect((screen.getAllByLabelText("Asset-class name")[0] as HTMLInputElement).value).toBe(
+      "Unsaved allocation edit",
+    );
+  });
+
+  it("adds, reorders, removes, and saves the complete string-backed allocation collection", async () => {
+    const state = defaultState();
+    const fetchMock = serverFetch(state);
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PolicyClient />);
+    await screen.findByRole("heading", { name: "Draft allocation" });
+
+    await userEvent.click(screen.getByRole("button", { name: "Save allocations" }));
+    expect(screen.getByRole("alert").textContent).toContain("no allocation changes");
+
+    await userEvent.click(screen.getByRole("button", { name: "Add allocation row" }));
+    const names = screen.getAllByLabelText("Asset-class name");
+    const percentages = screen.getAllByLabelText("Target percentage");
+    await userEvent.type(names[2], "Third user class");
+    await userEvent.type(percentages[2], "0.25");
+    expect(screen.getByText("Draft allocation total: 100.25%")).toBeTruthy();
+    await userEvent.click(screen.getAllByRole("button", { name: "Move up" })[2]);
+    await userEvent.click(screen.getAllByRole("button", { name: "Remove" })[0]);
+    await userEvent.click(screen.getByRole("button", { name: "Save allocations" }));
+
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(1));
+    expect(await screen.findByText("Server revision 4")).toBeTruthy();
+    const payload = JSON.parse(String(fetchMock.mock.calls.find(([, init]) => init?.method === "PUT")?.[1]?.body));
+    expect(payload.expected_revision).toBe(3);
+    expect(payload.items).toEqual([
+      { asset_class_name: "Third user class", target_percentage: "0.25" },
+      { asset_class_name: "Second user class", target_percentage: "40.00" },
+    ]);
+  });
+
+  it("retains allocation input and shows a neutral duplicate-name 422", async () => {
+    const state = defaultState();
+    const fetchMock = serverFetch(state, (url, method) =>
+      url.endsWith("/allocations") && method === "PUT"
+        ? jsonResponse({ detail: [{ msg: "secret-marker duplicate" }] }, 422)
+        : undefined,
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PolicyClient />);
+    await screen.findByRole("heading", { name: "Draft allocation" });
+
+    const firstName = screen.getAllByLabelText("Asset-class name")[0];
+    await userEvent.clear(firstName);
+    await userEvent.type(firstName, "SECOND USER CLASS");
+    await userEvent.click(screen.getByRole("button", { name: "Save allocations" }));
+    expect(await screen.findByText(/duplicate asset-class names/)).toBeTruthy();
+    expect((firstName as HTMLInputElement).value).toBe("SECOND USER CLASS");
+    expect(screen.getByRole("alert").textContent).not.toContain("secret-marker");
+  });
+
+  it("requires explicit publication confirmation and sends the exact saved revision once", async () => {
+    const readyDraft = {
+      ...draft,
+      objectives: "Owner objective",
+      time_horizon: "Owner horizon",
+      decision_process: "Owner process",
+    };
+    const state = defaultState({ draft: readyDraft });
+    const fetchMock = serverFetch(state);
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PolicyClient />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Review for publication" }));
+    expect(screen.getAllByText(/do not constitute investment, tax, or legal advice/)).toHaveLength(2);
+    const publishButton = screen.getByRole("button", { name: "Publish immutable Version" });
+    expect((publishButton as HTMLButtonElement).disabled).toBe(true);
+    await userEvent.click(screen.getByRole("checkbox"));
+    await userEvent.dblClick(publishButton);
+
+    expect(await screen.findByRole("heading", { name: /Current Published Version · Version 2/ })).toBeTruthy();
+    const publishCalls = fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/publish"));
+    expect(publishCalls).toHaveLength(1);
+    expect(JSON.parse(String(publishCalls[0][1]?.body))).toEqual({ expected_revision: 3, confirmation: true });
+    expect(screen.getByText("Published versions cannot be edited.", { exact: false })).toBeTruthy();
+  });
+
+  it.each([
+    [400, /mechanically incomplete/],
+    [409, /Reload server data/],
+  ])("handles publish HTTP %s without retrying", async (status, expected) => {
+    const readyDraft = {
+      ...draft,
+      objectives: "Owner objective",
+      time_horizon: "Owner horizon",
+      decision_process: "Owner process",
+    };
+    const state = defaultState({ draft: readyDraft });
+    const fetchMock = serverFetch(state, (url, method) =>
+      url.endsWith("/publish") && method === "POST"
+        ? jsonResponse({ detail: "secret-marker" }, status)
+        : undefined,
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PolicyClient />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Review for publication" }));
+    await userEvent.click(screen.getByRole("checkbox"));
+    await userEvent.click(screen.getByRole("button", { name: "Publish immutable Version" }));
+    expect(await screen.findByText(expected)).toBeTruthy();
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/publish"))).toHaveLength(1);
+    expect(screen.queryByText("secret-marker")).toBeNull();
+  });
+
+  it("creates only blank or current-Published Drafts and exposes no historical restore", async () => {
+    const state = defaultState({ draft: null, published: version, history: [version] });
+    const fetchMock = serverFetch(state);
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PolicyClient />);
+    await screen.findByRole("heading", { name: /Current Published Version/ });
+
+    expect(screen.getByRole("button", { name: "Start blank" })).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Copy current Published" }));
+    const draftCreate = fetchMock.mock.calls.find(
+      ([url, init]) => String(url).endsWith("/api/policies/current/draft") && init?.method === "POST",
+    );
+    expect(JSON.parse(String(draftCreate?.[1]?.body))).toEqual({ source_version_id: version.id });
+    expect(screen.queryByRole("button", { name: /restore/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /delete published/i })).toBeNull();
+  });
+
+  it("paginates newest-first history without duplicates and reads immutable detail", async () => {
+    const version3 = { ...version, id: "version-3", version_number: 3, status: "published" as const };
+    const version2 = { ...version, id: "version-2", version_number: 2, status: "superseded" as const, superseded_at: "2026-07-14T03:00:00Z" };
+    const version1 = { ...version, id: "version-1", version_number: 1, status: "superseded" as const, superseded_at: "2026-07-14T02:00:00Z" };
+    const state = defaultState({ draft: null, published: version3, history: [version3, version2], nextCursor: 2 });
+    let moreLoaded = false;
+    const fetchMock = serverFetch(state, (url, method) => {
+      if (url.includes("before_version_number=2") && method === "GET") {
+        moreLoaded = true;
+        return jsonResponse({ items: [version2, version1], next_before_version_number: null });
+      }
+      if (url.endsWith("/versions/1")) return jsonResponse(version1);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PolicyClient />);
+    const historySection = await screen.findByRole("heading", { name: "Version history" });
+    const historyPanel = historySection.closest("section") as HTMLElement;
+    expect(within(historyPanel).getAllByText(/Version [23]/).map((node) => node.textContent)).toEqual(["Version 3", "Version 2"]);
+
+    await userEvent.click(screen.getByRole("button", { name: "Load more Versions" }));
+    await waitFor(() => expect(moreLoaded).toBe(true));
+    expect(within(historyPanel).getAllByText("Version 2")).toHaveLength(1);
+    expect(within(historyPanel).getByText("Version 1")).toBeTruthy();
+    await userEvent.click(within(historyPanel).getAllByRole("button", { name: "View immutable detail" })[2]);
+    expect(await within(historyPanel).findByRole("heading", { name: /Historical Version · Version 1/ })).toBeTruthy();
+    expect(within(historyPanel).queryByRole("button", { name: /restore/i })).toBeNull();
+  });
+
+  it("keeps server sequence order and retries only audit GET after a successful mutation", async () => {
+    const state = defaultState();
+    let auditRequests = 0;
+    const fetchMock = serverFetch(state, (url, method) => {
+      if (url.endsWith("/audit-events")) {
+        auditRequests += 1;
+        if (auditRequests === 2) return jsonResponse({}, 503);
+      }
+      if (url.endsWith("/api/policies/current/draft") && method === "PATCH") {
+        const saved = { ...draft, notes: "Saved note", revision: 4 };
+        state.draft = saved;
+        return jsonResponse(saved);
+      }
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PolicyClient />);
+    const auditHeading = await screen.findByRole("heading", { name: "Policy audit timeline" });
+    const auditPanel = auditHeading.closest("section") as HTMLElement;
+    expect(within(auditPanel).getAllByRole("listitem").map((node) => within(node).getByText(/policy\./).textContent)).toEqual([
+      "policy.created",
+      "policy.draft.updated",
+    ]);
+
+    await userEvent.type(screen.getByLabelText("Notes"), "Saved note");
+    await userEvent.click(screen.getByRole("button", { name: "Save policy text" }));
+    expect(await screen.findByText("Policy text saved.")).toBeTruthy();
+    expect(await within(auditPanel).findByText(/mutation succeeded, but the audit timeline/)).toBeTruthy();
+    await userEvent.click(within(auditPanel).getByRole("button", { name: "Retry audit timeline" }));
+    await waitFor(() => expect(auditRequests).toBe(3));
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(1);
+  });
+
+  it("requires discard confirmation, sends the revision, and prevents repeat submission", async () => {
+    const state = defaultState();
+    const fetchMock = serverFetch(state);
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PolicyClient />);
+    await screen.findByRole("heading", { name: "Discard Draft" });
+
+    await userEvent.click(screen.getByRole("button", { name: "Discard Draft…" }));
+    const confirm = screen.getByRole("button", { name: "Confirm discard Draft" });
+    await userEvent.dblClick(confirm);
+    await screen.findByRole("heading", { name: "No Draft is open" });
+    const calls = fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/discard"));
+    expect(calls).toHaveLength(1);
+    expect(JSON.parse(String(calls[0][1]?.body))).toEqual({ expected_revision: 3 });
+  });
+
+  it("keeps the Draft and offers Reload after a discard conflict", async () => {
+    const state = defaultState();
+    const fetchMock = serverFetch(state, (url, method) =>
+      url.endsWith("/discard") && method === "POST" ? jsonResponse({}, 409) : undefined,
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PolicyClient />);
+    await screen.findByRole("heading", { name: "Discard Draft" });
+
+    await userEvent.click(screen.getByRole("button", { name: "Discard Draft…" }));
+    await userEvent.click(screen.getByRole("button", { name: "Confirm discard Draft" }));
+    expect(await screen.findByRole("button", { name: "Reload server data" })).toBeTruthy();
+    expect(screen.getByText("Server revision 3")).toBeTruthy();
+  });
+
+  it("shows safety boundaries and no prohibited product operations", async () => {
+    vi.stubGlobal("fetch", serverFetch(defaultState()));
+    render(<PolicyClient />);
+    await screen.findByRole("heading", { name: "Policy text" });
+
+    expect(screen.getByText(/local-only and non-production/)).toBeTruthy();
+    expect(screen.getByText(/no authentication/)).toBeTruthy();
+    expect(screen.getByText(/does not evaluate whether an investment policy/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /AI|Guardian|Broker|trade|recommend/i })).toBeNull();
+  });
+
+  it("aborts outstanding initial requests when unmounted", async () => {
+    const signals: AbortSignal[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_input: string | URL | Request, init?: RequestInit) => {
+        if (init?.signal) signals.push(init.signal);
+        return new Promise<Response>(() => undefined);
+      }),
+    );
+    const view = render(<PolicyClient />);
+    await waitFor(() => expect(signals.length).toBe(2));
+    view.unmount();
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
+  });
+});
+
+===== FILE: frontend/lib/policy-api.ts =====
+export const POLICY_TEXT_FIELDS = [
+  "objectives",
+  "time_horizon",
+  "liquidity",
+  "diversification",
+  "contribution_policy",
+  "rebalancing_policy",
+  "prohibited_assets",
+  "leverage_policy",
+  "decision_process",
+  "notes",
+] as const;
+
+export type PolicyTextField = (typeof POLICY_TEXT_FIELDS)[number];
+
+export const POLICY_TEXT_LIMITS: Record<PolicyTextField, number> = {
+  objectives: 4000,
+  time_horizon: 2000,
+  liquidity: 4000,
+  diversification: 4000,
+  contribution_policy: 4000,
+  rebalancing_policy: 4000,
+  prohibited_assets: 4000,
+  leverage_policy: 4000,
+  decision_process: 4000,
+  notes: 8000,
+};
+
+export const REQUIRED_PUBLISH_FIELDS = [
+  "objectives",
+  "time_horizon",
+  "decision_process",
+] as const satisfies readonly PolicyTextField[];
+
+export type PolicyText = Record<PolicyTextField, string>;
+
+export type Policy = {
+  id: string;
+  household_id: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Allocation = {
+  id: string;
+  asset_class_name: string;
+  target_percentage: string;
+  sort_order: number;
+};
+
+export type PolicyDraft = PolicyText & {
+  id: string;
+  policy_id: string;
+  source_version_id: string | null;
+  revision: number;
+  created_at: string;
+  updated_at: string;
+  allocations: Allocation[];
+};
+
+export type PolicyVersionSummary = {
+  id: string;
+  version_number: number;
+  status: "published" | "superseded";
+  published_at: string;
+  superseded_at: string | null;
+};
+
+export type PolicyVersion = PolicyText & PolicyVersionSummary & {
+  policy_id: string;
+  allocations: Allocation[];
+};
+
+export type PolicyVersionHistory = {
+  items: PolicyVersionSummary[];
+  next_before_version_number: number | null;
+};
+
+export type PolicyAuditEvent = {
+  id: string;
+  household_id: string;
+  actor: string;
+  action: string;
+  entity_type: string;
+  entity_id: string;
+  occurred_at: string;
+  sequence_number: number;
+  metadata: Record<string, string | number | string[]>;
+};
+
+export type AllocationInput = {
+  asset_class_name: string;
+  target_percentage: string;
+};
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+
+export class PolicyApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "PolicyApiError";
+  }
+}
+
+function neutralErrorMessage(status: number): string {
+  if (status === 400) {
+    return "The request could not be completed because the record is mechanically incomplete or unchanged.";
+  }
+  if (status === 404) return "The requested Policy record was not found.";
+  if (status === 409) {
+    return "The Policy data changed in another operation. Reload before trying again.";
+  }
+  if (status === 422) {
+    return "The request was not accepted. Check field formats, limits, and duplicate asset-class names.";
+  }
+  return "The Policy request could not be completed.";
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, init);
+  if (!response.ok) throw new PolicyApiError(neutralErrorMessage(response.status), response.status);
+  if (response.status === 204) return undefined as T;
+  return (await response.json()) as T;
+}
+
+function jsonRequest(method: string, payload: unknown, signal?: AbortSignal): RequestInit {
+  return {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal,
+  };
+}
+
+export async function hasCurrentHousehold(signal?: AbortSignal): Promise<boolean> {
+  const response = await fetch(`${API_BASE_URL}/api/households/current`, {
+    cache: "no-store",
+    signal,
+  });
+  if (response.status === 404) return false;
+  if (!response.ok) throw new PolicyApiError(neutralErrorMessage(response.status), response.status);
+  return true;
+}
+
+export async function getCurrentPolicy(signal?: AbortSignal): Promise<Policy | null> {
+  const response = await fetch(`${API_BASE_URL}/api/policies/current`, {
+    cache: "no-store",
+    signal,
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new PolicyApiError(neutralErrorMessage(response.status), response.status);
+  return (await response.json()) as Policy;
+}
+
+export function createPolicy(signal?: AbortSignal): Promise<{ policy: Policy; draft: PolicyDraft }> {
+  return request("/api/policies", { method: "POST", signal });
+}
+
+export function getCurrentDraft(signal?: AbortSignal): Promise<PolicyDraft | null> {
+  return request<PolicyDraft>("/api/policies/current/draft", {
+    cache: "no-store",
+    signal,
+  }).catch((error: unknown) => {
+    if (error instanceof PolicyApiError && error.status === 404) return null;
+    throw error;
+  });
+}
+
+export function updateDraftText(
+  expectedRevision: number,
+  changedFields: Partial<PolicyText>,
+): Promise<PolicyDraft> {
+  return request(
+    "/api/policies/current/draft",
+    jsonRequest("PATCH", { expected_revision: expectedRevision, ...changedFields }),
+  );
+}
+
+export function replaceDraftAllocations(
+  expectedRevision: number,
+  items: AllocationInput[],
+): Promise<PolicyDraft> {
+  return request(
+    "/api/policies/current/draft/allocations",
+    jsonRequest("PUT", { expected_revision: expectedRevision, items }),
+  );
+}
+
+export function discardDraft(expectedRevision: number): Promise<void> {
+  return request(
+    "/api/policies/current/draft/discard",
+    jsonRequest("POST", { expected_revision: expectedRevision }),
+  );
+}
+
+export function createDraft(sourceVersionId?: string): Promise<PolicyDraft> {
+  const payload = sourceVersionId ? { source_version_id: sourceVersionId } : {};
+  return request("/api/policies/current/draft", jsonRequest("POST", payload));
+}
+
+export function publishDraft(expectedRevision: number): Promise<PolicyVersion> {
+  return request(
+    "/api/policies/current/draft/publish",
+    jsonRequest("POST", { expected_revision: expectedRevision, confirmation: true }),
+  );
+}
+
+export function getCurrentPublished(signal?: AbortSignal): Promise<PolicyVersion | null> {
+  return request<PolicyVersion>("/api/policies/current/published", {
+    cache: "no-store",
+    signal,
+  }).catch((error: unknown) => {
+    if (error instanceof PolicyApiError && error.status === 404) return null;
+    throw error;
+  });
+}
+
+export function getVersionHistory(
+  beforeVersionNumber?: number,
+  signal?: AbortSignal,
+): Promise<PolicyVersionHistory> {
+  const query = beforeVersionNumber
+    ? `?before_version_number=${beforeVersionNumber}`
+    : "";
+  return request(`/api/policies/current/versions${query}`, { cache: "no-store", signal });
+}
+
+export function getVersion(versionNumber: number, signal?: AbortSignal): Promise<PolicyVersion> {
+  return request(`/api/policies/current/versions/${versionNumber}`, {
+    cache: "no-store",
+    signal,
+  });
+}
+
+export function getPolicyAuditEvents(signal?: AbortSignal): Promise<PolicyAuditEvent[]> {
+  return request("/api/policies/current/audit-events", { cache: "no-store", signal });
+}
+
+function parseDigits(value: string): number | null {
+  if (!value) return null;
+  let result = 0;
+  for (const character of value) {
+    const digit = character.charCodeAt(0) - 48;
+    if (digit < 0 || digit > 9) return null;
+    result = result * 10 + digit;
+  }
+  return result;
+}
+
+export function percentageToHundredths(value: string): number | null {
+  if (!/^\d+(?:\.\d{1,2})?$/.test(value)) return null;
+  const [wholeText, fractionText = ""] = value.split(".");
+  const whole = parseDigits(wholeText);
+  const fraction = parseDigits(fractionText.padEnd(2, "0"));
+  if (whole === null || fraction === null) return null;
+  const hundredths = whole * 100 + fraction;
+  if (hundredths <= 0 || hundredths > 10000) return null;
+  return hundredths;
+}
+
+export function formatHundredths(value: number): string {
+  const whole = Math.floor(value / 100);
+  const fraction = String(value % 100).padStart(2, "0");
+  return `${whole}.${fraction}`;
+}
+
+export function allocationTotal(items: AllocationInput[]): {
+  hundredths: number | null;
+  display: string;
+} {
+  let total = 0;
+  for (const item of items) {
+    const value = percentageToHundredths(item.target_percentage);
+    if (value === null) return { hundredths: null, display: "Invalid input" };
+    total += value;
+  }
+  return { hundredths: total, display: formatHundredths(total) };
+}
+
+function normalizedName(value: string): string {
+  return value.normalize("NFKC").trim().replace(/\s+/gu, " ").toLocaleLowerCase();
+}
+
+function normalizedPercentage(value: string): string | null {
+  const hundredths = percentageToHundredths(value);
+  return hundredths === null ? null : formatHundredths(hundredths);
+}
+
+export function allocationsEqual(saved: Allocation[], edited: AllocationInput[]): boolean {
+  if (saved.length !== edited.length) return false;
+  return saved.every((item, index) => {
+    const candidate = edited[index];
+    return (
+      normalizedName(item.asset_class_name) === normalizedName(candidate.asset_class_name) &&
+      item.target_percentage === normalizedPercentage(candidate.target_percentage)
+    );
+  });
+}
+
+===== FILE: frontend/lib/policy-api.test.ts =====
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import {
+  allocationTotal,
+  createDraft,
+  createPolicy,
+  getPolicyAuditEvents,
+  getVersionHistory,
+  percentageToHundredths,
+  PolicyApiError,
+  publishDraft,
+  replaceDraftAllocations,
+  updateDraftText,
+} from "./policy-api";
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(status === 204 ? null : JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("Policy API client", () => {
+  it("creates a Policy without sending a JSON null or request body", async () => {
+    const fetchMock = vi.fn<
+      (input: string | URL | Request, init?: RequestInit) => Promise<Response>
+    >(
+      async () => jsonResponse({ policy: {}, draft: {} }, 201),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createPolicy();
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/api\/policies$/);
+    expect(init).toEqual(expect.objectContaining({ method: "POST" }));
+    expect(init?.body).toBeUndefined();
+    expect(init?.headers).toBeUndefined();
+  });
+
+  it("uses the approved endpoints, methods, revisions, and decimal strings", async () => {
+    const fetchMock = vi.fn<
+      (input: string | URL | Request, init?: RequestInit) => Promise<Response>
+    >(async () => jsonResponse({}));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await updateDraftText(7, { objectives: "Owner text" });
+    await replaceDraftAllocations(8, [
+      { asset_class_name: "User entered", target_percentage: "12.50" },
+    ]);
+    await publishDraft(9);
+    await createDraft("version-id");
+    await getVersionHistory(3);
+
+    expect(fetchMock.mock.calls.map(([url, init]) => [String(url), init?.method])).toEqual([
+      [expect.stringMatching(/\/api\/policies\/current\/draft$/), "PATCH"],
+      [expect.stringMatching(/\/api\/policies\/current\/draft\/allocations$/), "PUT"],
+      [expect.stringMatching(/\/api\/policies\/current\/draft\/publish$/), "POST"],
+      [expect.stringMatching(/\/api\/policies\/current\/draft$/), "POST"],
+      [expect.stringMatching(/\/api\/policies\/current\/versions\?before_version_number=3$/), undefined],
+    ]);
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
+      expected_revision: 8,
+      items: [{ asset_class_name: "User entered", target_percentage: "12.50" }],
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body))).toEqual({
+      expected_revision: 9,
+      confirmation: true,
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[3][1]?.body))).toEqual({
+      source_version_id: "version-id",
+    });
+  });
+
+  it.each([404, 409, 422])("preserves HTTP %s as a typed neutral error", async (status) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ detail: "secret-marker owner payload" }, status)),
+    );
+
+    const error = await getPolicyAuditEvents().catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(PolicyApiError);
+    expect((error as PolicyApiError).status).toBe(status);
+    expect((error as Error).message).not.toContain("secret-marker");
+  });
+
+  it("does not retry a failed mutation", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ detail: "Conflict" }, 409));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(updateDraftText(1, { notes: "Private text" })).rejects.toBeInstanceOf(
+      PolicyApiError,
+    );
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("parses and sums exact integer hundredths without floating-point artifacts", () => {
+    expect(percentageToHundredths("0.1")).toBe(10);
+    expect(percentageToHundredths("0.2")).toBe(20);
+    expect(allocationTotal([
+      { asset_class_name: "One", target_percentage: "0.1" },
+      { asset_class_name: "Two", target_percentage: "0.2" },
+    ])).toEqual({ hundredths: 30, display: "0.30" });
+    expect(allocationTotal([{ asset_class_name: "One", target_percentage: "99.99" }]).display).toBe("99.99");
+    expect(allocationTotal([{ asset_class_name: "One", target_percentage: "100" }]).display).toBe("100.00");
+    expect(allocationTotal([
+      { asset_class_name: "One", target_percentage: "99.99" },
+      { asset_class_name: "Two", target_percentage: "0.02" },
+    ]).display).toBe("100.01");
+  });
+
+  it("rejects excess scale and never rounds it", () => {
+    expect(percentageToHundredths("12.345")).toBeNull();
+    expect(allocationTotal([{ asset_class_name: "One", target_percentage: "12.345" }])).toEqual({
+      hundredths: null,
+      display: "Invalid input",
+    });
+  });
+});
+
+===== FILE: frontend/app/page.tsx =====
+import Link from "next/link";
+
+export default function HomePage() {
+  return (
+    <main className="shell">
+      <h1>CompoundOS</h1>
+      <p>Local household discipline workspace.</p>
+      <nav className="home-actions" aria-label="CompoundOS workspaces">
+        <Link className="primary-link" href="/household">
+          Open household profile
+        </Link>
+        <Link href="/policy">Open Investment Policy</Link>
+      </nav>
+    </main>
+  );
+}
+
+===== FILE: frontend/app/layout.tsx =====
+import type { Metadata } from "next";
+import type { ReactNode } from "react";
+
+import "./globals.css";
+
+export const metadata: Metadata = {
+  title: "CompoundOS",
+  description: "Local household discipline workspace for CompoundOS",
+};
+
+export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
+  return (
+    <html lang="en">
+      <body>{children}</body>
+    </html>
+  );
+}
+
+===== FILE: frontend/app/globals.css =====
+:root {
+  color-scheme: light;
+  --ink: #17211b;
+  --muted: #5e6c63;
+  --line: #d7ded9;
+  --paper: #f7f8f4;
+  --panel: #ffffff;
+  --accent: #1f5b43;
+  --accent-soft: #e8f0eb;
+  --warning: #7a4a13;
+  --warning-soft: #fff4df;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+button, input, textarea { font: inherit; }
+
+button, .primary-link {
+  border: 1px solid var(--line);
+  border-radius: 0.45rem;
+  background: var(--panel);
+  color: var(--ink);
+  cursor: pointer;
+  padding: 0.65rem 0.9rem;
+  text-decoration: none;
+}
+
+button:focus-visible, input:focus-visible, textarea:focus-visible, a:focus-visible {
+  outline: 3px solid #86ad99;
+  outline-offset: 2px;
+}
+
+button:disabled { cursor: wait; opacity: 0.65; }
+
+.primary-button, .primary-link {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+.shell, .household-shell, .policy-shell {
+  margin: 0 auto;
+  max-width: 58rem;
+  padding: 3rem 1.25rem 5rem;
+}
+
+.shell { min-height: 100vh; }
+.shell p { color: var(--muted); margin-bottom: 2rem; }
+.home-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 0.8rem; }
+.home-actions a:not(.primary-link) { color: var(--accent); font-weight: 700; }
+
+.page-header { margin-bottom: 2rem; }
+.page-header h1 { font-size: clamp(2.3rem, 6vw, 4rem); margin: 0.3rem 0 0.8rem; }
+.lede { color: var(--muted); font-size: 1.12rem; line-height: 1.6; max-width: 46rem; }
+.eyebrow { color: var(--accent); font-size: 0.76rem; font-weight: 700; letter-spacing: 0.11em; margin: 0; text-transform: uppercase; }
+
+.notice, .panel, .error-panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 0.7rem;
+  margin-bottom: 1rem;
+  padding: 1.15rem 1.25rem;
+}
+
+.notice p { color: var(--muted); line-height: 1.55; margin: 0.4rem 0 0; }
+.notice-warning { background: var(--warning-soft); border-color: #e6c99c; color: var(--warning); }
+.panel { margin-top: 1.5rem; padding: clamp(1.25rem, 4vw, 2rem); }
+.section-heading { margin-bottom: 1.4rem; }
+.section-heading h2 { margin: 0.35rem 0 0; }
+.section-heading-row { align-items: center; display: flex; justify-content: space-between; gap: 1rem; }
+
+.household-form, .policy-form { display: grid; gap: 1rem; }
+.household-form label, .policy-form label { display: grid; font-weight: 650; gap: 0.4rem; }
+.household-form input, .household-form textarea, .policy-form textarea,
+.allocation-editor input {
+  background: white;
+  border: 1px solid #aeb9b1;
+  border-radius: 0.4rem;
+  color: var(--ink);
+  padding: 0.7rem 0.75rem;
+}
+.household-form textarea, .policy-form textarea { min-height: 6rem; resize: vertical; }
+.hint { color: var(--muted); font-size: 0.82rem; font-weight: 400; line-height: 1.4; }
+.actions, .row-actions { display: flex; flex-wrap: wrap; gap: 0.7rem; margin-top: 0.4rem; }
+.error { color: #a42c25; margin: 0; }
+.error-panel { border-color: #db938e; color: #8f221c; }
+.success-message { background: var(--accent-soft); border-left: 3px solid var(--accent); padding: 0.8rem 1rem; }
+
+.summary-grid { display: grid; gap: 0; margin: 0; }
+.summary-grid div { border-top: 1px solid var(--line); display: grid; gap: 1rem; grid-template-columns: minmax(9rem, 0.35fr) 1fr; padding: 0.9rem 0; }
+.summary-grid dt { color: var(--muted); font-weight: 650; }
+.summary-grid dd { margin: 0; white-space: pre-wrap; }
+
+.timeline { display: grid; gap: 0.8rem; list-style: none; margin: 0; padding: 0; }
+.timeline li { background: var(--accent-soft); border-left: 3px solid var(--accent); display: grid; gap: 0.25rem; padding: 0.9rem 1rem; }
+.timeline span { color: var(--muted); font-size: 0.86rem; }
+
+.workspace-status {
+  align-items: center;
+  background: var(--accent-soft);
+  border: 1px solid #bdd1c4;
+  border-radius: 0.7rem;
+  display: flex;
+  justify-content: space-between;
+  margin: 1.5rem 0;
+  padding: 0.9rem 1.1rem;
+}
+.label-row { align-items: center; display: flex; gap: 0.75rem; justify-content: space-between; }
+.field-badge { color: var(--muted); font-size: 0.76rem; font-weight: 500; }
+.allocation-editor, .allocation-readonly, .version-list, .mechanical-checks {
+  display: grid;
+  gap: 0.8rem;
+  list-style: none;
+  margin: 1rem 0;
+  padding: 0;
+}
+.allocation-editor li {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 0.55rem;
+  display: grid;
+  gap: 0.8rem;
+  grid-template-columns: minmax(12rem, 1fr) minmax(9rem, 0.35fr);
+  padding: 1rem;
+}
+.allocation-editor label { display: grid; font-weight: 650; gap: 0.35rem; }
+.allocation-editor .row-actions { grid-column: 1 / -1; }
+.total-panel {
+  background: var(--accent-soft);
+  border-radius: 0.55rem;
+  display: grid;
+  gap: 0.35rem;
+  margin: 1rem 0;
+  padding: 1rem;
+}
+.total-panel span { color: var(--muted); }
+.publish-review { display: grid; gap: 1rem; }
+.mechanical-checks li { border-left: 3px solid var(--accent); padding-left: 0.8rem; }
+.confirmation-row { align-items: flex-start; display: flex; gap: 0.65rem; font-weight: 650; }
+.confirmation-row input { margin-top: 0.2rem; }
+.allocation-readonly li, .version-list li {
+  align-items: center;
+  border-top: 1px solid var(--line);
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  padding: 0.8rem 0;
+}
+.version-list li div { display: grid; gap: 0.2rem; }
+.version-list span { color: var(--muted); font-size: 0.86rem; }
+.policy-summary { margin-bottom: 1.2rem; }
+.confirmation-panel { background: var(--warning-soft); border-radius: 0.55rem; padding: 1rem; }
+
+@media (max-width: 640px) {
+  .section-heading-row { align-items: flex-start; flex-direction: column; }
+  .summary-grid div { gap: 0.35rem; grid-template-columns: 1fr; }
+  .allocation-editor li { grid-template-columns: 1fr; }
+  .workspace-status, .allocation-readonly li, .version-list li { align-items: flex-start; flex-direction: column; }
+}
+
+===== FILE: frontend/package.json =====
+{
+  "name": "compoundos-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "npm@10.9.8",
+  "engines": {
+    "node": ">=22 <23",
+    "npm": ">=10 <11"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint . --max-warnings=0",
+    "test": "vitest run",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "next": "16.2.10",
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.15.3",
+    "@types/react": "19.1.2",
+    "@types/react-dom": "19.1.2",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.1",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "16.2.10",
+    "jsdom": "29.1.1",
+    "typescript": "5.8.3",
+    "vitest": "4.1.10"
+  },
+  "overrides": {
+    "postcss": "8.5.10"
+  }
+}
+
+===== FILE: frontend/vitest.config.ts =====
+import { defineConfig } from "vitest/config";
+
+export default defineConfig({
+  test: {
+    environment: "jsdom",
+    globals: true,
+  },
+});
+
+===== FILE: apps/api/routers/policies.py =====
+from __future__ import annotations
+
+from typing import Annotated, Optional
+
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status
+from sqlalchemy.orm import Session
+
+from apps.api.database import get_session
+from apps.api.policy_schemas import (
+    AllocationReplaceRequest,
+    AllocationResponse,
+    CreatePolicyDraftRequest,
+    EmptyPolicyCreateRequest,
+    ExpectedRevisionRequest,
+    PolicyAuditEventResponse,
+    PolicyCreateResponse,
+    PolicyDraftResponse,
+    PolicyDraftUpdate,
+    PolicyResponse,
+    PolicyVersionHistoryResponse,
+    PolicyVersionResponse,
+    PolicyVersionSummary,
+    PublishPolicyDraftRequest,
+)
+from apps.api.services.policies import (
+    DraftAlreadyExistsError,
+    DraftConflictError,
+    DraftNotFoundError,
+    HouseholdRequiredError,
+    NoPolicyChangesError,
+    PolicyAlreadyExistsError,
+    PolicyIncompleteError,
+    PolicyNotFoundError,
+    PolicyVersionNotFoundError,
+    PublishedVersionNotFoundError,
+    create_new_draft,
+    create_policy,
+    discard_draft,
+    publish_draft,
+    read_current_draft,
+    read_current_policy,
+    read_current_published,
+    read_policy_audit_events,
+    read_version,
+    read_version_history,
+    replace_allocations,
+    update_draft_text,
+)
+
+router = APIRouter(prefix="/api/policies", tags=["policies"])
+DatabaseSession = Annotated[Session, Depends(get_session)]
+
+
+def _draft_response(draft, allocations) -> PolicyDraftResponse:
+    values = {
+        name: getattr(draft, name)
+        for name in PolicyDraftResponse.model_fields
+        if name != "allocations"
+    }
+    values["allocations"] = [AllocationResponse.model_validate(item) for item in allocations]
+    return PolicyDraftResponse.model_validate(values)
+
+
+def _version_response(version, allocations) -> PolicyVersionResponse:
+    values = {
+        name: getattr(version, name)
+        for name in PolicyVersionResponse.model_fields
+        if name != "allocations"
+    }
+    values["allocations"] = [AllocationResponse.model_validate(item) for item in allocations]
+    return PolicyVersionResponse.model_validate(values)
+
+
+def _translate(exc: Exception) -> HTTPException:
+    if isinstance(exc, HouseholdRequiredError):
+        return HTTPException(status_code=404, detail="Household profile not found")
+    if isinstance(exc, PolicyNotFoundError):
+        return HTTPException(status_code=404, detail="Investment policy not found")
+    if isinstance(exc, DraftNotFoundError):
+        return HTTPException(status_code=404, detail="Investment policy draft not found")
+    if isinstance(exc, PublishedVersionNotFoundError):
+        return HTTPException(status_code=404, detail="Published policy version not found")
+    if isinstance(exc, PolicyVersionNotFoundError):
+        return HTTPException(status_code=404, detail="Policy version not found")
+    if isinstance(exc, PolicyAlreadyExistsError):
+        return HTTPException(status_code=409, detail="An investment policy already exists")
+    if isinstance(exc, DraftAlreadyExistsError):
+        return HTTPException(status_code=409, detail="An investment policy draft already exists")
+    if isinstance(exc, DraftConflictError):
+        return HTTPException(
+            status_code=409, detail="Investment policy draft changed or unavailable"
+        )
+    if isinstance(exc, NoPolicyChangesError):
+        return HTTPException(status_code=400, detail="No investment policy changes provided")
+    if isinstance(exc, PolicyIncompleteError):
+        return HTTPException(status_code=400, detail="Investment policy draft is incomplete")
+    raise exc
+
+
+@router.post("", response_model=PolicyCreateResponse, status_code=status.HTTP_201_CREATED)
+def create(
+    session: DatabaseSession,
+    _payload: EmptyPolicyCreateRequest = Body(default_factory=EmptyPolicyCreateRequest),
+) -> PolicyCreateResponse:
+    try:
+        policy, draft, allocations = create_policy(session)
+        return PolicyCreateResponse(
+            policy=PolicyResponse.model_validate(policy),
+            draft=_draft_response(draft, allocations),
+        )
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.get("/current", response_model=PolicyResponse)
+def get_current(session: DatabaseSession) -> PolicyResponse:
+    try:
+        return PolicyResponse.model_validate(read_current_policy(session))
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.get("/current/draft", response_model=PolicyDraftResponse)
+def get_draft(session: DatabaseSession) -> PolicyDraftResponse:
+    try:
+        draft, allocations = read_current_draft(session)
+        return _draft_response(draft, allocations)
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.patch("/current/draft", response_model=PolicyDraftResponse)
+def patch_draft(payload: PolicyDraftUpdate, session: DatabaseSession) -> PolicyDraftResponse:
+    try:
+        return update_draft_text(session, payload)
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.put("/current/draft/allocations", response_model=PolicyDraftResponse)
+def put_allocations(
+    payload: AllocationReplaceRequest, session: DatabaseSession
+) -> PolicyDraftResponse:
+    try:
+        draft, allocations = replace_allocations(session, payload)
+        return _draft_response(draft, allocations)
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.post("/current/draft/discard", status_code=status.HTTP_204_NO_CONTENT)
+def discard(payload: ExpectedRevisionRequest, session: DatabaseSession) -> Response:
+    try:
+        discard_draft(session, payload.expected_revision)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.post(
+    "/current/draft",
+    response_model=PolicyDraftResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def new_draft(
+    session: DatabaseSession,
+    payload: CreatePolicyDraftRequest = Body(default_factory=CreatePolicyDraftRequest),
+) -> PolicyDraftResponse:
+    try:
+        draft, allocations = create_new_draft(session, payload)
+        return _draft_response(draft, allocations)
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.post(
+    "/current/draft/publish",
+    response_model=PolicyVersionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def publish(
+    payload: PublishPolicyDraftRequest, session: DatabaseSession
+) -> PolicyVersionResponse:
+    try:
+        version, allocations = publish_draft(session, payload)
+        return _version_response(version, allocations)
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.get("/current/published", response_model=PolicyVersionResponse)
+def get_published(session: DatabaseSession) -> PolicyVersionResponse:
+    try:
+        version, allocations = read_current_published(session)
+        return _version_response(version, allocations)
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.get("/current/versions", response_model=PolicyVersionHistoryResponse)
+def get_versions(
+    session: DatabaseSession,
+    before_version_number: Optional[int] = Query(default=None, ge=1),
+    limit: int = Query(default=20, ge=1, le=100),
+) -> PolicyVersionHistoryResponse:
+    try:
+        versions, next_cursor = read_version_history(
+            session,
+            before_version_number=before_version_number,
+            limit=limit,
+        )
+        return PolicyVersionHistoryResponse(
+            items=[PolicyVersionSummary.model_validate(item) for item in versions],
+            next_before_version_number=next_cursor,
+        )
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.get("/current/versions/{version_number}", response_model=PolicyVersionResponse)
+def get_version(
+    version_number: int, session: DatabaseSession
+) -> PolicyVersionResponse:
+    if version_number < 1:
+        raise HTTPException(status_code=422, detail="version number must be positive")
+    try:
+        version, allocations = read_version(session, version_number)
+        return _version_response(version, allocations)
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.get("/current/audit-events", response_model=list[PolicyAuditEventResponse])
+def get_audit_events(
+    session: DatabaseSession,
+    limit: int = Query(default=50, ge=1, le=100),
+) -> list[PolicyAuditEventResponse]:
+    try:
+        return [
+            PolicyAuditEventResponse.model_validate(event)
+            for event in read_policy_audit_events(session, limit)
+        ]
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+===== FILE: apps/api/policy_schemas.py =====
+from __future__ import annotations
+
+import re
+import unicodedata
+from datetime import datetime
+from decimal import Decimal, InvalidOperation
+from typing import Any, Literal, Optional
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+POLICY_TEXT_LIMITS = {
+    "objectives": 4_000,
+    "time_horizon": 2_000,
+    "liquidity": 4_000,
+    "diversification": 4_000,
+    "contribution_policy": 4_000,
+    "rebalancing_policy": 4_000,
+    "prohibited_assets": 4_000,
+    "leverage_policy": 4_000,
+    "decision_process": 4_000,
+    "notes": 8_000,
+}
+POLICY_TEXT_FIELDS = tuple(POLICY_TEXT_LIMITS)
+REQUIRED_PUBLISH_FIELDS = ("objectives", "time_horizon", "decision_process")
+
+
+def normalize_asset_class_name(value: str) -> tuple[str, str]:
+    display_name = re.sub(r"\s+", " ", unicodedata.normalize("NFKC", value).strip())
+    if not display_name:
+        raise ValueError("asset class name cannot be blank")
+    if len(display_name) > 200:
+        raise ValueError("asset class name must contain at most 200 characters")
+    return display_name, display_name.casefold()
+
+
+class PolicyTextFields(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    objectives: str = Field(default="", max_length=4_000)
+    time_horizon: str = Field(default="", max_length=2_000)
+    liquidity: str = Field(default="", max_length=4_000)
+    diversification: str = Field(default="", max_length=4_000)
+    contribution_policy: str = Field(default="", max_length=4_000)
+    rebalancing_policy: str = Field(default="", max_length=4_000)
+    prohibited_assets: str = Field(default="", max_length=4_000)
+    leverage_policy: str = Field(default="", max_length=4_000)
+    decision_process: str = Field(default="", max_length=4_000)
+    notes: str = Field(default="", max_length=8_000)
+
+
+class EmptyPolicyCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class PolicyDraftUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    expected_revision: int = Field(ge=1)
+    objectives: Optional[str] = Field(default=None, max_length=4_000)
+    time_horizon: Optional[str] = Field(default=None, max_length=2_000)
+    liquidity: Optional[str] = Field(default=None, max_length=4_000)
+    diversification: Optional[str] = Field(default=None, max_length=4_000)
+    contribution_policy: Optional[str] = Field(default=None, max_length=4_000)
+    rebalancing_policy: Optional[str] = Field(default=None, max_length=4_000)
+    prohibited_assets: Optional[str] = Field(default=None, max_length=4_000)
+    leverage_policy: Optional[str] = Field(default=None, max_length=4_000)
+    decision_process: Optional[str] = Field(default=None, max_length=4_000)
+    notes: Optional[str] = Field(default=None, max_length=8_000)
+
+    @field_validator(*POLICY_TEXT_FIELDS)
+    @classmethod
+    def reject_null_text(cls, value: Optional[str]) -> str:
+        if value is None:
+            raise ValueError("field cannot be null")
+        return value
+
+
+class AllocationItemInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    asset_class_name: str
+    target_percentage: str
+
+    @field_validator("asset_class_name")
+    @classmethod
+    def normalize_display_name(cls, value: str) -> str:
+        display_name, _ = normalize_asset_class_name(value)
+        return display_name
+
+    @field_validator("target_percentage", mode="before")
+    @classmethod
+    def validate_decimal_string(cls, value: Any) -> str:
+        if not isinstance(value, str):
+            raise ValueError("target percentage must be a decimal string")
+        if not re.fullmatch(r"\d+(?:\.\d{1,2})?", value):
+            raise ValueError("target percentage must have at most two decimal places")
+        try:
+            percentage = Decimal(value)
+        except InvalidOperation as exc:
+            raise ValueError("target percentage must be a decimal string") from exc
+        if percentage <= Decimal("0.00") or percentage > Decimal("100.00"):
+            raise ValueError("target percentage must be greater than 0 and at most 100")
+        return format(percentage, ".2f")
+
+
+class AllocationReplaceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_revision: int = Field(ge=1)
+    items: list[AllocationItemInput]
+
+    @model_validator(mode="after")
+    def reject_canonical_duplicates(self) -> AllocationReplaceRequest:
+        canonical_names = [
+            normalize_asset_class_name(item.asset_class_name)[1] for item in self.items
+        ]
+        if len(canonical_names) != len(set(canonical_names)):
+            raise ValueError("asset class names must be unique after normalization")
+        return self
+
+
+class ExpectedRevisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_revision: int = Field(ge=1)
+
+
+class CreatePolicyDraftRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_version_id: Optional[UUID] = None
+
+
+class PublishPolicyDraftRequest(ExpectedRevisionRequest):
+    confirmation: Literal[True]
+
+
+class AllocationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    asset_class_name: str
+    target_percentage: str
+    sort_order: int
+
+    @field_validator("target_percentage", mode="before")
+    @classmethod
+    def serialize_decimal(cls, value: Any) -> str:
+        return format(Decimal(str(value)), ".2f")
+
+
+class PolicyResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    household_id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+class PolicyDraftResponse(PolicyTextFields):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    policy_id: UUID
+    source_version_id: Optional[UUID]
+    revision: int
+    created_at: datetime
+    updated_at: datetime
+    allocations: list[AllocationResponse]
+
+
+class PolicyCreateResponse(BaseModel):
+    policy: PolicyResponse
+    draft: PolicyDraftResponse
+
+
+class PolicyVersionSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    version_number: int
+    status: str
+    published_at: datetime
+    superseded_at: Optional[datetime]
+
+
+class PolicyVersionResponse(PolicyTextFields):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    policy_id: UUID
+    version_number: int
+    status: str
+    published_at: datetime
+    superseded_at: Optional[datetime]
+    allocations: list[AllocationResponse]
+
+
+class PolicyVersionHistoryResponse(BaseModel):
+    items: list[PolicyVersionSummary]
+    next_before_version_number: Optional[int]
+
+
+class PolicyAuditEventResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    household_id: UUID
+    actor: str
+    action: str
+    entity_type: str
+    entity_id: UUID
+    occurred_at: datetime
+    sequence_number: int
+    metadata: dict[str, Any] = Field(validation_alias="event_metadata")
+
+===== FILE: README.md =====
+# CompoundOS
+
+CompoundOS is a long-term AI Family Office and Wealth Operating System. Sprint
+002 now includes the local-only Household workflow and the Slice 2C Investment
+Policy frontend workflow on top of the validated backend foundation.
+
+> **Local-only security boundary:** This Sprint 002 build is for local,
+> single-user development only. It has no authentication and must not be exposed
+> to the public internet.
+
+## Current Scope
+
+- Create, read, and update the sole `HouseholdProfile`.
+- Persist the profile and append-only `AuditEvent` records in PostgreSQL.
+- Show the household summary and read-only audit timeline at `/household`.
+- Record user-authored Investment Policy Draft text and target percentages through
+  the backend API, then publish immutable Version snapshots.
+- Use `/policy` to create and edit the sole Policy Draft, explicitly save text and
+  allocations, review and publish immutable Versions, inspect history and audit
+  events, and start a blank or current-Published-derived Draft.
+- Keep Decision Journal, AI, Guardian, broker, trading, recommendation, and
+  authentication behavior outside the current implementation.
+
+## Repository Layout
+
+- apps/api: FastAPI backend service
+- frontend: Next.js frontend application shell
+- migrations: explicit Alembic database migrations
+- docs: product, architecture, and governance documentation
+- tests: backend health, API, validation, migration, and PostgreSQL integration tests
+
+## Local Development
+
+### Prerequisites
+
+- Node.js 22.x
+- npm 10.x (the repository standard; use the committed `package-lock.json`)
+- Python 3.9 or newer
+- PostgreSQL 16 for local database-backed API work, or Docker with Compose
+
+Sprint 001.1 uses Next.js 16.2.10 with TypeScript. See
+`docs/ADR/0001-frontend-framework-and-package-manager.md` for the accepted version
+and package-manager decision.
+
+### Backend
+
+1. Create a virtual environment: `python3 -m venv .venv`
+2. Activate it: `source .venv/bin/activate`
+3. Install dependencies: `python -m pip install -r requirements.txt`
+4. Copy `.env.example` to `.env`, then export it for the current shell with
+   `set -a; source .env; set +a`.
+5. Apply the explicit migration: `alembic upgrade head`
+6. Check the migration revision: `alembic current`
+7. Start the API: `python -m uvicorn apps.api.main:app --reload`
+
+The backend is available at `http://localhost:8000`; its health endpoint is
+`GET /api/health`.
+
+The application never creates tables implicitly at startup. Migration to Alembic
+head is a required, separate step.
+
+### Household API
+
+FastAPI publishes interactive local API documentation at `http://127.0.0.1:8000/docs`.
+Slice 1 exposes only:
+
+- `POST /api/households` — create the sole profile; a later create returns 409
+- `GET /api/households/current` — read the profile; returns 404 when absent
+- `PATCH /api/households/current` — update approved fields; empty/no-op returns 400
+- `GET /api/households/current/audit-events` — read the stable audit timeline
+
+Request bodies reject undeclared fields. Responses use explicit schemas and do
+not expose ORM-only singleton state.
+
+### Investment Policy API
+
+Slice 2B exposes the local-only backend contracts documented by FastAPI at
+`http://127.0.0.1:8000/docs`. The API supports the sole Policy and Draft,
+whole-collection allocation replacement, immutable publication, version reads,
+and a Policy-filtered audit timeline under `/api/policies`.
+
+Percentages are JSON decimal strings such as `"12.50"`. These endpoints record
+only user-entered policy information; they do not evaluate, recommend, score, or
+execute anything.
+
+### Frontend
+
+1. Change directories: `cd frontend`
+2. Install dependencies: `npm ci`
+3. Start the development server: `npm run dev`
+
+The frontend is available at `http://127.0.0.1:3000`; its health endpoint is
+`GET /api/health`, the Household flow is at `/household`, and the local-only
+Investment Policy workflow is at `/policy`.
+
+### Validation
+
+- Database migration: `alembic upgrade head && alembic current`
+- Backend lint: `ruff check apps tests`
+- Backend tests without a local PostgreSQL URL: `pytest -q` (the explicitly marked
+  PostgreSQL integration suite is skipped)
+- Real PostgreSQL tests: `TEST_DATABASE_URL="$DATABASE_URL" pytest -q -m postgres -ra`
+- CI-equivalent PostgreSQL gate:
+  `COMPOUNDOS_REQUIRE_POSTGRES_TESTS=1 TEST_DATABASE_URL="$DATABASE_URL" pytest -q -m postgres -ra`
+- Frontend lint: `npm --prefix frontend run lint`
+- Frontend type check: `npm --prefix frontend run type-check`
+- Frontend tests: `npm --prefix frontend test`
+- Frontend production build: `npm --prefix frontend run build`
+
+The project-specific required-mode flag intentionally fails when
+`TEST_DATABASE_URL` is missing or empty. It prevents CI configuration regressions
+from turning required PostgreSQL coverage into a successful skipped test run.
+
+## Environment Variables
+
+Copy `.env.example` to `.env` and adjust values if needed. The example contains
+development-only placeholders and no real secrets.
+
+## Local Infrastructure
+
+The containerized local stack includes the Next.js frontend, FastAPI backend,
+PostgreSQL, and Redis:
+
+1. Copy `.env.example` to `.env` if local overrides are needed.
+2. Validate the configuration: `docker compose config`
+3. Build and start the stack: `docker compose up --build -d`
+4. Check service state: `docker compose ps`
+5. Verify `http://localhost:3000/api/health` and
+   `http://localhost:8000/health`.
+6. Stop the stack: `docker compose down`
+
+Compose binds web, API, PostgreSQL, and Redis host ports to `127.0.0.1`. A
+one-shot `migrate` service applies Alembic before the API starts. Redis remains
+in the development stack but carries no Slice 1 product logic.
+
+## Monorepo Convention
+
+The current validated layout keeps the API in `apps/api/` and the web application
+in `frontend/`. A possible migration from `frontend/` to `apps/web/` is deferred
+to a separately approved sprint; Sprint 001.1 does not restructure working code.
+
+## Notes
+
+Slice 2C implements only the local, user-authored Investment Policy frontend. It
+does not implement decision journals, trading, broker integrations,
+authentication, Guardian logic, recommendations, or autonomous agents. Sprint
+002 is not complete; Slice 2C is in Review and Slice 3 is not authorized or
+started.
+
+===== FILE: docs/MASTER_PLAN.md =====
+# Master Plan
+
+## Long-term Goal
+
+Build CompoundOS as a trustworthy, explainable operating system for family office and wealth management workflows, beginning with a documented and testable foundation.
+
+## Milestones
+
+- Milestone 1: Foundation and governance scaffold
+- Milestone 2: Core platform services and health monitoring
+- Milestone 3: Decision support workflows and review interfaces
+
+## Current Sprint
+
+- Sprint 001: Project Foundation
+- Status: Done
+- Scope: final foundation verification, frontend health test, and Docker-based
+  local development configuration
+- Sprint 002: In Progress
+- Completed work: Implementation Slice 1 — Household and Persistence Foundation
+- Completed work: Implementation Slice 2A — Investment Policy Persistence and
+  Immutability Foundation
+- Slice 2 Technical Design: Approved
+- Current implementation authorization: Slice 2C — Investment Policy Frontend Workflow
+- Slice 2A: Done
+- Slice 2B: Investment Policy Backend Workflow and API / Done
+- Slice 2C: Implementation complete / Review
+- Slice 3: Not authorized / Not Started
+
+## Planning
+
+- Sprint 002 selected direction: Household Investment Policy + Decision Journal.
+- Planning pull request #4 completed independent planning review and is approved
+  for merge.
+- Sprint 002 Slice 1 planning and implementation are complete; later
+  implementation slices remain unauthorized.
+- Sprint 002 Slice 2 technical design is authorized for planning and review only.
+- Slice 2A implementation was separately authorized on 2026-07-14.
+- Slice 2B implementation was separately authorized on 2026-07-14.
+- Slice 2C implementation was separately authorized on 2026-07-14.
+- Slice 3 remains unauthorized.
+
+## Backlog
+
+- Complete Docker runtime verification in a Docker-enabled environment
+- Align `NEXT_PUBLIC_API_URL` with the Docker build-time public environment model
+- Split Python runtime and development dependencies before production hardening
+- Design AuditEvent pagination before introducing higher-volume event sources
+- Strengthen Policy persistence schema and trigger regression coverage for all
+  allocation unique constraints and index predicates, combined seal-plus-content
+  mutation, repeated Superseded mutation, and multi-row forbidden statements
+- In a separate maintenance change, add Alembic `path_separator = os` and rerun
+  offline and real PostgreSQL migration validation
+- Decide and enforce whether `POST /api/policies` must distinguish an omitted body
+  from explicit JSON `null`; currently `null` is accepted as the optional empty request
+- Complete browser-path validation with the full Docker runtime stack
+- Decide whether to migrate `frontend/` to `apps/web/`
+- Add backend domain modules
+- Introduce data persistence and orchestration
+- Add Guardian monitoring workflows
+- Add AI Investment Committee workflows
+- Add notification escalation capabilities
+
+## In Progress
+
+- Sprint 002 remains In Progress.
+- Slice 2A is Done after independent review and approval for merge.
+- Slice 2B is Done after independent review and approval for merge.
+- Slice 2C implementation is complete and is in Review.
+- Slice 3 remains unauthorized and Not Started.
+
+## Review
+
+- Planning PR #4 initial review requested documentation changes.
+- Required planning changes were addressed.
+- Final planning review conclusion: APPROVE.
+- Planning PR #4 approved for merge.
+- Sprint 002 Slice 1 initial review conclusion: REQUEST CHANGES.
+- Review finding M-1 was resolved with an explicit real PostgreSQL CI gate that
+  cannot silently skip in required mode.
+- Review finding M-2 was resolved with matching named PostgreSQL and Pydantic
+  safety constraints.
+- Review finding M-3 was resolved by separating mutation success from audit
+  refresh failure and providing a GET-only retry.
+- Sprint 002 Slice 1 final independent review conclusion: APPROVE WITH
+  NON-BLOCKING FOLLOW-UP.
+- Pull request #5 approved for merge.
+- Sprint 002 Slice 2 technical design reviewed.
+- Owner decisions OD-1 through OD-6 resolved on 2026-07-14.
+- The AuditEvent deterministic database insertion-ordering requirement was
+  resolved in the design with a database-generated sequence number; it is not a
+  claim about concurrent transaction commit order.
+- Sprint 002 Slice 2 Technical Design final independent review conclusion:
+  APPROVE.
+- Pull request #6 approved for merge.
+- Merging the design pull request does not authorize Slice 2 implementation.
+- Sprint 002 Slice 2A persistence and immutability foundation completed
+  independent Review.
+- Slice 2A contains migration, ORM mapping, database constraints, immutable
+  snapshot triggers, AuditEvent insertion sequencing, and real PostgreSQL tests.
+- Slice 2A adds no Policy service, repository workflow, API, or frontend.
+- Sprint 002 Slice 2A final independent review conclusion: APPROVE WITH
+  NON-BLOCKING FOLLOW-UP.
+- The review found zero BLOCKER, HIGH, MEDIUM, or LOW findings and recorded two
+  non-blocking maintenance follow-ups in the Backlog.
+- Pull request #7 approved for merge.
+- Sprint 002 remains In Progress; Slice 2B, Slice 2C, and Slice 3 are not
+  authorized and Not Started.
+- Sprint 002 Slice 2B backend workflow and API is in Review.
+- Slice 2B contains strict Policy contracts, repository queries, atomic service
+  transactions, locking, immutable publication orchestration, version reads, and
+  Policy-filtered AuditEvent reads.
+- Slice 2B adds no frontend, recommendation, Guardian, AI, Broker, trading,
+  authentication, Slice 2C, or Slice 3 behavior.
+- Sprint 002 Slice 2B independent review conclusion: REQUEST CHANGES, with two
+  MEDIUM findings (post-commit PATCH response snapshot race and blocking test
+  coverage) and one LOW finding (non-empty Policy-create bodies were ignored).
+- M-1 is addressed by constructing the complete Draft response snapshot while
+  the Policy-then-Draft transaction is still locked, then returning only the
+  scalar DTO after a successful commit with no post-commit query.
+- M-2 is addressed with deterministic independent-session concurrency tests,
+  transaction-stage rollback tests, audit-window and ownership filtering tests,
+  complete Policy text boundaries, exact publish totals, and error/session reuse
+  coverage against real PostgreSQL.
+- L-1 is partially resolved: an omitted body and `{}` follow the contract, while
+  non-empty objects, scalars, and arrays return 422 without creating Policy state.
+  Explicit JSON `null` is still treated as an omitted body and returns 201; this
+  remaining LOW issue is a non-blocking Backlog follow-up.
+- Sprint 002 Slice 2B final incremental review conclusion: APPROVE WITH
+  NON-BLOCKING FOLLOW-UP.
+- Pull request #8 approved for merge.
+- Slice 2B completes the Policy backend workflow and API only; it does not include
+  the Policy frontend or a complete Policy user experience.
+- Sprint 002 Slice 2C Investment Policy frontend implementation is in Review.
+- Slice 2C provides the local-only `/policy` workflow for the sole Household and
+  Policy: explicit Draft text and allocation saves, mechanical publication review,
+  immutable Published and history reads, Policy audit reads, Draft creation, and
+  confirmed Draft discard.
+- The frontend preserves decimal percentage strings and computes displayed totals
+  by parsing them into integer hundredths; it provides no recommendation,
+  suitability, score, rebalancing, or automated decision behavior.
+- Policy mutation success and audit refresh failure remain separate outcomes;
+  audit retry performs only the audit GET and never replays a mutation.
+- Slice 2C adds no backend behavior, migration, dependency, authentication,
+  Decision Journal, Guardian, AI, Broker, market, holding, recommendation, or
+  trading behavior.
+- Slice 3 remains unauthorized and Not Started.
+
+## Done
+
+- Sprint 001: Project Foundation
+- Sprint 001.1: Repository Hardening
+- Repository structure created
+- Basic health endpoints implemented
+- Initial documentation scaffold added
+- Backend and frontend validation commands added
+- Production frontend dependency audit completed with no known vulnerabilities
+- CompoundOS repository isolated from unrelated parent-directory files
+- npm, Node.js, TypeScript, and Next.js version decisions documented
+- ADR 0001 accepted for the frontend framework and package manager
+- Sprint 001 Git identity corrected using the approved repository-local identity
+- Intended empty GitHub repository verified
+- Pull request #1 squash-merged into `main` as
+  `b3801c64fa09856d491317b0ebda45007c210ae0`
+- GitHub Actions backend and frontend checks passed for push and pull request events
+- Frontend health endpoint automated test added and included in CI
+- Docker Compose and Dockerfiles added with static YAML, context, path, and command
+  consistency validation
+- Pull request #3 squash-merged into `main` as
+  `e117a4d936872342dee2baa7012c76816a708d81`
+- Sprint 002 Slice 1: Household and Persistence Foundation
+- HouseholdProfile vertical create, read, update, and audit workflow
+- PostgreSQL persistence managed through explicit Alembic migration
+- Database-enforced singleton HouseholdProfile constraint
+- Atomic HouseholdProfile and AuditEvent writes
+- Local-only Household UI with independent audit refresh recovery
+- Real PostgreSQL CI gate with required-mode skip prevention
+- Sprint 002 Slice 2A: Investment Policy Persistence and Immutability Foundation
+- Immutable Policy, Draft, allocation, and Version persistence schema
+- Database-enforced immutable Version sealing and supersession transitions
+- Database-generated AuditEvent insertion sequencing
+- Real PostgreSQL migration, constraint, trigger, rollback, and sequencing tests
+- Slice 2A completed without a Policy service, repository workflow, API, or frontend
+- Sprint 002 Slice 2B: Investment Policy Backend Workflow and API
+- Strict Policy request/response contracts and repository-backed reads
+- Atomic Draft lifecycle, publication, rollback, concurrency, and AuditEvent workflows
+- Immutable Policy Version history and Policy-filtered audit API
+- Transaction-scoped PATCH response snapshots without post-commit database reads
+- Slice 2B completed without a Policy frontend or complete Policy user experience
+
+## Decision Log
+
+- 2026-07-11: Use a minimal monorepo with FastAPI and Next.js placeholders for Sprint 001.
+- 2026-07-11: Avoid implementing investment logic, trading, brokers, or autonomous agents in this sprint.
+- 2026-07-11: Defer Docker Compose until it can be validated in a Docker-enabled environment.
+- 2026-07-12: Isolate CompoundOS in a dedicated repository directory while preserving Sprint 001 history.
+- 2026-07-12: Standardize on Node.js 22, npm 10, TypeScript, and Next.js 16.2.10.
+- 2026-07-12: Retain `frontend/` alongside `apps/api/` for Sprint 001.1; evaluate `apps/web/` later.
+- 2026-07-12: Complete Sprint 001.1 after local validation and GitHub Actions passed.
+- 2026-07-12: Finalize Sprint 001 and Sprint 001.1 through pull request #1 using a
+  squash merge (`b3801c64fa09856d491317b0ebda45007c210ae0`).
+- 2026-07-12: Keep Sprint 002 Not Started; the next approved action is planning only.
+- 2026-07-12: Reopen Sprint 001 in Review to add the approved Docker development
+  configuration and frontend health test without beginning Sprint 002.
+- 2026-07-12: Record Docker runtime verification as pending; do not claim container
+  validation until Docker is available.
+- 2026-07-12: Sprint 001 independent code review passed with the conclusion
+  APPROVE WITH NON-BLOCKING FOLLOW-UP.
+- 2026-07-12: Treat Docker runtime verification as a non-blocking follow-up and
+  retain it in the Backlog.
+- 2026-07-12: Approve pull request #3 for merge; Sprint 002 remains Not Started.
+- 2026-07-13: Sprint 002 planning authorized.
+- 2026-07-13: Planning does not authorize Sprint 002 implementation.
+- 2026-07-13: Selected Sprint 002 candidate A, Household Investment Policy +
+  Decision Journal.
+- 2026-07-13: Approved the single-household, local-only, no-authentication boundary.
+- 2026-07-13: Approved user-entered target allocation percentages while prohibiting
+  actual holdings, accounts, and monetary data.
+- 2026-07-13: Confirmed no AI, Guardian, broker integration, recommendations, or
+  trading in Sprint 002.
+- 2026-07-13: Planning approval does not yet authorize implementation.
+- 2026-07-13: Standardized policy lifecycle as Draft → Published → Superseded.
+- 2026-07-13: Standardized journal lifecycle as Draft → Confirmed → Archived with
+  appended DecisionCorrection records outside the lifecycle state machine.
+- 2026-07-13: Required a database-enforced or transaction-safe constraint allowing
+  at most one total HouseholdProfile.
+- 2026-07-13: Required localhost-only host port bindings for the local MVP.
+- 2026-07-13: Required real PostgreSQL integration and transaction rollback tests.
+- 2026-07-13: Approved provisional local-MVP non-advisory copy.
+- 2026-07-13: Approved the temporary local-MVP retention and reset boundary.
+- 2026-07-13: Confirmed production compliance, authentication, export, backup, and
+  encryption remain deferred.
+- 2026-07-13: Planning PR #4 must merge before any separate Sprint 002
+  implementation approval; Sprint 002 remains Not Started.
+- 2026-07-13: Corrected the policy publish contract to publish an
+  InvestmentPolicyDraft.
+- 2026-07-13: Confirmed DecisionCorrection is an append-only correction record,
+  not a journal lifecycle state.
+- 2026-07-13: Confirmed Sprint 002 permits at most one total HouseholdProfile and
+  defines no household archive or inactive lifecycle.
+- 2026-07-13: Planning PR #4 final independent review passed.
+- 2026-07-13: Planning PR #4 approved for merge.
+- 2026-07-13: Planning merge does not authorize Sprint 002 implementation.
+- 2026-07-13: Sprint 002 Slice 1 implementation authorized.
+- 2026-07-13: Slice 1 scope is limited to HouseholdProfile, PostgreSQL,
+  AuditEvent, and the household UI.
+- 2026-07-13: Later Sprint 002 slices remain unauthorized.
+- 2026-07-13: Sprint 002 Slice 1 independent review requested changes for the
+  PostgreSQL CI gate, database safety constraints, and post-mutation audit refresh UX.
+- 2026-07-13: Preserve local PostgreSQL-test skipping when no database is
+  configured, but prohibit skips when the CompoundOS CI gate is enabled.
+- 2026-07-13: Mirror approved input-safety limits in Pydantic and named PostgreSQL
+  constraints; these technical limits are not investment rules.
+- 2026-07-13: Treat a successful household mutation and a failed audit refresh as
+  separate outcomes, and retry only the audit GET.
+- 2026-07-13: Slice 1 remains in Review and Slice 2 remains unauthorized.
+- 2026-07-13: Sprint 002 Slice 1 final independent review passed with the
+  conclusion APPROVE WITH NON-BLOCKING FOLLOW-UP.
+- 2026-07-13: Review finding M-1 is resolved by the required real PostgreSQL CI gate.
+- 2026-07-13: Review finding M-2 is resolved by named database safety constraints.
+- 2026-07-13: Review finding M-3 is resolved by independent audit refresh UX and
+  GET-only retry behavior.
+- 2026-07-13: Pull request #5 is approved for merge.
+- 2026-07-13: Sprint 002 remains In Progress; Slice 2 remains unauthorized and
+  Not Started.
+- 2026-07-14: Sprint 002 Slice 2 technical design authorized.
+- 2026-07-14: Technical design does not authorize Slice 2 implementation; Slice 2
+  remains Not Started and Slice 3 remains unauthorized.
+- 2026-07-14: Approved three required publication fields: `objectives`,
+  `time_horizon`, and `decision_process`; the other seven policy categories may
+  remain empty.
+- 2026-07-14: Approved `NUMERIC(5,2)` storage and the decimal-string API contract
+  for target percentages, with no silent rounding.
+- 2026-07-14: Approved PostgreSQL immutability triggers with strict Version sealing
+  and supersession transitions and deferred commit-time sealing enforcement.
+- 2026-07-14: Approved atomic replacement of the complete Draft allocation
+  collection with optimistic revision control.
+- 2026-07-14: Approved a Policy-filtered audit read while retaining the existing
+  HouseholdProfile audit endpoint.
+- 2026-07-14: Approved blank/current-Published-only Draft sourcing and rejected
+  arbitrary historical or Superseded sources.
+- 2026-07-14: Required a database-generated AuditEvent `sequence_number` for
+  deterministic insertion ordering of Policy and Household audit reads, without
+  treating it as concurrent transaction commit order.
+- 2026-07-14: These design decisions do not authorize Slice 2 implementation;
+  Slice 2 remains Not Started and Slice 3 remains unauthorized.
+- 2026-07-14: Sprint 002 Slice 2 Technical Design final independent review
+  conclusion is APPROVE; pull request #6 is approved for merge.
+- 2026-07-14: Merging pull request #6 does not authorize Slice 2 implementation;
+  Slice 2 remains Not Started and Slice 3 remains unauthorized.
+- 2026-07-14: Sprint 002 Slice 2A implementation authorized for Investment Policy
+  persistence and immutable database snapshots only.
+- 2026-07-14: Slice 2A may add migration, ORM mapping, database helpers, and real
+  PostgreSQL tests, but no Policy service, API, or frontend workflow.
+- 2026-07-14: Slice 2B, Slice 2C, and Slice 3 remain unauthorized.
+- 2026-07-14: Sprint 002 Slice 2A final independent review passed with the
+  conclusion APPROVE WITH NON-BLOCKING FOLLOW-UP.
+- 2026-07-14: Record stronger Policy persistence schema/trigger regression
+  assertions and Alembic `path_separator = os` migration validation as
+  non-blocking maintenance Backlog items.
+- 2026-07-14: Pull request #7 is approved for merge; Slice 2A is Done while
+  Sprint 002 remains In Progress.
+- 2026-07-14: Slice 2B, Slice 2C, and Slice 3 remain unauthorized and Not Started.
+- 2026-07-14: Sprint 002 Slice 2B implementation authorized for the Investment
+  Policy backend workflow and API only.
+- 2026-07-14: Slice 2B implements approved decimal-string allocation contracts,
+  Policy/Draft lifecycle transactions, immutable publication, version history,
+  and Policy-filtered audit reads.
+- 2026-07-14: Slice 2B enters Review; Slice 2C and Slice 3 remain unauthorized and
+  Not Started.
+- 2026-07-14: Slice 2B independent review concluded REQUEST CHANGES for M-1
+  response snapshot atomicity, M-2 blocking test coverage, and L-1 strict Policy
+  creation body validation.
+- 2026-07-14: M-1, M-2, and L-1 review fixes were implemented for independent
+  incremental review; pull request #8 remains Draft and is not approved for merge.
+- 2026-07-14: Docker/browser runtime validation and the Alembic
+  `path_separator = os` warning remain non-blocking Backlog items; Slice 2C and
+  Slice 3 remain unauthorized and Not Started.
+- 2026-07-14: Slice 2B final incremental review concluded APPROVE WITH
+  NON-BLOCKING FOLLOW-UP; M-1 atomic PATCH response snapshots and M-2 blocking
+  test coverage are fully resolved.
+- 2026-07-14: L-1 is partially resolved: omitted and `{}` Policy-create bodies are
+  accepted, non-empty objects/scalars/arrays return 422, and explicit JSON `null`
+  remains accepted as a LOW non-blocking follow-up.
+- 2026-07-14: Pull request #8 is approved for merge. Slice 2B is Done while Sprint
+  002 remains In Progress; Slice 2C and Slice 3 remain unauthorized and Not Started.
+- 2026-07-14: Sprint 002 Slice 2C implementation authorized for the local-only
+  Investment Policy frontend workflow only; Slice 3 remains unauthorized.
+- 2026-07-14: Slice 2C implements `/policy`, a typed Policy API client, explicit
+  Draft text and allocation saves, mechanical publication confirmation, immutable
+  Published/history views, Policy audit reads, and confirmed Draft discard without
+  changing the approved backend contract.
+- 2026-07-14: Slice 2C enters Review. Sprint 002 remains In Progress; Slice 3
+  remains unauthorized and Not Started.
+
+===== FILE: docs/ARCHITECTURE.md =====
+# Architecture
+
+## Overview
+
+CompoundOS will use a modular monorepo with a Next.js frontend, a FastAPI backend, PostgreSQL, Redis, Docker-based local development, and future decision-support services.
+
+## Sprint 002 Slice 1 Architecture
+
+- Frontend: Next.js 16.2.10 App Router application with TypeScript in `frontend/`
+- Backend: FastAPI routers, Pydantic contracts, a small service transaction layer,
+  and SQLAlchemy repositories in `apps/api/`
+- Data: PostgreSQL through synchronous SQLAlchemy 2.x and psycopg 3; Redis carries
+  no Slice 1 product logic
+- Local infrastructure: `compose.yaml` defines the web, API, PostgreSQL, and Redis
+  services using Dockerfiles aligned with the current repository paths; runtime
+  verification remains pending in a Docker-enabled environment
+- Migration: explicit Alembic revisions in `migrations/`; application startup never
+  calls `create_all`
+- Validation: real PostgreSQL integration tests plus pytest and Ruff for the
+  backend; Vitest, ESLint, TypeScript, and the Next.js production build for the
+  frontend
+- Safety constraints: Pydantic performs request validation and named PostgreSQL
+  checks independently enforce the same character limits and currency format
+
+## Sprint 002 Slice 2A Architecture
+
+Slice 2A extends the persistence foundation without adding a Policy use case or
+user-facing workflow:
+
+- Alembic revision `0002_investment_policy_foundation` extends `audit_events` and
+  creates the five approved Policy, Draft, allocation, and immutable Version tables.
+- `audit_events.sequence_number` is a PostgreSQL-generated identity value used for
+  deterministic insertion ordering. It may contain rollback gaps and does not
+  represent concurrent transaction commit order.
+- Named PostgreSQL checks, unique constraints, foreign keys, and indexes enforce
+  Policy/Draft cardinality, allocation bounds, normalized-name uniqueness,
+  version numbering, and at most one current `published` Version.
+- PostgreSQL trigger functions permit only the internal unsealed snapshot-build
+  interval, exact sealing, and exact `published` to `superseded` transition.
+- A deferred constraint trigger prevents committing an unsealed Version.
+- Version allocation rows are insertable only before parent sealing and are never
+  updateable or deletable.
+- SQLAlchemy models mirror the migration. No Policy repository workflow, service,
+  request schema, router, endpoint, or frontend is introduced in Slice 2A.
+- Real PostgreSQL tests cover fresh/incremental migration, downgrade/re-upgrade,
+  named constraints, trigger transitions, rollback, and AuditEvent sequencing.
+
+## Sprint 002 Slice 2B Architecture
+
+Slice 2B adds the approved local-only backend workflow without changing the
+Slice 2A schema:
+
+- `policy_schemas.py` owns strict request/response contracts, decimal-string
+  validation, and Unicode allocation-name normalization.
+- `repositories/policies.py` contains SQLAlchemy reads, row-locking queries,
+  collection replacement, and non-sensitive AuditEvent construction.
+- `services/policies.py` owns transaction boundaries and maps only approved named
+  database conflicts or explicit lifecycle/revision conflicts.
+- `routers/policies.py` exposes the approved `/api/policies` contracts and neutral
+  400/404/409/422 responses without leaking SQL errors or sensitive values.
+- Mutations that touch both rows lock Policy before Draft. Publication supersedes
+  the prior Version, snapshots the Draft, seals the new Version, consumes the
+  Draft, and writes ordered AuditEvents in one transaction.
+- Target percentages remain decimal strings at the API boundary, `Decimal` in
+  Python, and `NUMERIC(5,2)` in PostgreSQL.
+- Policy audit reads select the newest limited window by descending database
+  sequence and return that window ascending.
+- Draft text updates materialize a complete scalar response snapshot while the
+  Policy-then-Draft transaction remains locked. The service commits before
+  returning that snapshot and performs no Draft or allocation query after commit.
+- Policy creation uses a strict empty-object request contract: the body may be
+  omitted or `{}`, while non-empty objects and non-object JSON are rejected before
+  persistence.
+
+No frontend, authentication, recommendation, Guardian, AI, Broker, trading, or
+Decision Journal module is introduced in Slice 2B.
+
+## Sprint 002 Slice 2C Architecture
+
+Slice 2C adds the approved browser workflow without changing the Slice 2B API or
+Slice 2A persistence design:
+
+- `frontend/app/policy/page.tsx` defines the App Router boundary and delegates all
+  interactive behavior to a client component.
+- `frontend/app/policy/policy-client.tsx` keeps the saved server snapshot separate
+  from local Draft text and allocation edits, with independent loading, mutation,
+  history, and audit states.
+- `frontend/lib/policy-api.ts` is the typed browser boundary for the approved
+  Policy endpoints. Reads may be aborted to prevent stale responses from replacing
+  newer state; mutations are never automatically retried.
+- Initial Household and Policy reads run in parallel. Draft, current Published,
+  history, and audit reads run in parallel after Policy presence is known.
+- Target percentages stay as decimal strings at the browser/API boundary. Display
+  totals use strict parsing into integer hundredths and integer addition, with no
+  `Number`, `parseFloat`, rounding, recommendation, or evaluation step.
+- Explicit saves send only changed Draft text fields or the full ordered allocation
+  collection with the current expected revision. Successful responses become the
+  new saved snapshot; failed mutations retain local edits.
+- Publication is a read-only review of the saved Draft snapshot followed by an
+  explicit confirmation. The server remains authoritative for completeness,
+  revision, and publication success.
+- Version history is read-only and cursor-paginated newest first. Audit events are
+  rendered in server-returned sequence order and use an independent GET-only retry.
+
+Slice 2C adds no backend module, database change, authentication, recommendation,
+Guardian, AI, Broker, trading, actual-holdings, or Decision Journal behavior.
+
+## Module Boundaries
+
+- `routers/households.py`: four approved HTTP contracts and status mapping
+- `schemas.py`: strict request/response contracts and technical field limits
+- `services/households.py`: create/update transaction boundaries and domain errors
+- `repositories/households.py`: SQLAlchemy queries and minimal AuditEvent writes
+- `models.py`: only `household_profiles` and `audit_events`
+- `frontend/app/household/`: local-only create/read/update/audit workflow
+- `frontend/lib/household-api.ts`: typed browser-to-API boundary
+- `frontend/app/policy/`: local-only Policy Draft, publication, immutable history,
+  and audit workflow
+- `frontend/lib/policy-api.ts`: typed browser-to-Policy-API boundary and exact
+  integer-hundredths display helpers
+
+No Policy, Allocation, Journal, User, Account, AI, Guardian, Broker, or trading
+module is created in Slice 1.
+
+## Transaction Flow
+
+1. FastAPI validates and sanitizes the request contract.
+2. A request-scoped synchronous SQLAlchemy session enters one short transaction.
+3. The service inserts or updates HouseholdProfile and flushes it.
+4. The repository inserts an AuditEvent containing changed field names only.
+5. Both writes commit together; any failure rolls both back.
+
+The database singleton uses a required boolean sentinel constrained to true and
+unique across `household_profiles`. It prevents concurrent requests from storing
+two profiles; the API maps the resulting integrity conflict to HTTP 409.
+
+Frontend household mutations and AuditEvent refreshes have separate outcomes. A
+successful mutation updates the profile and exits edit mode even if the following
+audit GET fails. The timeline retains prior data, shows an independent error, and
+offers a GET-only retry; mutations are never automatically replayed.
+
+## Migration and CI
+
+Alembic revision `0001_household_persistence` upgrades an empty database and
+creates only the two approved product tables. The initial downgrade is provided
+for development, without promising a production downgrade strategy. CI starts an
+isolated PostgreSQL 16 service, runs `alembic upgrade head` and `alembic current`,
+then runs repository/API/rollback tests against that real database. SQLite and
+mocks do not replace these integration tests. CI sets the project-specific
+`COMPOUNDOS_REQUIRE_POSTGRES_TESTS=1` gate and runs the `postgres`-marked suite
+explicitly. A missing test database fails in that mode; local runs without a
+configured PostgreSQL database may skip the marked integration suite.
+
+## Local Network Boundary
+
+Browser requests use `NEXT_PUBLIC_API_URL` to reach FastAPI. CORS permits only the
+two local web origins. Compose publishes all four host ports on `127.0.0.1`; an
+automated expanded-config check rejects broader default bindings. Containers may
+listen on `0.0.0.0` internally. This is not authentication and is not suitable for
+public deployment.
+
+## Repository Layout Decision
+
+The mixed `apps/api/` and `frontend/` layout is intentional for Sprint 001.1
+because it is functional, small, and already validated. A future migration to
+`apps/web/` and `apps/api/` would improve naming symmetry, but it is not required
+for correctness and would add unnecessary review risk to this hardening sprint.
+Any migration requires approval in a later sprint.
+
+Frontend dependencies are installed reproducibly with npm and the committed
+`frontend/package-lock.json`. Node.js 22.x and npm 10.x are the documented local
+and CI toolchain.
+
+## Principles
+
+- Keep the initial architecture simple and reviewable.
+- Favor explicit contracts and documentable boundaries.
+- Avoid speculative service logic and future-slice abstractions.
+
+## Deferred
+
+- Complete full Docker application runtime verification in a Docker-enabled environment.
+- Decide whether to migrate `frontend/` to `apps/web/` in a later approved sprint.
+- Any later persistence, authentication, policy, journal, Guardian, AI, or broker
+  architecture requires separate approval.
+- Full Docker runtime and browser-path validation remains pending.
+- Decision Journal work remains outside Slice 2 and unauthorized as Slice 3.
+
+===== FILE: docs/PRD.md =====
+# Product Requirements Document
+
+## Status
+
+Approved behavior includes the Slice 1 Household workflow, the Slice 2B local-only
+Investment Policy backend API, and the Slice 2C local-only Policy frontend. Slice
+2A and Slice 2B are Done. Slice 2C is in Review; Slice 3 is not authorized.
+
+## Summary
+
+Slice 1 provides a local, single-user HouseholdProfile record with PostgreSQL
+persistence and an append-only AuditEvent timeline. It records user-entered
+context without interpreting it or providing investment advice.
+
+Slice 2B records user-authored Investment Policy Draft text and target allocation
+percentages, publishes immutable Version snapshots, and exposes version and audit
+reads. It provides no frontend and never evaluates the recorded information.
+
+Slice 2C provides the `/policy` user interface for those approved contracts. It
+supports explicit user-authored Draft saves, mechanical publication review,
+immutable Version reads, and a Policy-filtered audit timeline without interpreting
+the content or providing investment advice.
+
+## Slice 2B Backend Requirements
+
+- The sole Household owns at most one stable Policy and one editable Draft.
+- Draft text updates and whole-allocation replacement require an expected revision,
+  reject no-ops, and commit one redacted AuditEvent atomically.
+- Allocation percentages are decimal strings with at most two places; Draft totals
+  may be incomplete, while publication mechanically requires exactly `100.00`.
+- Publication requires non-whitespace `objectives`, `time_horizon`, and
+  `decision_process`, without judging their meaning or quality.
+- Publication creates immutable Version snapshots and consumes the Draft in one
+  Policy-then-Draft locked transaction.
+- Reads expose current metadata, Draft, current Published Version, cursor-based
+  newest-first history, immutable Version detail, and a limited Policy audit window.
+- Responses never expose normalized names, sealing internals, or sensitive Audit metadata.
+
+## Slice 2B Explicit Non-Goals
+
+- Policy frontend or frontend API client
+- Advice, recommendations, evaluation, suitability, eligibility, scores, rankings,
+  compliance conclusions, rebalancing calculations, or trades
+- Decision Journal, Guardian, AI, Broker, market, holdings, accounts, authentication,
+  multiple households/users, export, or hard-delete workflows
+
+## Slice 2C Frontend Requirements
+
+- Initial Household and Policy reads are parallel, abortable, and protected from
+  stale-response replacement.
+- A missing Household links to `/household` and cannot create a Policy. An empty
+  Policy state can create the sole blank Draft without sending explicit JSON `null`.
+- The Draft editor exposes the ten approved user-input fields with explicit saves,
+  Unicode character limits, changed-field-only PATCH requests, expected revisions,
+  neutral conflict/validation feedback, and no suggested text or autosave.
+- The allocation editor supports local add, remove, and accessible reordering, then
+  explicitly replaces the complete ordered collection. It supplies no default asset
+  classes or target percentages.
+- Allocation inputs remain decimal strings. The displayed total uses integer
+  hundredths and reports only mechanical equality with `100.00`; it never scores or
+  evaluates the allocation.
+- Publication shows a read-only saved Draft snapshot, required-field presence,
+  exact total, and current revision. It requires explicit confirmation and sends
+  `confirmation: true`; the server remains authoritative.
+- Published and historical Versions are immutable and read-only. New Drafts may be
+  blank or copied only from the current Published Version; historical restore/copy,
+  Published editing, and product deletion are absent.
+- The audit timeline preserves the server-returned sequence order and discloses the
+  latest-window/no-cursor boundary. Audit refresh errors are independent from
+  successful mutations, and retry performs only the audit GET.
+- Draft discard requires explicit confirmation and an expected revision; it never
+  deletes the Policy or immutable Versions.
+- The page visibly states its local-only, non-production, no-authentication, and
+  non-advisory boundary.
+
+## Slice 2C Acceptance Criteria
+
+- Loading, missing Household, empty Policy, Draft, publish review, current
+  Published, history, audit, and discard states are accessible at `/policy`.
+- Duplicate mutation submissions are prevented; mutations are not automatically
+  retried, and 409 conflicts offer an explicit server reload without overwriting
+  local input.
+- Text and allocation no-ops issue no mutation. Successful saves adopt the complete
+  server snapshot and revision; failures retain local edits.
+- Exact decimal-string examples such as `0.10 + 0.20`, `99.99`, `100.00`, and
+  `100.01` display without binary floating-point artifacts or silent rounding.
+- Publication requires the three approved fields, exactly `100.00`, and explicit
+  confirmation while remaining subject to server validation.
+- Version history paginates newest first without duplicate entries, remains
+  immutable, and offers no restore or historical-copy action.
+- Policy audit failures never recast a completed Policy mutation as failed, and
+  the retry cannot replay that mutation.
+- UI and API-client tests cover the approved flows, error classes, request payloads,
+  cleanup, non-advisory copy, and prohibited action boundaries.
+
+## Slice 2C Explicit Non-Goals
+
+- Advice, recommendations, suitability, eligibility, scoring, rankings, asset-class
+  defaults, rebalancing or drift calculations, and automated decisions
+- Decision Journal, Guardian thresholds or alerts, AI, Broker or market integration,
+  actual holdings, accounts, monetary amounts, authentication, or public deployment
+- Backend contract or behavior changes, database changes, new dependencies, product
+  deletion, historical restore/copy, Published editing, or Slice 3
+
+## User Stories
+
+- As the local owner, I can create the sole HouseholdProfile.
+- As the local owner, I can refresh and retrieve the persisted profile.
+- As the local owner, I can update approved profile fields.
+- As the local owner, I can inspect a read-only, stably ordered audit timeline.
+- As the local owner, I receive a 409 if any later create is attempted.
+
+## Approved Fields and Technical Limits
+
+- `household_name`: required, trimmed, 1–200 characters
+- `base_currency`: required, exactly three uppercase ASCII letters
+- `investment_horizon`: optional free text, at most 2,000 characters
+- `liquidity_needs`: optional free text, at most 4,000 characters
+- `risk_statement`: optional free text, at most 4,000 characters
+- `notes`: optional free text, at most 8,000 characters
+
+These are input-safety limits, not investment rules. `base_currency` is stored as
+context only; no conversion occurs. `risk_statement` is never interpreted. The
+same limits are enforced in the API contract and by named PostgreSQL constraints
+using character length rather than byte length.
+
+## Lifecycle and Audit Boundary
+
+- The database permits at most one HouseholdProfile in total.
+- The first create succeeds; every later create returns HTTP 409.
+- Clients cannot supply identifiers, actors, or timestamps.
+- Slice 1 has no household active, inactive, archived, deleted, or replacement
+  state and no product delete endpoint.
+- Create and actual update append an AuditEvent in the same transaction.
+- Empty and no-op PATCH requests return HTTP 400 and do not create AuditEvents.
+- Audit metadata lists changed field names only; it does not copy sensitive text.
+
+## Local-Only Requirements
+
+- No authentication or authorization is implemented.
+- The application is limited to local, single-user development.
+- Web, API, PostgreSQL, and Redis host ports bind to `127.0.0.1` by default.
+- Public internet exposure is prohibited.
+- The approved non-advisory notice appears on first entry to the household flow.
+
+## Acceptance Criteria
+
+- Create returns 201, persists through refresh, and emits an atomic AuditEvent.
+- Current GET returns the profile or a clear 404.
+- Approved PATCH fields persist and emit an atomic AuditEvent.
+- Undeclared fields and client-controlled server fields are rejected without
+  echoing sensitive values.
+- Database constraints prevent a second profile, including concurrent attempts.
+- Audit events are read-only, stably ordered, attributed to `local-owner`, and
+  contain no full sensitive field values.
+- Alembic upgrades an empty PostgreSQL database to head, and integration tests use
+  real PostgreSQL.
+- Household UI covers loading, empty, create, summary, edit, 409, error, and audit
+  states with the required local-only and non-advisory notices.
+- A successful create/update remains visibly successful if the following audit
+  refresh fails; the existing timeline remains available and a retry performs only
+  the audit GET without replaying the mutation.
+- CI explicitly requires the PostgreSQL-marked suite and fails rather than skips
+  when its real database URL is unavailable.
+- Existing health, lint, type-check, test, build, audit, Compose, and CI checks pass.
+
+## Explicit Non-Goals for Slice 1
+
+- Investment Policy, target asset allocation, policy lifecycle, Decision Journal,
+  or DecisionCorrection
+- AI, AI Investment Committee, Guardian logic, thresholds, alerts, or notifications
+- Broker integrations, market data, recommendations, suitability, eligibility,
+  scores, rankings, or trading
+- Authentication, authorization, household members, multiple households, or tenancy
+- Accounts, holdings, amounts, balances, quantities, prices, costs, returns, or trades
+- Export, product hard delete, Redis product logic, public deployment, or Slice 2
+
+===== FILE: docs/sprints/SPRINT_002_SLICE_2_TECHNICAL_DESIGN.md =====
+# Sprint 002 Slice 2 Technical Design: Investment Policy Foundation
+
+## Status
+
+**Approved — Slice 2A Implemented for Review**
+
+- Design date: 2026-07-14
+- Baseline: Sprint 002 Slice 1 at merge commit
+  `a06ebb917570672cb38c01fb7defad4c62ed5605`
+- Purpose: define a reviewable Policy-only implementation specification
+- Final independent review conclusion: APPROVE
+- Pull request #6 is approved for merge.
+- Project-owner authorization on 2026-07-14 permits Slice 2A persistence,
+  immutability enforcement, ORM mapping, and database tests only. Slice 2B, Slice
+  2C, and Slice 3 remain unauthorized.
+
+## 1. Scope and boundaries
+
+### Proposed Slice 2 scope
+
+- One stable `InvestmentPolicy` for the sole existing `HouseholdProfile`.
+- At most one editable `InvestmentPolicyDraft` for that Policy.
+- Ten user-authored free-text policy categories.
+- Structured user-authored target asset allocation percentages.
+- Atomic publication into an immutable `InvestmentPolicyVersion` snapshot.
+- `Published` and `Superseded` version history.
+- Policy lifecycle `AuditEvent` records with non-sensitive metadata.
+- One minimal local-only `/policy` workflow.
+
+### Explicit non-goals
+
+- Decision Journal, DecisionCorrection, or Slice 3.
+- AI, AI Investment Committee, generation, summarization, scoring, or agents.
+- Guardian logic, thresholds, monitoring, alerts, or escalation.
+- Brokers, market data, actual holdings, accounts, balances, amounts, prices,
+  performance, drift, or rebalancing calculations.
+- Recommendations, default allocations, templates, suitability conclusions,
+  compliance judgments, policy evaluation, or rule execution.
+- Trading, order preparation, or execution.
+- Authentication, authorization, multiple households, multiple users, or tenancy.
+- Export, general hard delete, public deployment, or production-readiness claims.
+
+Policy category names are neutral recordkeeping structure. Their presence does not
+make them system-authored investment rules, and their contents are never parsed
+into Guardian thresholds or trading instructions.
+
+## 2. Policy and Draft cardinality
+
+### Stable Policy identity
+
+The recommended model permits each `HouseholdProfile` to own at most one stable
+`InvestmentPolicy`. The Policy row contains identity and timestamps, not mutable
+policy content. Drafts and immutable Versions belong to that identity.
+
+PostgreSQL enforces cardinality with:
+
+- a non-null `investment_policies.household_id` foreign key;
+- `UNIQUE (household_id)` on `investment_policies`;
+- no endpoint for a second Policy, Policy replacement, or Policy deletion; and
+- named-constraint handling that converts only the Policy singleton race to 409.
+
+Two concurrent create requests may both pass a pre-read, but only one can satisfy
+the unique constraint. The winner creates the stable Policy and initial Draft;
+the loser rolls back its entire transaction and receives 409.
+
+### Draft cardinality comparison
+
+| Option | Benefits | Costs and risks | Recommendation |
+|---|---|---|---|
+| A. One editable Draft per Policy | Smallest state model; no branch selection or merge; clear UI; simple locking | User must finish or discard the current Draft before starting another | **Recommended** |
+| B. Multiple parallel Drafts | Supports experiments and collaboration | Requires names, ownership, selection, merge/conflict semantics, and more audit/UI states | Reject for this Slice |
+
+`UNIQUE (policy_id)` on `investment_policy_drafts` enforces Option A. Creating a
+Draft when one exists returns 409, including concurrent attempts. A new Draft may
+be blank or copied from the current Published version. Draft existence represents
+the `Editable` lifecycle state; no Draft status column is needed.
+
+Initial Policy creation should create both the stable Policy and a blank Draft in
+one transaction and emit `policy.created` and `policy.draft.created`. If either
+write or either audit event fails, no Policy remains.
+
+## 3. Policy fields and technical limits
+
+Only the following user-authored free-text fields are proposed:
+
+| Field | Proposed maximum characters | Rationale |
+|---|---:|---|
+| `objectives` | 4,000 | Allows several goals without unbounded payloads |
+| `time_horizon` | 2,000 | Matches the existing household horizon safety limit |
+| `liquidity` | 4,000 | Allows detailed context without structured amounts |
+| `diversification` | 4,000 | User statement only; no evaluation |
+| `contribution_policy` | 4,000 | Allows a descriptive process without monetary modeling |
+| `rebalancing_policy` | 4,000 | Records user wording without calculating rebalancing |
+| `prohibited_assets` | 4,000 | Free text only; not an eligibility engine |
+| `leverage_policy` | 4,000 | Free text only; not a Guardian threshold |
+| `decision_process` | 4,000 | Allows a documented owner process |
+| `notes` | 8,000 | Provides bounded supplementary context |
+
+API validation strips leading/trailing whitespace, rejects undeclared fields,
+and measures Unicode characters rather than encoded bytes. Named PostgreSQL
+`char_length` checks independently enforce the same maxima. Draft values may be
+empty while work is incomplete. At publication, only `objectives`,
+`time_horizon`, and `decision_process` must contain non-whitespace user content.
+`liquidity`, `diversification`, `contribution_policy`, `rebalancing_policy`,
+`prohibited_assets`, `leverage_policy`, and `notes` may remain empty. Validation
+checks only non-whitespace presence for the three required categories and the
+technical length limits for all categories. It must not evaluate quality,
+meaning, suitability, or completeness beyond those mechanical rules. Empty
+optional fields are not system advice, approval, or a risk judgment.
+
+The UI and API must not offer suggested text, recommended values, generated
+content, “good/bad” judgments, or an indication that a category complies with a
+long-term plan. These limits are input-safety limits, not investment rules.
+
+## 4. Target Asset Allocation
+
+### Data and normalization
+
+Each allocation item contains only:
+
+- `asset_class_name`: user-authored display text, proposed 1–200 characters after
+  trimming; and
+- `target_percentage`: an exact decimal value.
+
+No default asset class, recommended percentage, actual holding, drift value, or
+rebalancing result exists.
+
+Before validation, the application computes a canonical comparison key by:
+
+1. applying Unicode NFKC normalization;
+2. trimming leading and trailing Unicode whitespace;
+3. collapsing every internal Unicode whitespace run to one ASCII space; and
+4. applying Unicode case folding.
+
+The original normalized display name and the canonical key are stored separately.
+Named unique constraints on `(draft_id, normalized_asset_class_name)` and
+`(version_id, normalized_asset_class_name)` reject names such as `Cash`, ` cash `,
+and `CASH` in the same collection. The service is the canonical-key producer;
+PostgreSQL enforces uniqueness of the stored key without requiring a locale- or
+extension-dependent case-insensitive type. Tests must cover ASCII and Unicode
+space/case examples.
+
+### Draft and publish validation
+
+- A Draft may have no allocation items.
+- A Draft may have items whose total is not 100%; this is visibly “incomplete,”
+  not “invalid investment policy.”
+- Each saved item must already have a non-empty unique name and percentage greater
+  than `0.00` and no greater than `100.00`. Draft incompleteness is represented by
+  missing items or a non-100 total, not zero/negative placeholders.
+- Publish requires at least one item and an exact total of `100.00` (displayed as
+  100%). This is a record-completeness check, not endorsement of the allocation.
+- The API represents every percentage as a decimal string such as `"12.50"`,
+  never a JSON binary floating-point number.
+- Values may have at most two decimal places. More precise input returns 422 and
+  is never silently rounded.
+- PostgreSQL uses `NUMERIC(5,2)`, Python uses `Decimal`, and frontend form state
+  and API payloads retain strings. The sum never uses binary float.
+
+### Precision comparison
+
+| Type | User experience | Exact total | Decision |
+|---|---|---|---|
+| `NUMERIC(5,2)` | Integer or two-decimal display; fixed hundredths contract | Exact `100.00` | **Approved** |
+| Higher precision | Finer fractions but a more complex contract and display | A different scale-specific total | Not approved for this Slice |
+
+The approved contract is `NUMERIC(5,2)` with checks
+`target_percentage > 0.00` and `target_percentage <= 100.00`. The UI may display
+an integer or two decimals, but storage and API precision remain fixed at two
+decimals. The UI states the accepted precision and never silently rounds. Exact
+100% is only a record-completeness condition; it is not an allocation endorsement
+or recommendation.
+
+### Collection mutation comparison
+
+| API style | Benefits | Risks |
+|---|---|---|
+| Independent item CRUD endpoints | Small payloads; individual item identity | More requests, partial-save UX, more race paths, item ordering complexity |
+| Atomic collection replacement | One Draft revision, simple editor state, duplicate and total checks together, easy rollback | Sends the complete small collection on each explicit save |
+
+Atomic collection replacement is approved for the MVP. One
+`PUT /api/policies/current/draft/allocations` receives `expected_revision` and a
+complete ordered `items` collection whose percentages are decimal strings. The
+backend validates the full request before locking the Draft, then compares the
+expected revision. A stale revision returns 409, duplicate canonical asset class
+returns 422, and a semantic no-op returns 400. One transaction replaces the
+collection, increments the Draft revision once, and emits one
+`policy.draft.updated` event. Any failure preserves the complete prior collection.
+There is no single-item allocation CRUD endpoint and no autosave.
+
+## 5. Lifecycle and publication transaction
+
+### Editable Draft
+
+- Draft content is editable only through explicit saves.
+- Each real text or allocation save increments `revision` and creates one
+  `policy.draft.updated` AuditEvent in the same transaction.
+- Empty and semantic no-op saves return 400, do not increment `revision`, and do
+  not emit an AuditEvent.
+- A Draft may be discarded. Discard deletes Draft allocation rows and the Draft,
+  emits `policy.draft.discarded` atomically, and leaves the stable Policy and all
+  Versions intact.
+- A discarded Draft is not formal version history.
+
+A new Draft may be blank or copied only from the current Published Version. If no
+Published Version exists, only blank creation is valid. A Superseded Version or
+any arbitrary historical Version cannot be a source; such a lifecycle request
+returns 409. The Draft stores `source_version_id` solely for provenance. This
+Slice has no restore, historical branching, or version-selection workflow, and a
+request made while a Draft already exists returns 409.
+
+### Published and Superseded Versions
+
+- Publication creates a new immutable Version snapshot; it never converts the
+  Draft row in place.
+- A Version's content and allocation snapshot are immutable after sealing.
+- Stored status values are lower-case `published` and `superseded`; the UI may
+  display them as Published and Superseded.
+- The only permitted lifecycle transition is `published → superseded`.
+- Superseded content remains immutable and cannot be physically deleted.
+- Changes require a new Draft and a new Version number.
+
+### Atomic publish algorithm
+
+Within one synchronous SQLAlchemy service transaction at PostgreSQL `READ
+COMMITTED`:
+
+1. Lock the stable Policy row with `SELECT ... FOR UPDATE`.
+2. Lock the Draft row and verify `expected_revision`; stale input returns 409.
+3. Require non-whitespace `objectives`, `time_horizon`, and `decision_process`;
+   validate only technical length for the seven optional free-text categories.
+4. Read and validate the locked Draft allocation collection: at least one item,
+   unique normalized names, each `(0.00, 100.00]`, at most two decimals, and exact
+   sum `100.00`.
+5. Compute `version_number = max(existing version_number) + 1` while the Policy
+   lock serializes competing publishers.
+6. If a current `published` version exists, change only its status to
+   `superseded` and `superseded_at` from null to a timestamp; insert
+   `policy.superseded`. This occurs before inserting the replacement so the
+   partial unique current-Published index remains satisfied.
+7. Insert an internal Version already containing every policy field,
+   `version_number`, `status = 'published'`, and `published_at`, with only
+   `sealed_at = NULL` during snapshot construction.
+8. Insert the complete immutable allocation snapshot.
+9. Seal the new Version inside the transaction.
+10. Delete the consumed Draft and Draft allocations.
+11. Insert `policy.published` with only non-sensitive metadata. Its database audit
+    sequence must follow `policy.superseded` when both occur in this transaction.
+12. Commit all changes together.
+
+Any failure rolls back the new Version, snapshot, previous-version status change,
+Draft consumption, and AuditEvents. Supersession, replacement publication, and
+both AuditEvents are one transaction. The API returns the new immutable Version
+with 201 only after commit. Only an expected conflict from the named partial
+current-Published index may map to a lifecycle 409; unrelated `IntegrityError`
+instances must propagate instead of being mislabeled.
+
+## 6. Immutability options
+
+| Option | Protection | Migration/testing impact | Assessment |
+|---|---|---|---|
+| A. Service/repository checks only | Protects approved application paths | Simple, but defects or direct SQL can rewrite history | Insufficient alone |
+| B. PostgreSQL triggers | Database rejects forbidden updates/deletes regardless of application path | Requires functions, trigger ordering, rollback and downgrade tests | **Recommended** |
+| C. Separate database roles/permissions | Strong operational boundary | Requires credential/role lifecycle not present in local MVP | Defer to production hardening |
+| D. Append-only schema structure | Separates Drafts from snapshots and avoids normal update paths | Does not by itself prevent direct UPDATE/DELETE/late child INSERT | Useful structure, insufficient alone |
+
+The approved local-MVP design is **Option B applied to the append-only Version
+structure**, without introducing database roles or a permission system:
+
+- a Version INSERT must already contain all policy fields, `version_number`,
+  `status = 'published'`, and `published_at`; only `sealed_at` is temporarily null;
+- while a Version is unsealed, its sole permitted UPDATE changes `sealed_at` from
+  null to non-null and leaves every other column exactly unchanged;
+- while a sealed Version is `published`, its sole permitted UPDATE changes status
+  from `published` to `superseded` and `superseded_at` from null to non-null while
+  leaving every other column exactly unchanged;
+- a `superseded` Version permits no UPDATE;
+- every Version DELETE is forbidden, whether sealed or unsealed; a failed publish
+  is cleaned up by transaction rollback, never explicit deletion;
+- allocation INSERT is permitted only while its parent Version is unsealed;
+  allocation UPDATE and DELETE are always forbidden, and no allocation may be
+  appended after the parent is sealed;
+- publish sets `sealed_at` before commit; and
+- a deferred constraint trigger rejects a transaction that would commit with any
+  unsealed Version.
+
+The internal unsealed interval is not a product lifecycle state and is never
+visible outside the atomic transaction. Trigger and function names are stable,
+and trigger functions raise stable SQLSTATE/error messages that tests can
+distinguish from ordinary unique or validation failures. Direct SQL tests cover
+every allowed and forbidden transition.
+
+Migration impact: the new revision creates tables first, then functions, then
+triggers. Downgrade drops triggers before functions and tables. Tests must attempt
+direct SQL/ORM mutation, deletion of sealed and unsealed Versions, late allocation
+insertion, and an unsealed commit. This design is more work than service-only
+checks but is narrowly focused on the stated immutable-history guarantee.
+
+## 7. Proposed tables (design only)
+
+No table in this section exists until a separate implementation approval.
+
+### `investment_policies`
+
+- `id UUID PRIMARY KEY`, server/application generated.
+- `household_id UUID NOT NULL REFERENCES household_profiles(id) ON DELETE RESTRICT`.
+- `created_at TIMESTAMPTZ NOT NULL DEFAULT now()`.
+- `updated_at TIMESTAMPTZ NOT NULL DEFAULT now()` for Draft lifecycle metadata
+  only; no policy content is stored here.
+- `UNIQUE (household_id)` named `uq_investment_policies_household_id`.
+- Index on `household_id` is supplied by the unique constraint.
+
+### `investment_policy_versions`
+
+- `id UUID PRIMARY KEY`.
+- `policy_id UUID NOT NULL REFERENCES investment_policies(id) ON DELETE RESTRICT`.
+- `version_number INTEGER NOT NULL CHECK (version_number > 0)`.
+- `status TEXT NOT NULL CHECK (status IN ('published', 'superseded'))`; constrained
+  text is preferred over a PostgreSQL enum for simpler migration evolution.
+- The ten policy text columns, all non-null with named `char_length` checks.
+- `published_at TIMESTAMPTZ NOT NULL` and internal
+  `sealed_at TIMESTAMPTZ NULL`; the deferred trigger requires `sealed_at` to be
+  non-null by commit.
+- `superseded_at TIMESTAMPTZ NULL`, with a check requiring null for `published`
+  and non-null for `superseded`.
+- `UNIQUE (policy_id, version_number)`.
+- Partial unique index on `policy_id WHERE status = 'published'` so at most one
+  current Published version exists. Stored values remain lower-case even when UI
+  labels use Published/Superseded.
+- Index `(policy_id, version_number DESC)` for history.
+- Trigger-enforced immutable content and no physical delete after sealing.
+
+Versions are created before Drafts in the migration so a Draft may safely hold an
+optional source-Version foreign key without a table-creation cycle.
+
+### `investment_policy_drafts`
+
+- `id UUID PRIMARY KEY`.
+- `policy_id UUID NOT NULL REFERENCES investment_policies(id) ON DELETE RESTRICT`.
+- `source_version_id UUID NULL REFERENCES investment_policy_versions(id) ON DELETE RESTRICT`.
+- `revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0)` for optimistic concurrency.
+- The ten non-null policy text columns with named maximum-length checks; empty
+  strings are permitted while editable.
+- `created_at` and `updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`.
+- `UNIQUE (policy_id)` enforces one editable Draft.
+- Index on `source_version_id` for provenance lookup.
+
+### `investment_policy_draft_allocations`
+
+- `id UUID PRIMARY KEY`.
+- `draft_id UUID NOT NULL REFERENCES investment_policy_drafts(id) ON DELETE CASCADE`.
+- `asset_class_name TEXT NOT NULL` with `char_length BETWEEN 1 AND 200`.
+- `normalized_asset_class_name TEXT NOT NULL` with the same bound.
+- `target_percentage NUMERIC(5,2) NOT NULL CHECK (> 0.00 AND <= 100.00)`.
+- `sort_order INTEGER NOT NULL CHECK (sort_order >= 0)`.
+- `UNIQUE (draft_id, normalized_asset_class_name)`.
+- `UNIQUE (draft_id, sort_order)`.
+- Index on `draft_id`; Draft discard intentionally cascades to these editable rows.
+
+### `investment_policy_version_allocations`
+
+- `id UUID PRIMARY KEY`.
+- `version_id UUID NOT NULL REFERENCES investment_policy_versions(id) ON DELETE RESTRICT`.
+- The same name, normalized-name, percentage, and order columns/checks as Draft
+  allocations.
+- `UNIQUE (version_id, normalized_asset_class_name)`.
+- `UNIQUE (version_id, sort_order)`.
+- Index `(version_id, sort_order)` for stable snapshot display.
+- Trigger-enforced insert-only-during-unsealed-publish and no UPDATE/DELETE.
+
+No Journal, Guardian, AI, Broker, Account, Holding, User, or tenancy table is
+proposed.
+
+### Existing `audit_events` extension
+
+The migration adds `sequence_number BIGINT GENERATED ALWAYS AS IDENTITY` to the
+existing Slice 1 table. It is a PostgreSQL-assigned, unique, monotonically
+increasing insertion sequence that is `NOT NULL` and `UNIQUE`; clients and
+application inserts cannot provide it. Existing AuditEvent rows must be preserved
+and receive valid, unique sequence numbers during the incremental migration.
+
+The sequence provides deterministic event display ordering. It does **not**
+represent the global commit order of concurrent transactions and must not be
+treated as complete cross-transaction causal ordering. Rollbacks can leave gaps,
+so clients must not require consecutive values. The field records database
+insertion sequence only; it is not a business priority, policy score, event
+importance, or transaction commit timestamp.
+
+Audit API responses expose `sequence_number` as additive read-only metadata to
+make ordering testable and leave a stable foundation for future pagination;
+clients cannot set it. The existing HouseholdProfile endpoint switches only to
+`sequence_number ASC` ordering. Its resource boundary, filters, previously
+exposed fields, and pagination behavior otherwise remain unchanged. AuditEvent
+pagination remains a Backlog item.
+
+## 8. AuditEvent expansion
+
+Proposed action names:
+
+- `policy.created`
+- `policy.draft.created`
+- `policy.draft.updated`
+- `policy.draft.discarded`
+- `policy.published`
+- `policy.superseded`
+
+All actions retain actor `local-owner`, use the existing household foreign key,
+and use stable `InvestmentPolicy` identity as `entity_type`/`entity_id`. Metadata
+may contain only:
+
+- sorted changed field names;
+- Draft revision;
+- source version number;
+- published or superseded version number; and
+- allocation item count.
+
+Metadata must not contain full policy text, asset-class names, percentages, or the
+complete allocation collection. Audit insertion belongs to the same transaction
+as the business mutation. No audit event is written for validation failure, stale
+409, or no-op save.
+
+### Audit read comparison
+
+| Choice | Benefits | Risks |
+|---|---|---|
+| Expand the existing Household timeline | One chronological stream | Mixes profile and Policy semantics; requires immediate UI label changes; harder focused review |
+| Add a Policy-filtered read | Keeps Slice 1 behavior stable; focused Policy history; simple entity filter | Two endpoints can show overlapping household history later |
+
+The approved design retains the Slice 1 HouseholdProfile audit resource contract
+and adds a Policy-filtered endpoint. The repository query filters by household,
+`entity_type = 'InvestmentPolicy'`, and stable Policy ID. The read is exposed as
+`GET /api/policies/current/audit-events`, is strictly read-only, and returns no
+policy text, asset-class name, or percentage.
+
+The Policy endpoint accepts an optional `limit` with default 50 and maximum 100.
+PostgreSQL first orders matching rows by `sequence_number DESC` and selects the
+latest N; the API then returns that selected window in `sequence_number ASC`
+order, from older to newer within the window. This Slice provides no cursor, so
+events older than the selected latest-N window are temporarily inaccessible
+through this endpoint. Full AuditEvent pagination remains in the Backlog. The
+existing Household query changes only to `sequence_number ASC` ordering and gains
+no new pagination or resource semantics. Any future combined household-wide
+activity feed requires its own pagination and presentation decision.
+
+## 9. Proposed API contracts (not implemented)
+
+All request models forbid extra fields and all responses omit internal normalized
+keys, trigger/sealing mechanics, and recommendation-like fields.
+
+| Method and path | Request | Success | Error behavior and transaction |
+|---|---|---|---|
+| `POST /api/policies` | Empty body | `201` stable Policy plus initial blank Draft | `404` no Household; `409` Policy exists/race. Policy, Draft, and two audit events are atomic. |
+| `GET /api/policies/current` | None | `200` Policy metadata | `404` no Policy. Read-only. |
+| `GET /api/policies/current/draft` | None | `200` Draft, revision, fields, allocations | `404` no Policy or Draft. Read-only. |
+| `PATCH /api/policies/current/draft` | `expected_revision` plus any proposed text fields | `200` updated Draft | `400` empty/no-op; `404` missing; `409` stale/lifecycle; `422` shape/length. Update and audit are atomic. |
+| `PUT /api/policies/current/draft/allocations` | `expected_revision`, complete ordered `items`; every percentage is a decimal string with at most two places | `200` updated Draft snapshot | `400` semantic no-op; `404` missing; `409` stale/publish race; `422` duplicate canonical name, binary JSON number, excess scale, or invalid item. Full validation precedes the locked atomic replacement and audit; failure preserves the old collection. |
+| `POST /api/policies/current/draft/discard` | `expected_revision` | `204` | `404` missing; `409` stale/publish race. Draft deletion and audit are atomic. |
+| `POST /api/policies/current/draft` | Optional `source_version_id` identifying only the current Published Version; omit for blank | `201` Draft with provenance | `404` Policy missing; `409` Draft exists, no current Published source exists, or requested source is Superseded/arbitrary history; `422` invalid request. If no Published Version exists, only blank creation is allowed. Copy and audit are atomic. |
+| `POST /api/policies/current/draft/publish` | `expected_revision`, `confirmation: true` | `201` immutable Version snapshot | `400` incomplete text/allocation total; `404` missing; `409` stale/already consumed/concurrent lifecycle; `422` malformed input. Entire publish algorithm is one transaction. |
+| `GET /api/policies/current/published` | None | `200` current Published Version and allocation snapshot | `404` no current Published version. Read-only. |
+| `GET /api/policies/current/versions` | Optional `before_version_number`; `limit` defaults 20, maximum 100 | `200` version metadata newest first plus next cursor | `404` no Policy; `422` invalid pagination. Read-only. |
+| `GET /api/policies/current/versions/{version_number}` | Positive integer path value | `200` immutable Version and allocation snapshot | `404` missing; `422` malformed number. Read-only. |
+| `GET /api/policies/current/audit-events` | Optional `limit`, default 50 and maximum 100; no cursor in this Slice | `200` latest-N policy events returned `sequence_number ASC` within the selected window | `404` no Policy; `422` invalid limit. PostgreSQL selects by `sequence_number DESC`; events before the window are not accessible in this Slice. Read-only and filtered by household, `InvestmentPolicy`, and current Policy ID. |
+
+Status principles:
+
+- `201` means a new Policy, Draft, or immutable Version was committed.
+- `200` means retrieval or a real Draft mutation succeeded.
+- `204` is used only for successful Draft discard.
+- `400` means the structurally valid request cannot perform work, such as no-op or
+  publication incompleteness.
+- `404` means the addressed prerequisite/resource does not exist.
+- `409` means cardinality, lifecycle, stale revision, or concurrency conflict.
+- `422` means request shape, type, precision, name normalization, or technical
+  safety validation failed.
+
+Percentage response fields also use decimal strings. The API never accepts or
+emits a JSON binary floating-point value for the allocation contract and never
+silently rounds input.
+
+No endpoint returns a recommendation, evaluation, score, suitability statement,
+compliance status, allocation comparison, or trade action.
+
+## 10. Minimal frontend flow
+
+One route, `/policy`, is proposed with these states:
+
+1. **Missing Household:** explain the prerequisite and link to `/household`.
+2. **Empty Policy:** state that no Policy exists and offer “Create policy draft.”
+3. **Draft editor:** ten plain free-text fields, explicit Save, revision-conflict
+   messaging, and Discard Draft. It identifies `objectives`, `time_horizon`, and
+   `decision_process` as publication-required and the other seven as optional;
+   it makes no quality or meaning judgment.
+4. **Allocation editor:** add/remove/reorder local rows, string-backed inputs that
+   accept integers or at most two decimals, one explicit atomic Save, current sum
+   display, and neutral completeness text. It never autosaves or silently rounds.
+5. **Publish review/confirmation:** read-only Draft snapshot, mechanical checks
+   for the three required text fields and exact `100.00` total, required
+   confirmation, and the approved non-advisory copy immediately before publish.
+6. **Current Published version:** immutable label, publication/version metadata,
+   policy text and allocation snapshot, plus “Create new Draft” rather than edit.
+7. **Version history:** Published/Superseded metadata and immutable detail views.
+8. **Policy audit timeline:** policy-filtered events and independent retry behavior
+   consistent with the Slice 1 audit failure UX.
+
+The UI must state:
+
+- every percentage and asset-class name was entered by the user;
+- the 100% check verifies record completeness only and is not system approval;
+- Published and Superseded Versions cannot be edited;
+- changes require a new Draft; and
+- the application is local-only, has no authentication, and must not be publicly exposed.
+
+The new-Draft control offers only “Start blank” and, when one exists, “Copy
+current Published.” It never offers a Superseded or arbitrary history source.
+
+Immediately before publish, display exactly:
+
+> CompoundOS records information you enter. It does not evaluate whether an
+> investment policy or decision is suitable, appropriate, or likely to succeed.
+> Policy links and validations are for recordkeeping only and do not constitute
+> investment, tax, or legal advice.
+
+No recommendation button, AI generation, template picker, risk score, compliance
+badge, buy/sell language, or actual-versus-target view is designed.
+
+## 11. Concurrency design
+
+The recommended minimum combination is:
+
+- named unique constraints for Policy, Draft, current Published version, version
+  number, and normalized allocation names;
+- optimistic `revision` on editable Draft mutations;
+- `SELECT ... FOR UPDATE` on Policy and Draft during publish and on Draft during
+  allocation replacement/discard; and
+- PostgreSQL `READ COMMITTED`, relying on explicit locks rather than a broader
+  isolation level that would add retry complexity.
+
+The partial unique index permits at most one Version per Policy with stored
+`status = 'published'`. Publish locks the Policy, supersedes the old row first,
+then inserts the replacement, and writes `policy.superseded` before
+`policy.published` in the same transaction. Database-generated AuditEvent
+`sequence_number` values prove that insertion order within this one transaction.
+They do not establish commit order between concurrent transactions. A rollback
+preserves the prior Published Version, removes both attempted events, and may
+leave unused sequence values. Only the named partial-index conflict is translated
+to the corresponding lifecycle 409; other integrity errors propagate.
+
+| Race | Enforcement | Expected losing response |
+|---|---|---|
+| Two requests create Policy | `UNIQUE (household_id)`; atomic Policy/Draft/audit transaction | `409 Policy already exists` |
+| Two requests create Draft | `UNIQUE (policy_id)` | `409 Draft already exists` |
+| Two requests publish one Draft | Both lock Policy then Draft in the same order; first consumes Draft | `409 Draft already published or changed` |
+| Stale Draft text update | Conditional revision check/increment | `409 Draft revision is stale` |
+| Version-number competition | Policy row lock serializes `max + 1`; unique constraint is final guard | `409` if invariant guard is reached |
+| Allocation replace vs publish | Both lock Draft and require expected revision; publish snapshots only after lock | Stale operation receives `409`, never partial snapshot |
+
+Lock order is always Policy then Draft when both are needed, preventing inversion.
+Expected conflicts are translated only from named constraints or explicit
+revision/lifecycle checks; unrelated `IntegrityError` instances must propagate.
+
+## 12. Blocking test matrix
+
+### Migration and schema
+
+- Upgrade an existing database from `0001_household_persistence` to the proposed
+  new revision while preserving HouseholdProfile and AuditEvent rows and assigning
+  every existing AuditEvent a unique non-null `sequence_number`.
+- Upgrade a fresh PostgreSQL database from base to head.
+- Verify exactly the five proposed product tables, constraints, indexes, trigger
+  functions, and triggers are added; no prohibited table appears.
+- Development downgrade from the new revision to 0001 drops triggers and
+  functions in safe dependency order and leaves Slice 1 rows intact.
+- Downgrade safely removes the AuditEvent sequence constraint/index and identity
+  column while preserving the remaining Slice 1 AuditEvent fields and rows.
+- Confirm the application still never calls `create_all`.
+
+### Cardinality, Draft, and allocation
+
+- Policy singleton under sequential and concurrent creation.
+- Draft singleton under sequential and concurrent creation.
+- Initial Policy + Draft + AuditEvents atomic rollback.
+- Draft text save increments revision and audits changed field names only.
+- Empty/no-op text and allocation saves return 400 with no revision/event.
+- Every free-text maximum is enforced by Pydantic and named PostgreSQL checks.
+- Publish accepts non-whitespace `objectives`, `time_horizon`, and
+  `decision_process`, allows all seven optional categories to remain empty, and
+  rejects whitespace-only required content without assessing its meaning.
+- Decimal-string parsing rejects JSON numbers, float artifacts, more than two
+  decimals without rounding, zero, negative, and values above `100.00`; API
+  responses retain decimal strings and Python operations use `Decimal`.
+- Unicode name normalization and duplicate canonical-name rejection.
+- Draft totals below/above 100 may save; publish rejects them.
+- Publish requires at least one item and exact `100.00`.
+- Allocation replacement validates the complete ordered collection, rejects stale
+  revision/duplicate/no-op with the approved status, and preserves the prior
+  collection on every failure.
+- Draft creation permits blank or current Published source only, records
+  `source_version_id`, rejects Superseded/arbitrary history with 409, and rejects
+  a second Draft with 409.
+
+### Publication, immutability, and concurrency
+
+- First publish creates Version 1 and consumes Draft atomically.
+- Later publish creates the next number and supersedes exactly one prior Published version.
+- Failure at each publish step rolls back Version, snapshot, supersession, Draft
+  deletion, and AuditEvents.
+- Version INSERT without complete fields, positive version number,
+  `status = 'published'`, or `published_at` fails.
+- Direct SQL verifies an unsealed Version permits only `sealed_at NULL → non-null`
+  with every other column unchanged; every other unsealed UPDATE and every Version
+  DELETE fails.
+- Direct UPDATE/DELETE or late INSERT of Version allocations fails; INSERT works
+  only before parent sealing.
+- A deferred constraint trigger prevents any committed unsealed Version.
+- A sealed `published → superseded` transition with
+  `superseded_at NULL → non-null` succeeds once with all other columns unchanged;
+  every other/reverse transition and every Superseded UPDATE/DELETE fails.
+- Two simultaneous publishes yield one success and one 409.
+- Stale text/allocation/discard/publish operations return 409.
+- Allocation replacement racing publish cannot create a mixed snapshot.
+
+### Audit, API, UI, and regressions
+
+- All six Policy audit action types, stable ordering, actor `local-owner`, and
+  atomic business-write behavior.
+- Policy and Household audit reads order by database-generated `sequence_number`;
+  existing events survive migration with unique values, and clients cannot supply
+  a sequence number.
+- Sequence tests verify unique, monotonically increasing insertion values,
+  deterministic display ordering, and permitted gaps after rollback. Concurrent
+  tests must not assert that sequence order equals transaction commit time or a
+  complete cross-transaction causal order.
+- A replacement publish inserts `policy.superseded` before `policy.published`, and
+  their sequence numbers prove that insertion order within the same committed
+  transaction.
+- Policy audit filtering uses household, entity type, and current Policy ID; its
+  default-50/maximum-100 limit selects the latest N by descending sequence and
+  returns that window ascending, without cursor pagination. Tests confirm earlier
+  events are inaccessible and the response exposes read-only sequence metadata
+  but no policy text, class name, or percentage.
+- Existing Slice 1 audit ordering tests are updated to assert
+  `sequence_number ASC` without adding Household pagination or changing the
+  HouseholdProfile audit resource boundary.
+- Audit metadata contains only allowed keys and never policy text, class names,
+  percentages, or complete allocations.
+- All proposed 200/201/204/400/404/409/422 contracts and sensitive-input redaction.
+- `/policy` empty, Draft, allocation, publish-confirmation, current version,
+  history, and audit states.
+- Non-advisory copy appears at Policy flow entry and immediately before publish.
+- UI contains no recommendation, template, AI, Guardian, score, compliance,
+  trading, holdings, or actual-versus-target surface.
+- Real PostgreSQL CI runs with zero skipped PostgreSQL tests.
+- Existing Slice 1 API, transaction, frontend, health, lint, type-check, build,
+  audit, Compose, and localhost-binding tests remain green.
+
+## 13. Security and privacy
+
+- Policy fields are sensitive user-authored planning data. They must not enter
+  application logs, exception messages, validation responses, or Audit metadata.
+- Allocation names/percentages are returned only through Policy contracts and are
+  not copied into Audit metadata.
+- Validation errors report locations and neutral messages without echoing full input.
+- CORS remains limited to existing localhost origins; no origin or method expands
+  until the specific Policy routes are implemented and reviewed.
+- Web, API, PostgreSQL, and Redis host ports remain bound to `127.0.0.1`.
+- There is no authentication. Localhost binding is not access control; remote or
+  shared deployment remains prohibited.
+- Development reset may clear all local data. It is not a product delete feature.
+- No export, Policy/Version hard-delete API, backup feature, or encryption claim is added.
+- Published/Superseded history and AuditEvents are retained for the local MVP.
+- This design does not claim production security, privacy, compliance, fiduciary,
+  or advisory readiness.
+
+## 14. Migration strategy
+
+- Proposed revision ID: `0002_investment_policy_foundation`.
+- `down_revision` must be `0001_household_persistence`.
+- The merged 0001 revision is immutable and must not be edited.
+- Add database-generated `audit_events.sequence_number BIGINT GENERATED ALWAYS AS
+  IDENTITY`, populate existing rows through the migration, and enforce `NOT NULL`
+  plus uniqueness. Application/client inserts never set this field. Values are a
+  monotonically increasing insertion sequence, may contain rollback gaps, and do
+  not represent concurrent transaction commit order.
+- Upgrade order: AuditEvent sequence extension → Policy table → Version table →
+  Draft table → Draft allocations → Version allocations → indexes → trigger
+  functions → triggers.
+- Trigger functions use schema-qualified table references where appropriate and
+  stable names suitable for inspection tests.
+- Downgrade order: drop triggers → drop trigger functions → drop allocation tables
+  → drop Draft table → drop Version table → drop Policy table → remove the
+  AuditEvent sequence constraint/index and identity column safely.
+- The downgrade is development support, not a production rollback promise; it
+  necessarily removes Slice 2 Policy data while preserving Slice 1 tables.
+- CI must test both fresh `alembic upgrade head` and incremental
+  `upgrade 0001`, seed Slice 1 data including AuditEvents, then `upgrade head` and
+  verify preserved events have unique non-null sequence numbers.
+- A downgrade test must verify return to 0001 and successful re-upgrade.
+- No application startup path calls `create_all`.
+
+No migration is created by this design gate.
+
+## 15. Acceptance criteria and Definition of Done
+
+### Proposed acceptance criteria
+
+- The sole Household can create at most one stable Policy and one editable Draft.
+- Policy and initial Draft creation is atomic with non-sensitive AuditEvents.
+- Draft text and allocation saves are explicit, revisioned, atomic, and no-op safe.
+- Publication mechanically requires non-whitespace `objectives`, `time_horizon`,
+  and `decision_process`; the seven optional categories may remain empty, and no
+  text is semantically evaluated.
+- Draft allocation may be incomplete, while publication requires at least one
+  unique item and exact `100.00` using decimal-string API values, `Decimal`, and
+  `NUMERIC(5,2)` without binary float or silent rounding.
+- Publication atomically produces an immutable snapshot, supersedes the prior
+  Published version, consumes the Draft, and creates allowed AuditEvents.
+- Published and Superseded content cannot be updated or physically deleted,
+  including through direct database writes.
+- Strict triggers allow only sealing an otherwise unchanged unsealed Version and
+  superseding an otherwise unchanged sealed Published Version; all Version
+  deletes and Version-allocation updates/deletes are forbidden, and allocation
+  inserts are accepted only before the parent is sealed.
+- Version history and Policy audit reads are stable and expose no internal sealing
+  or normalized-name fields. Policy and Household audit reads use the unique,
+  database-generated `sequence_number`; it is exposed read-only for deterministic
+  display and never carries score, priority, global commit-order, or complete
+  cross-transaction causality meaning.
+- The Policy audit endpoint selects the latest 50 events by default (maximum 100)
+  in descending sequence order and returns that window ascending. It has no
+  cursor, so older events outside the window are temporarily inaccessible.
+- New Drafts are blank or sourced only from the current Published Version, retain
+  `source_version_id`, and cannot restore or branch from Superseded history.
+- The `/policy` flow covers empty, Draft, publish review, Published, history, and
+  audit states with local-only and non-advisory notices.
+- APIs/UI provide no recommendation, evaluation, score, rule result, Guardian/AI
+  output, broker/market/holding data, rebalancing calculation, or trade behavior.
+- Concurrency and stale operations return deterministic 409 responses without
+  partial writes.
+- Existing Slice 1 behavior remains unchanged and its regression suite passes.
+
+### Proposed Definition of Done
+
+- This technical design has received final independent review with conclusion
+  APPROVE; separate implementation authorization remains required. OD-1 through
+  OD-6 are already resolved.
+- A new 0002 migration, models, strict schemas, repositories, service transaction
+  boundaries, API contracts, and minimal UI are implemented only after approval.
+- Fresh and incremental migrations, downgrade, constraints, triggers, lifecycle,
+  immutability, AuditEvent sequence backfill/order, concurrency, rollback,
+  privacy, API, and frontend tests pass.
+- Real PostgreSQL CI executes the Policy integration suite with zero skips.
+- Ruff, frontend lint, TypeScript, Vitest, Next.js build, npm audit, Compose config,
+  and localhost-binding checks pass.
+- Required PRD, Architecture, ADR, README, Changelog, Master Plan, API, privacy,
+  and test documentation is current.
+- Independent code review approves the implementation.
+- Docker runtime/browser validation is run when available; otherwise the gap is
+  accurately disclosed and retained as a follow-up.
+- Sprint 002 remains In Progress until separately completed.
+- Slice 3 remains unauthorized.
+
+## 16. Resolved owner decisions
+
+OD-1 through OD-6 were resolved by project-owner decision on 2026-07-14. These
+decisions close the product-contract questions in this design; they do not
+authorize implementation. The planning PR must merge and separate implementation
+authorization is still required.
+
+| ID | Resolved decision | Status |
+|---|---|---|
+| OD-1 | Publication requires non-whitespace `objectives`, `time_horizon`, and `decision_process`; the other seven categories may be empty; validation never judges meaning or quality. | Resolved by project-owner decision on 2026-07-14 |
+| OD-2 | Percentages use decimal-string API values, Python `Decimal`, PostgreSQL `NUMERIC(5,2)`, at most two decimals without rounding, and exact publication total `100.00`. | Resolved by project-owner decision on 2026-07-14 |
+| OD-3 | PostgreSQL immutability triggers enforce the exact sealing/supersession transitions, allocation append window, universal Version delete ban, and deferred no-unsealed-at-commit rule; no database role system is added. | Resolved by project-owner decision on 2026-07-14 |
+| OD-4 | Draft allocations use atomic whole-collection replacement with expected revision, complete validation, one transaction, and no item CRUD or autosave. | Resolved by project-owner decision on 2026-07-14 |
+| OD-5 | The Slice 1 Household audit endpoint remains; a Policy-filtered read uses database audit sequence ordering and a safe limit without full pagination. | Resolved by project-owner decision on 2026-07-14 |
+| OD-6 | A Draft is blank or sourced only from the current Published Version; Superseded/arbitrary history sources are rejected and provenance is retained. | Resolved by project-owner decision on 2026-07-14 |
+
+Final constraint and trigger names, repository class/function layout, specific
+React component decomposition, CSS visual details, and test-fixture internals are
+implementation details rather than unresolved product blockers. They must remain
+consistent with this approved contract during any separately authorized work.
+
+Non-blocking for this local-only design but blocking before any remote/production
+use: jurisdiction/legal review, authentication and authorization, production
+retention/export/deletion, backup, encryption, and final legal copy.
+
+## Design gate conclusion
+
+Final independent technical design review conclusion: **APPROVE**. Pull request
+#6 was squash-merged. Slice 2A was separately authorized and is implemented for
+review; this does not authorize Slice 2B, Slice 2C, or Slice 3.

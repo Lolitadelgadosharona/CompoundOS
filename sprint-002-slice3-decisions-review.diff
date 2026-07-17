@@ -1,0 +1,1247 @@
+diff --git a/docs/MASTER_PLAN.md b/docs/MASTER_PLAN.md
+index bbeab9e..448cbf3 100644
+--- a/docs/MASTER_PLAN.md
++++ b/docs/MASTER_PLAN.md
+@@ -25,9 +25,11 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+ - Slice 2A: Done
+ - Slice 2B: Investment Policy Backend Workflow and API / Done
+ - Slice 2C: Investment Policy Frontend Workflow / Done
+-- Slice 3: Technical Design proposed / Implementation Not Authorized
+-- Slice 3 Technical Design: Draft PR on planning branch, awaiting review and owner
+-  decisions on OD-S3-1 through OD-S3-12
++- Slice 3: Technical Design Owner Decisions Resolved / Implementation Not
++  Authorized
++- Slice 3 Technical Design: Draft PR on planning branch, OD-S3-1 through
++  OD-S3-15 all Resolved by Project Owner — 2026-07-16, design decision
++  changes pending final consistency review
+ 
+ ## Planning
+ 
+@@ -44,7 +46,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+   the Decision Journal data model, lifecycle, API, UI, immutability, and
+   concurrency patterns without any implementation.
+ - Slice 3 implementation remains unauthorized.
+-- OD-S3-1 through OD-S3-12 are all Open — Owner Decision Required.
++- OD-S3-1 through OD-S3-15 were all Open — Owner Decision Required; all
++  resolved by Project Owner on 2026-07-16.
+ 
+ ## Backlog
+ 
+@@ -76,7 +79,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+ - Slice 3 Technical Design is proposed on the
+   `planning/sprint-002-slice-3-decision-journal` branch as a Draft PR.
+ - Slice 3 implementation remains unauthorized and Not Started.
+-- OD-S3-1 through OD-S3-12 are all Open — Owner Decision Required.
++- OD-S3-1 through OD-S3-15 were all Open — Owner Decision Required; all
++  resolved by Project Owner on 2026-07-16.
+ 
+ ## Review
+ 
+@@ -173,7 +177,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+   snapshot corrections, cursor-based audit pagination, and a three-layer
+   immutability design.
+ - Twelve Open Decisions (OD-S3-1 through OD-S3-12) are recorded and all marked
+-  Open — Owner Decision Required.
++  Open — Owner Decision Required. Three additional Open Decisions added
++  (OD-S3-13 through OD-S3-15) during fix revision, total fifteen.
+ - The design compares three data model approaches, eight domain design
+   questions, three correction models, and four immutability enforcement layers.
+ - No implementation is included; the design covers only proposed schema, API
+@@ -181,6 +186,18 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+ - Draft PR on `planning/sprint-002-slice-3-decision-journal` branch; the PR
+   remains Draft and is not approved for merge.
+ - Merging the design PR does not authorize Slice 3 implementation.
++- 2026-07-16: OD-S3-1 through OD-S3-15 all Resolved by Project Owner. All
++  fifteen owner decisions recorded in the technical design with Selected option,
++  Rejected alternatives, and Resolved date. NBF-1 (Correction trigger status
++  validation) and NBF-2 (DELETE trigger draft-only guard) resolved in design.
++  Global consistency revision applied across all sections: scope, lifecycle,
++  data model, field rules, dates, Policy Version reference, Confirm transaction,
++  Archive/unarchive, Correction model, Audit, PostgreSQL triggers,
++  constraints/FKs, concurrency, API, UI, retention, test matrix, dependencies,
++  Definition of Done, and implementation split. PR #10 remains Draft. Design
++  decision changes pending final consistency review. Slice 3 Implementation
++  remains Not Authorized. Slice 3A, 3B, 3C remain Not Started. Merging the
++  Technical Design PR does not authorize Slice 3A. Existing Backlog preserved.
+ 
+ ## Done
+ 
+@@ -415,3 +432,31 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
+   PR #10 remains Draft and is not approved for merge. Design remains pending
+   independent re-review. Slice 3 Implementation remains Not Authorized.
+   Slice 3A, 3B, 3C remain Not Started.
++- 2026-07-16: Incremental Technical Design Re-Review concluded APPROVE WITH
++  NON-BLOCKING FOLLOW-UP. All eight original findings (M-1 through M-5, L-1
++  through L-3) are RESOLVED. Two new LOW non-blocking findings: NBF-1
++  (Correction trigger missing status validation) and NBF-2 (lifecycle trigger
++  missing discarded transition).
++- 2026-07-16: OD-S3-1 through OD-S3-15 all Resolved by Project Owner.
++  OD-S3-1 (Option B: multiple independent Drafts), OD-S3-2 (title, summary,
++  rationale, decision_date required at Confirm), OD-S3-3 (no classification in
++  MVP), OD-S3-4 (DATE, backfill allowed, future forbidden), OD-S3-5 (current
++  Published Version only, lock + re-validate), OD-S3-6 (consume Draft + immutable
++  snapshot), OD-S3-7 (Archive = list hiding, allow unarchive, optional reason),
++  OD-S3-8 (full replacement snapshot), OD-S3-9 (user text/dates correctable,
++  Policy Version/audit/archive metadata not correctable), OD-S3-10 (Decision-
++  filtered audit + Household timeline includes, cursor pagination), OD-S3-11
++  (provisional MVP non-advisory copy), OD-S3-12 (3A/3B/3C split), OD-S3-13
++  (Option A: atomic identity deletion for never-Confirmed discard), OD-S3-14
++  (Option A: per-decision sequential via Decision lock + MAX+1), OD-S3-15
++  (Option A: Archived still allows Correction).
++- 2026-07-16: NBF-1 resolved: Correction INSERT trigger now validates Decision
++  status IN ('confirmed', 'archived') with stable SQLSTATE/error identifiers.
++  NBF-2 resolved: new DELETE guard trigger fn_decision_identity_delete_guard
++  allows DELETE only when status=draft; forbids confirmed/archived DELETE.
++- 2026-07-16: Global consistency revision applied across all design sections.
++  All conditional/Open language replaced with resolved decisions. PR #10 remains
++  Draft. Design decision changes pending final consistency review. Slice 3
++  Implementation remains Not Authorized. Slice 3A, 3B, 3C remain Not Started.
++  Merging the Technical Design PR does not authorize Slice 3A. Existing Backlog
++  preserved.
+diff --git a/docs/sprints/SPRINT_002_SLICE_3_TECHNICAL_DESIGN.md b/docs/sprints/SPRINT_002_SLICE_3_TECHNICAL_DESIGN.md
+index dee7df7..9308a5c 100644
+--- a/docs/sprints/SPRINT_002_SLICE_3_TECHNICAL_DESIGN.md
++++ b/docs/sprints/SPRINT_002_SLICE_3_TECHNICAL_DESIGN.md
+@@ -1,7 +1,7 @@
+ # Sprint 002 Slice 3 Technical Design: Decision Journal and Append-Only Corrections
+ 
+ - Date: 2026-07-15
+-- Status: **Recommended — Owner Approval Required**
++- Status: **Resolved by Project Owner — 2026-07-16**
+ - Authorization: Slice 3 Technical Design Gate only; implementation is **Not Authorized**
+ - Branch: `planning/sprint-002-slice-3-decision-journal`
+ - Baseline: `main` at `18697b4757be96f82aa1a7f62453a7751e148cc5`
+@@ -238,13 +238,16 @@ lock decision FOR UPDATE → lock draft FOR UPDATE → validate → INSERT snaps
+ → DELETE draft → UPDATE decision status → INSERT AuditEvents. All in one
+ transaction. The decision ID is stable throughout.
+ 
+-**Draft discard.** Discarding an unconfirmed Draft requires an explicit
+-decision on what happens to the decision identity row. This is recorded as
+-OD-S3-13 and remains Open — Owner Decision Required.
++**Draft discard.** Discarding a never-Confirmed Draft atomically deletes
++both the Draft row and the decision identity row in the same transaction
++(OD-S3-13 Option A). An AuditEvent with the stable Decision UUID is written
++before deletion. Confirmed, Archived, and Corrected decisions are never
++hard-deleted.
+ 
+-**Correction numbering.** The mechanism for numbering Corrections depends on
+-OD-S3-14 (Correction numbering and ordering) and remains Open — Owner Decision
+-Required.
++**Correction numbering.** Corrections use per-decision sequential numbering:
++the append transaction locks the decision identity row, computes
++`MAX(correction_number) + 1` within the lock, and inserts with an explicit
++value. Enforced by `UNIQUE(decision_id, correction_number)` (OD-S3-14 Option A).
+ 
+ **Concurrency.** Draft edits use optimistic revision on the draft table.
+ Confirm serializes via FOR UPDATE on decision + draft. The snapshot is created
+@@ -290,8 +293,7 @@ is no risk of accidental multi-version semantics.
+ 
+ ### 3.5 Recommendation
+ 
+-**Recommended — Owner Approval Required: Approach C (Stable Decision Identity +
+-Draft + Confirmed Version)**
++**Selected: Approach C (Stable Decision Identity + Draft + Confirmed Version)**
+ 
+ Rationale:
+ 
+@@ -307,7 +309,7 @@ Rationale:
+ - Future extension to Draft revision history or decision versioning is possible
+   without schema restructuring, though neither is proposed now.
+ 
+-This recommendation does not constitute approval. The owner must decide.
++Resolved by Project Owner — 2026-07-16. Approach C is the approved data model.
+ 
+ ---
+ 
+@@ -352,11 +354,14 @@ UI complexity: the Draft list view replaces the singleton editor. The user
+ sees a list of in-progress decisions and selects one to edit. This is standard
+ list-detail navigation.
+ 
+-**Recommended — Owner Approval Required: Option B (multiple independent
+-Drafts).** The singleton Draft rule works for Policy because there is exactly
+-one Policy per Household, but the Decision Journal is inherently multi-entry.
++**Selected: Option B (multiple independent Drafts).** The singleton Draft
++rule works for Policy because there is exactly one Policy per Household, but
++the Decision Journal is inherently multi-entry. Each Draft creates an
++independent Decision identity. The API uses Decision ID, not an ambiguous
++`current/draft` path. The UI provides a Draft list and individual Draft
++detail. Concurrent creation of different Decision Drafts is allowed.
+ 
+-This is recorded as **OD-S3-1**.
++This is recorded as **OD-S3-1** — Resolved by Project Owner — 2026-07-16.
+ 
+ ---
+ 
+@@ -389,13 +394,11 @@ None of these options produce recommendations, scores, pass/fail, suitability,
+ eligibility, compliance, or approval conclusions. They are purely
+ organizational metadata.
+ 
+-**Recommended — Owner Approval Required: Option A (free text, no
+-classification) for the initial slice, with the option to add neutral
+-categories later as a non-breaking extension.** A `category` column can be
+-added to the snapshot and draft tables in a future migration without
+-restructuring existing data.
++**Selected: no classification for Slice 3 MVP.** No fixed types, no user
++tags, no system classification, no AI classification. If classification is
++needed in the future, it must be designed in a separate approved Sprint.
+ 
+-This is recorded as **OD-S3-3**.
++This is recorded as **OD-S3-3** — Resolved by Project Owner — 2026-07-16.
+ 
+ ---
+ 
+@@ -438,13 +441,21 @@ Draft field nullability:
+ 
+ Confirm mechanical required fields:
+ 
+-- `title`, `decision_summary`, `rationale`, `decision_date`, and
+-  `selected_policy_version_id` are mechanically required at confirm time.
++- `title`, `decision_summary`, `rationale`, and `decision_date` are
++  mechanically required at confirm time.
+ - The server validates non-blank content for `title`, `decision_summary`, and
+   `rationale` after trim.
+-- `decision_date` must be a valid DATE value.
+-- The server does **not** evaluate text quality, meaning, or completeness.
+-- All other fields remain optional at confirm time.
++- `decision_date` must be a valid DATE value (strict ISO `YYYY-MM-DD`).
++- `selected_policy_version_id` is set by the system from the current
++  Published Policy Version at confirm time (not user-supplied).
++- The server does **not** evaluate text quality, meaning, completeness,
++  appropriateness, risk level, or compliance.
++- No amount, position, trade, or score fields are added.
++- All other approval fields remain optional at confirm time, including
++  `alternatives_considered`, `risks_and_uncertainties`, `evidence_or_sources`,
++  `expected_outcome`, `review_trigger`, `review_date`, and `notes`.
++- Drafts may be incomplete during editing; only presence, type, date, and
++  length validation is enforced.
+ 
+ Character length limits follow the same pattern as the existing Policy text
+ fields: PostgreSQL `character_length()` semantics (code points, not bytes),
+@@ -454,7 +465,7 @@ No structured financial fields: no amount, quantity, price, cost, return,
+ percentage, position, account, or balance fields. The Decision Journal records
+ only user-entered text and dates.
+ 
+-This is recorded as **OD-S3-2**.
++This is recorded as **OD-S3-2** — Resolved by Project Owner — 2026-07-16.
+ 
+ ---
+ 
+@@ -476,7 +487,7 @@ The Proposal uses `decision_date` to mean "when the user says they made this
+ decision." This is a calendar date, not a precise timestamp. The user is
+ unlikely to say "I decided at 14:37:22 UTC." DATE is the appropriate type.
+ 
+-**Recommended — Owner Approval Required: DATE for decision_date.**
++**Selected: DATE for decision_date.** API uses strict ISO `YYYY-MM-DD` strings.
+ 
+ **Backdating.**
+ 
+@@ -486,19 +497,20 @@ legitimate: the user may record a decision days after making it. The
+ 
+ **Future decision_date.**
+ 
+-Allowing a future `decision_date` is questionable: the user has not yet made
+-the decision. However, the system does not evaluate the date — it records what
+-the user enters. A future date may represent a planned decision.
+-
+-**Recommended — Owner Approval Required: allow backdating (past or present
+-dates), allow future decision_date, and rely on the audit trail to
+-distinguish user-claimed dates from system timestamps.**
++Future `decision_date` values are **forbidden**. The user may set
++`decision_date` to today or any past date (backdating is legitimate — the
++user may record a decision days after making it). The `created_at` and
++`confirmed_at` timestamps provide the actual system timeline. The system
++validates `decision_date <= CURRENT_DATE` at both Draft save and Confirm time.
++This is a record integrity rule, not an investment rule.
+ 
+ **review_date.**
+ 
+-`review_date` is a user-entered optional DATE. It records a date the user
+-would like to review the decision. It does **not** trigger any notification,
+-alert, Guardian action, or automated behavior. It is purely informational.
++`review_date` is a user-entered optional DATE. It may be set to any date
++including future dates. It records a date the user would like to review the
++decision. It does **not** trigger any notification, alert, Guardian action,
++or automated behavior. Whether the date has arrived produces no system
++judgment or reminder. It is purely informational.
+ 
+ **AuditEvent ordering.**
+ 
+@@ -513,7 +525,7 @@ order and may contain rollback gaps. Decision audit events use the same
+ (system). The UI must display both to make the distinction clear. User input
+ times must never be used as audit or system timestamps.
+ 
+-This is recorded as **OD-S3-4**.
++This is recorded as **OD-S3-4** — Resolved by Project Owner — 2026-07-16.
+ 
+ ---
+ 
+@@ -557,13 +569,22 @@ Analysis:
+ - Historical Version selection increases the risk of the user choosing the
+   wrong Version, especially in a local MVP with no undo.
+ 
+-**Recommended — Owner Approval Required: Option A (current Published Version
+-only).** This is simpler, avoids historical Version selection UI complexity,
+-and matches the existing Policy Draft sourcing rule (blank or current
+-Published only). If the Policy is superseded during Draft editing, the confirm
+-fails with 409 and the user re-confirms with the new current Version.
++**Selected: Option A (current Published Version only).** This is simpler,
++avoids historical Version selection UI complexity, and matches the existing
++Policy Draft sourcing rule (blank or current Published only). If the Policy
++is superseded during Draft editing, the confirm fails with 409 and the user
++re-confirms with the new current Version.
++
++Confirm first locks the `investment_policies` row (`SELECT FOR UPDATE`), then
++re-reads the current Published Version within the lock. If the request carries
++a `selected_policy_version_id`, it must exactly equal the locked current
++Published Version ID; otherwise the confirm returns 409. If the Version has
++been superseded or the Policy changed concurrently, the confirm returns 409.
++The Confirmed snapshot permanently stores that Version reference. Subsequent
++Policy supersession does not alter the Decision's stored reference. Future
++historical Version reference, if needed, must be separately approved.
+ 
+-This is recorded as **OD-S3-5**.
++This is recorded as **OD-S3-5** — Resolved by Project Owner — 2026-07-16.
+ 
+ ---
+ 
+@@ -581,7 +602,7 @@ all confirmed field values, `confirmed_at = now()`, and
+ `selected_policy_version_id = <version>`. The decision identity row is updated
+ to `status = 'confirmed'`.
+ 
+-Under Approach C (recommended data model), Option B is the natural choice:
++Under Approach C (selected data model), Option B is the natural choice:
+ the Draft is consumed and the snapshot is created. The decision identity
+ remains stable.
+ 
+@@ -590,9 +611,10 @@ remains stable.
+ 1. Locate the sole Household and its InvestmentPolicy.
+ 2. Acquire `SELECT FOR UPDATE` on the `investment_policies` row.
+ 3. Within the Policy lock, fetch and validate the current Published Policy
+-   Version (`status = 'published'`). If the owner later permits historical
+-   Version selection (OD-S3-5 Option B), this step would re-validate the
+-   selected Version instead.
++   Version (`status = 'published'`). If the request carries a
++   `selected_policy_version_id`, it must exactly equal the locked current
++   Published Version ID. A mismatch, superseded Version, or concurrent
++   Policy change returns 409 lifecycle conflict.
+ 4. Acquire `SELECT FOR UPDATE` on the decision identity row.
+ 5. Acquire `SELECT FOR UPDATE` on the Draft row.
+ 6. Validate `expected_revision` matches the Draft's current revision.
+@@ -609,6 +631,9 @@ remains stable.
+ 
+ **Explicit confirmation.** The confirm request must include
+ `confirmation: true` (literal boolean). The server does not auto-confirm.
++After confirm, no editable Draft remains. There is no Confirmed→Draft or
++reopen-for-editing capability. Changes are only possible through
++DecisionCorrection.
+ 
+ **Non-advisory copy.** The confirm response and UI copy must not imply
+ recommendation, evaluation, or compliance. The confirmation is a mechanical
+@@ -642,7 +667,7 @@ fields, `confirmed_at`, `selected_policy_version_id`, and the decision ID.
+ The response is constructed from scalar values captured inside the locked
+ transaction, with no post-commit query.
+ 
+-This is recorded as **OD-S3-6**.
++This is recorded as **OD-S3-6** — Resolved by Project Owner — 2026-07-16.
+ 
+ ---
+ 
+@@ -662,10 +687,11 @@ timeline are all accessible.
+ 
+ **Unarchive.**
+ 
+-**Recommended — Owner Approval Required: allow unarchive.** Archive is a
+-soft-hide, not a permanent seal. The user may unarchive to bring a Decision
+-back to the default list. Unarchive sets `archived_at = NULL` and
+-`archive_reason = NULL`. Unarchive is itself an auditable action.
++**Selected: allow unarchive.** Archive is a soft-hide, not a permanent seal.
++The user may unarchive to bring a Decision back to the default list
++(`archived → confirmed`). Unarchive sets `archived_at = NULL` and clears
++`archive_reason`. Unarchive is itself an auditable action. Archived→Draft is
++not allowed.
+ 
+ **Archive reason.**
+ 
+@@ -680,31 +706,26 @@ are stored on the decision identity row.
+ **Actor.** `local-owner`.
+ 
+ **AuditEvent.** Archive creates a `decision.archived` AuditEvent. Unarchive
+-(if approved) creates a `decision.unarchived` AuditEvent.
++creates a `decision.unarchived` AuditEvent.
+ 
+ **Archived + Correction.**
+ 
+-Whether Archived Decisions may receive appended Corrections is recorded as
+-**OD-S3-15** and remains Open — Owner Approval Required. Until OD-S3-15 is
+-resolved, the Correction INSERT trigger, API, UI, and concurrency design must
+-be conditional on the owner's choice:
+-
+-- If Archived Decisions **may** receive Corrections: the Correction trigger
+-  accepts `status = 'confirmed'` or `'archived'`. Archive and Correction can
+-  proceed independently (they touch different tables).
+-- If Archived Decisions **may not** receive Corrections: the Correction trigger
+-  accepts only `status = 'confirmed'`. The user must unarchive first (if
+-  unarchive is approved under OD-S3-7). Archive and Correction may race, and
+-  the Correction would fail with 409 if Archive commits first.
+-
+-The design must not treat either option as approved until the owner decides.
++Archived Decisions **may** receive appended Corrections (OD-S3-15 Option A).
++Archive only affects default list visibility and does not close the factual
++correction capability. The Correction INSERT trigger accepts
++`status = 'confirmed'` or `'archived'` on the referenced Decision. Archive
++and Correction can proceed independently (they touch different tables but
++both lock the same decision identity row and serialize through it). A
++Correction appended to an Archived Decision does **not** change the archived
++status, `archived_at`, or `archive_reason`. The Correction trigger re-validates
++`status IN ('confirmed', 'archived')` after acquiring the Decision lock.
+ 
+ **No physical deletion.**
+ 
+ Archive does not DELETE any row. The decision identity, snapshot, corrections,
+ and audit events all remain in the database.
+ 
+-This is recorded as **OD-S3-7**.
++This is recorded as **OD-S3-7** — Resolved by Project Owner — 2026-07-16.
+ 
+ ---
+ 
+@@ -785,8 +806,7 @@ replacement snapshot or field-level patch.
+ 
+ #### 4.8.3 Recommendation
+ 
+-**Recommended — Owner Approval Required: Approach A (full replacement
+-snapshot correction).**
++**Selected: Approach A (full replacement snapshot correction).**
+ 
+ Rationale:
+ 
+@@ -801,50 +821,51 @@ Rationale:
+ - The correction INSERT trigger can follow the same pattern as the snapshot
+   INSERT trigger.
+ 
+-This is recorded as **OD-S3-8**.
++This is recorded as **OD-S3-8** — Resolved by Project Owner — 2026-07-16.
+ 
+ #### 4.8.4 Owner Decisions on Correction Behavior
+ 
+ **Correctable fields.**
+ 
+-**Recommended — Owner Approval Required: the following fields may be corrected:**
++**Selected: the following user-input fields may be corrected:**
+ `title`, `decision_summary`, `rationale`, `alternatives_considered`,
+ `risks_and_uncertainties`, `evidence_or_sources`, `expected_outcome`,
+-`review_trigger`, `review_date`, `decision_date`, `notes`.
+-
+-The `selected_policy_version_id` must **not** be correctable. The Policy
+-Version reference is a point-in-time record of what was current when the user
+-confirmed. Correcting it would retroactively change the Policy context, which
+-is a historical fact.
+-
+-**Multiple corrections.** Allow multiple Corrections on the same Decision. The
+-latest Correction is the current effective view.
+-
+-**Correcting `decision_date`.** Allow correction. The original
+-`decision_date` is preserved in the Confirmed snapshot. The Correction
+-snapshot stores the corrected date. The audit trail records both.
+-
+-**Correcting archive metadata.** Archive metadata (`archived_at`,
+-`archive_reason`) lives on the decision identity row, not on the snapshot.
+-Correction applies to the snapshot content, not to archive metadata. If the
+-user wants to change `archive_reason`, they can unarchive and re-archive with
+-a new reason.
+-
+-**Correction of correction.** A Correction itself cannot be corrected. If a
+-Correction contains an error, the user appends a new Correction with the
+-correct content. The erroneous Correction remains in the chain (it is
+-immutable).
+-
+-**Original and effective view.** The UI shows:
+-- Original view: the Confirmed snapshot as created at confirm time.
+-- Effective view: the latest Correction's full snapshot, or the original if
+-  no Corrections exist.
+-- Correction history: all Corrections in chronological order.
++`review_trigger`, `decision_date`, `review_date`, `notes`.
++
++The following must **not** be corrected:
++- Decision ID, Household ID
++- `selected_policy_version_id` — the Policy Version reference is a
++  point-in-time record of what was current when the user confirmed. Correcting
++  it would retroactively change the Policy context, which is a historical
++  fact.
++- `created_at`, `confirmed_at`, `actor`
++- AuditEvent records
++- Archive lifecycle metadata (`archived_at`, `archive_reason`) — these live
++  on the decision identity row, not on the snapshot. If the user wants to
++  change `archive_reason`, they unarchive and re-archive with a new reason.
++- Prior Correction records — each Correction is immutable.
++
++**correction_reason** is required on every Correction.
++
++**Multiple corrections** are allowed on the same Decision. Each Correction
++must be based on the current effective snapshot and create a complete
++replacement snapshot. A new Correction does not overwrite or modify old
++Corrections. There is no correction-of-correction reference; all Corrections
++reference the original Confirmed snapshot and the stable Decision identity.
++
++**Correcting `decision_date`.** Allowed. The corrected `decision_date` must
++still comply with the date rules in OD-S3-4 (no future dates).
++
++**Original view** displays the Confirmed snapshot. **Effective view** displays
++the latest Correction's full replacement snapshot, or the original if no
++Corrections exist. Both views are always visible. The latest Correction forms
++the effective view.
+ 
+ **No UPDATE or DELETE on Corrections.** The Correction table has a trigger
+-that forbids all UPDATE and DELETE operations.
++that forbids all UPDATE and DELETE operations. Corrections are append-only,
++immutable, and cannot be deleted.
+ 
+-This is recorded as **OD-S3-9**.
++This is recorded as **OD-S3-9** — Resolved by Project Owner — 2026-07-16.
+ 
+ ---
+ 
+@@ -886,11 +907,10 @@ Audit metadata may contain only:
+ - `changed_fields`: sorted list of field names that changed (for draft updates)
+ - `draft_revision`: integer Draft revision number (for draft events)
+ - `policy_version_number`: integer Policy Version number (for confirm events)
+-- `correction_number`: integer assigned to this Correction at insert time
+-  (conditional on OD-S3-14; if Option A, this is the per-decision sequential
+-  number; if Option B, this is the global sequence number; if Option C, this
+-  field is omitted). This records the number assigned to the individual
+-  Correction being audited, **not** a running total.
++- `correction_number`: per-decision sequential integer assigned to this
++  Correction at insert time (per OD-S3-14: Decision row lock +
++  `MAX(correction_number) + 1`). This records the number assigned to the
++  individual Correction being audited, **not** a running total.
+ 
+ **Excluded from audit metadata.** `correction_count` (total Correction count
+ for the Decision) is **not** included in AuditEvent metadata. In concurrent
+@@ -926,53 +946,9 @@ grows to include Decision lifecycle events alongside existing Household and
+ Policy events. This should not be described as "no change" — it expands the
+ scope of an existing endpoint's response.
+ 
+-Whether to accept this scope expansion, restrict the existing endpoint, or
+-create a separate combined endpoint is part of **OD-S3-10** and remains
+-Open — Owner Approval Required.
+-
+-**Option A: New Decision-filtered endpoint + existing Household timeline
+-includes Decision events.**
+-
+-`GET /api/decisions/{decision_id}/audit-events` returns only events where
+-`entity_type = 'Decision'` and `entity_id = <decision_id>`. The existing
+-`GET /api/households/current/audit-events` naturally includes Decision events
+-without query modification. The owner explicitly approves the Household
+-timeline content expansion.
+-
+-Response size impact: Household timeline responses grow as Decision events
+-accumulate. Pagination (already proposed in this section) mitigates this.
+-
+-**Option B: New Decision-filtered endpoint only + restrict existing Household
+-timeline to current entity boundary.**
+-
+-`GET /api/decisions/{decision_id}/audit-events` returns Decision-filtered
+-events. The existing Household audit endpoint is modified to filter
+-`entity_type IN ('HouseholdProfile', 'InvestmentPolicy')` (or equivalent),
+-excluding Decision events. This preserves the existing resource boundary but
+-requires code modification to the existing endpoint.
+-
+-**Option C: New combined activity endpoint + no change to existing Household
+-audit endpoint.**
+-
+-A new `GET /api/households/current/activity` endpoint returns all event types
+-including Decision events, with pagination. The existing
+-`GET /api/households/current/audit-events` remains unchanged and is eventually
+-deprecated. This avoids modifying an existing endpoint but introduces a new
+-endpoint with overlapping purpose.
+-
+-**Recommended — Owner Approval Required: Option A.** Provide the
+-Decision-filtered endpoint for the Decision detail view, and allow Decision
+-events to naturally appear in the combined Household timeline. This matches
+-the existing Policy pattern: `GET /api/policies/current/audit-events` is
+-Policy-filtered, while `GET /api/households/current/audit-events` includes
+-Policy events.
+-
+-The Decision-filtered endpoint uses the same pagination pattern as the
+-existing Household audit endpoint (sequence_number ordering, limit parameter).
+-
+-This is recorded as **OD-S3-10** (expanded scope: Decision-filtered endpoint,
+-Household timeline Decision event inclusion, and response size/pagination
+-impact).
++**Selected: Option A** (resolved by Project Owner — 2026-07-16). The design
++provides a Decision-filtered endpoint and allows Decision events to naturally
++appear in the combined Household timeline, as detailed in §5.5 above.
+ 
+ ### 5.6 Pagination
+ 
+@@ -987,9 +963,8 @@ existing Household audit endpoint as well. The owner must decide whether to
+ introduce pagination for Decision audit only (and later retrofit Household
+ audit) or to design a unified pagination approach now.
+ 
+-**Recommended — Owner Approval Required: introduce cursor-based pagination
+-for the Decision audit endpoint from the start, using the same
+-`before_sequence_number` + `limit` pattern as Policy version history.** The
++**Selected: cursor-based pagination for the Decision audit endpoint from the
++start, using `before_sequence_number` + `limit` (default 50, max 100).** The
+ existing Household audit endpoint remains unpaginated as a non-blocking
+ Backlog item.
+ 
+@@ -1018,7 +993,7 @@ pattern.
+ 
+ ### 6.2 Recommendation
+ 
+-**Recommended — Owner Approval Required: combine all four layers.**
++**Selected: combine all four layers.**
+ 
+ - Service layer validates lifecycle transitions and field rules.
+ - PostgreSQL triggers enforce immutability on snapshot and correction tables.
+@@ -1044,9 +1019,13 @@ immediately and permanently immutable.
+ - `fn_decision_correction_immutability()`: BEFORE INSERT/UPDATE/DELETE on
+   `decision_corrections`.
+   - INSERT: validate `corrected_entry_id` references a valid Confirmed
+-    snapshot belonging to the same Household.
+-  - UPDATE: **forbid all**.
+-  - DELETE: **forbid all**.
++    snapshot belonging to the same Household. **Also validate that the
++    referenced Decision's current status is `confirmed` or `archived`**
++    (per OD-S3-15: Archived Decisions may receive Corrections; other
++    statuses are rejected). Use a stable SQLSTATE and error identifier for
++    each rejection path.
++  - UPDATE: **forbid all** (return NULL, RAISE with stable error identifier).
++  - DELETE: **forbid all** (return NULL, RAISE with stable error identifier).
+ 
+ **Decision identity lifecycle:**
+ 
+@@ -1054,12 +1033,24 @@ immediately and permanently immutable.
+   - Allow only these status transitions:
+     - `draft` → `confirmed` (at confirm time)
+     - `confirmed` → `archived` (at archive time)
+-    - `archived` → `confirmed` (at unarchive time, if approved)
++    - `archived` → `confirmed` (at unarchive time)
+   - Forbid `confirmed` → `draft` and `archived` → `draft`.
++  - No `discarded` status exists (OD-S3-13 Option A: discard uses DELETE,
++    not status UPDATE).
+   - Allow `archived_at` and `archive_reason` to be set/cleared only during
+     archive/unarchive transitions.
+   - Forbid changes to `created_at`.
+ 
++- `fn_decision_identity_delete_guard()`: BEFORE DELETE on `decisions`.
++  - **Allow only when `status = 'draft'`** (never-Confirmed Draft discard
++    per OD-S3-13 Option A).
++  - **Forbid DELETE when `status = 'confirmed'` or `'archived'`**
++    (return NULL, RAISE with stable error identifier).
++  - The approved discard transaction atomically cleans the Draft row and the
++    identity row within the same transaction. Direct SQL DELETE on a
++    confirmed or archived identity is rejected.
++  - Multi-row DELETE tests must verify the guard fires for each affected row.
++
+ ### 6.4 Constraint Coverage
+ 
+ | Rule | Layer | Mechanism |
+@@ -1079,46 +1070,40 @@ immediately and permanently immutable.
+ 
+ ### 6.5 Correction Numbering
+ 
+-**Status: pending OD-S3-14 — Owner Decision Required.**
++**Selected: per-decision sequential numbering (OD-S3-14 Option A).**
++
++Each Decision displays its Corrections numbered 1, 2, 3, etc. This is NOT
++generated by `GENERATED ALWAYS AS IDENTITY` (which is a table-level sequence).
++Instead, the Correction append transaction:
+ 
+-The Correction table needs a stable ordering mechanism for listing and display.
+-The mechanism choice is recorded as OD-S3-14 and three approaches are compared
+-in §4.8 / OD-S3-14 below.
++1. Acquires `SELECT FOR UPDATE` on the decision identity row.
++2. Within the lock, computes `MAX(correction_number) + 1` filtered to the
++   current `decision_id`.
++3. INSERTs the Correction with the explicit `correction_number` value.
++4. The first Correction for a Decision is numbered 1.
+ 
+-**Important:** PostgreSQL `GENERATED ALWAYS AS IDENTITY` is a **table-level**
+-sequence. It produces globally unique, monotonically increasing integers across
+-all rows in the table, not per-decision sequential numbering. The design must
+-not describe IDENTITY ALWAYS as producing per-decision numbers.
++Enforced by `UNIQUE(decision_id, correction_number)`.
+ 
+-The three OD-S3-14 options are:
++**Concurrency:** Concurrent Corrections on the same Decision are serialized
++through the Decision row lock. Corrections on different Decisions proceed
++independently and concurrently.
+ 
+-- **Option A (per-decision sequential):** Lock the decision identity FOR UPDATE,
+-  compute `MAX(correction_number) + 1` for this decision_id within the lock,
+-  INSERT with an explicit correction_number. Enforce with
+-  `UNIQUE(decision_id, correction_number)`. Concurrent Corrections are
+-  serialized through the decision row lock. This requires the Correction
+-  append transaction to lock the decision identity, not just INSERT into the
+-  correction table.
++**Rollback:** If the transaction fails, the number is not committed. A retry
++recomputes `MAX(correction_number) + 1` within a new lock acquisition.
++Rollback leaves no committed gap.
+ 
+-- **Option B (global database identity):** Use
+-  `correction_sequence_number BIGINT GENERATED ALWAYS AS IDENTITY` as a
+-  table-level sequence. Numbers are globally unique and monotonically
+-  increasing. Rollback gaps are permitted. Numbers are not guaranteed to start
+-  at 1 per decision or be contiguous. Suitable for stable insertion ordering
+-  but not for "Correction 1, 2, 3 per Decision" display.
++**Ordering:** Correction list is ordered by `correction_number ASC`. The
++latest effective snapshot is the Correction with the maximum
++`correction_number`.
+ 
+-- **Option C (no separate business number):** Use the Correction UUID as the
+-  identity. Order by `created_at` + UUID for display. No human-readable
+-  numbering.
++**Audit:** AuditEvent may record the `correction_number` for the individual
++Correction being audited. It must not record or claim it as the final
++`corrections_count`. The `corrections_count` is computed at read time only.
+ 
+-**Recommended — Owner Approval Required: Option A (per-decision sequential).**
+-This provides the clearest user-facing numbering. If approved, the Correction
+-append transaction must lock the decision identity row before computing the
+-next number, and concurrent Corrections on the same Decision are serialized
+-through that lock. The design must not claim that two concurrent Corrections
+-can proceed without any shared lock.
++**Distinction:** `correction_number` is not the AuditEvent `sequence_number`
++and is not commit time.
+ 
+-This is recorded as **OD-S3-14**.
++This is recorded as **OD-S3-14** — Resolved by Project Owner — 2026-07-16.
+ 
+ ### 6.6 Deferred Sealing
+ 
+@@ -1165,21 +1150,26 @@ immutability triggers:
+ - `decision_corrections.decision_id` → `decisions.id`: RESTRICT (if direct FK)
+ - `decision_confirmed_snapshots.selected_policy_version_id` → `investment_policy_versions.id`: RESTRICT
+ - `decision_drafts.policy_id` → `investment_policies.id`: RESTRICT
+-- `decision_drafts.decision_id` → `decisions.id`: behavior depends on OD-S3-13
++- `decision_drafts.decision_id` → `decisions.id`: ON DELETE CASCADE (the
++  approved discard transaction deletes the identity, and the Draft cascades;
++  alternatively the service deletes the Draft first within the same transaction).
++  This FK must never allow cascade deletion of a confirmed or archived
++  identity's Draft — the DELETE guard trigger on `decisions` prevents this.
+ 
+ **AuditEvent:** The existing `audit_events.household_id` FK uses `ON DELETE
+ RESTRICT`. Decision AuditEvents reference the decision identity via
+-`entity_id` (UUID, no FK). If OD-S3-13 Option A deletes the decision identity
++`entity_id` (UUID, no FK). When OD-S3-13 Option A deletes the decision identity
+ on discard, the AuditEvent `entity_id` becomes a dangling UUID reference. This
+ is acceptable because AuditEvents are immutable records — the `entity_id`
+ documents what entity was affected at the time, and the entity may no longer
+ exist. No FK constraint exists on `entity_id` by design.
+ 
+-**Draft FK under OD-S3-13:** If OD-S3-13 Option A (atomic identity deletion)
+-is approved, the `decision_drafts.decision_id` FK must permit cascade deletion
+-of the Draft when the identity is deleted within the same transaction, or the
+-service must explicitly delete the Draft first. If Option B (discarded status)
+-is approved, the Draft FK uses RESTRICT.
++**Draft FK (OD-S3-13 Option A):** The approved discard transaction explicitly
++deletes the Draft row before deleting the decision identity row within the
++same transaction. The `decision_drafts.decision_id` FK uses ON DELETE CASCADE
++as a safety net, but the service drives the deletion order. The DELETE guard
++trigger on `decisions` prevents any DELETE on confirmed or archived identities,
++so cascade never reaches a Draft belonging to a non-draft Decision.
+ 
+ ### 6.10 Trigger Comparison Safety
+ 
+@@ -1231,7 +1221,7 @@ The database must prevent invalid committed states:
+   that `archived_at` is set only during archive transitions and cleared only
+   during unarchive.
+ 
+-**Recommended — Owner Approval Required: add a deferred constraint trigger**
++**Selected: add a deferred constraint trigger**
+ `fn_decision_lifecycle_consistency()` that verifies at commit time:
+ 
+ - Every `status = 'confirmed'` or `'archived'` decision has exactly one
+@@ -1248,7 +1238,7 @@ deferred trigger from Slice 2A.
+ 
+ ### 7.1 Lock Ordering
+ 
+-**Recommended — Owner Approval Required:**
++**Selected:**
+ 
+ `Household → Policy → Policy Version → Decision → Draft → Snapshot/Correction`
+ 
+@@ -1277,15 +1267,12 @@ deadlock.
+ 
+ **Correction append lock order.**
+ 
+-If OD-S3-14 selects per-decision sequential numbering (Option A), the
+-Correction append transaction must also acquire `SELECT FOR UPDATE` on the
+-decision identity row before computing `MAX(correction_number) + 1`. This
+-serializes concurrent Corrections on the same Decision through the decision
+-row lock. The lock order is: `decisions` (FOR UPDATE) → INSERT correction.
+-
+-If OD-S3-14 selects global database identity (Option B) or no business number
+-(Option C), Correction appends on different Decisions proceed independently
+-without a shared lock.
++The Correction append transaction acquires `SELECT FOR UPDATE` on the
++decision identity row before computing `MAX(correction_number) + 1` (per
++OD-S3-14 Option A). This serializes concurrent Corrections on the same
++Decision through the decision row lock. The lock order is:
++`decisions` (FOR UPDATE) → INSERT correction. Corrections on different
++Decisions proceed independently and concurrently.
+ 
+ ### 7.2 Concurrency Scenarios
+ 
+@@ -1310,40 +1297,42 @@ Two simultaneous confirm requests on the same Draft serialize through
+ 
+ **Discard Draft.**
+ 
+-The discard transaction acquires `SELECT FOR UPDATE` on the decision identity
+-and Draft rows, validates `expected_revision` and `status = 'draft'`, then
+-deletes the Draft row. What happens to the decision identity row after discard
+-is recorded as **OD-S3-13** and remains Open — Owner Approval Required:
+-
+-- If OD-S3-13 Option A (atomic identity deletion): the decision identity row
+-  is also deleted in the same transaction (only when `status = 'draft'` and
+-  the Decision has never been Confirmed). An AuditEvent is written before the
+-  identity deletion using the stable entity UUID.
+-- If OD-S3-13 Option B (discarded status): the decision identity row is
+-  updated to `status = 'discarded'`. The identity is preserved. The Draft row
+-  is deleted.
+-
+-The design must not commit to either behavior until the owner decides. The
+-design must prohibit the committed orphan state: `status = 'draft'` with no
+-Draft row.
++Discard applies only to Decisions with `status = 'draft'` that have never
++been Confirmed (OD-S3-13 Option A). The discard transaction:
++
++1. Acquires `SELECT FOR UPDATE` on the decision identity and Draft rows.
++2. Validates `expected_revision` and `status = 'draft'`.
++3. Verifies the Decision has never been Confirmed (no snapshot exists).
++4. INSERTs a `decision.draft.discarded` AuditEvent with the stable Decision
++   UUID as `entity_id` (AuditEvent has no FK to the decision identity, so
++   the event survives identity deletion).
++5. DELETEs the Draft row.
++6. DELETEs the decision identity row.
++7. Commits the transaction.
++
++This is a narrow exception to the general no-hard-delete rule, limited to
++never-Confirmed Drafts only. Confirmed, Archived, Confirmed snapshots,
++Corrections, and AuditEvents are never hard-deleted.
++
++The design prohibits the committed orphan state: `status = 'draft'` with no
++Draft row. The DELETE guard trigger (`fn_decision_identity_delete_guard`)
++rejects DELETE on confirmed or archived identities. No `discarded` or
++`abandoned` lifecycle status is introduced. There is no discarded Decision
++list, detail, or restore capability.
+ 
+ **Confirm vs Discard race.**
+ 
+ Both acquire `SELECT FOR UPDATE` on the decision identity. The first to
+-acquire the lock proceeds; the second finds the state has changed. The loser
+-response depends on OD-S3-13:
++acquire the lock proceeds; the second finds the state has changed:
+ 
+-- If OD-S3-13 Option A (atomic identity deletion): when discard wins, the
+-  decision identity is deleted. A subsequent confirm attempt targeting the
+-  same decision ID returns 404 (entity no longer exists). When confirm wins,
+-  discard returns 409 (Decision no longer in draft status).
+-- If OD-S3-13 Option B (discarded status): when discard wins, the decision
+-  identity has `status = 'discarded'`. A subsequent confirm attempt finds
+-  `status != 'draft'` and returns 409 (lifecycle conflict). When confirm
+-  wins, discard returns 409 (Decision no longer in draft status).
++- When **discard wins** first: the decision identity is atomically deleted.
++  A subsequent confirm attempt targeting the same decision ID returns **404**
++  (entity no longer exists).
++- When **confirm wins** first: the Decision transitions to `status = 'confirmed'`.
++  A subsequent discard attempt finds `status != 'draft'` and returns **409**
++  (lifecycle conflict).
+ 
+-An unrelated missing decision ID (never existed) always returns 404
+-regardless of OD-S3-13.
++An unrelated missing decision ID (never existed) always returns **404**.
+ 
+ **Confirm vs Policy supersession race.**
+ 
+@@ -1358,33 +1347,23 @@ publish — it only reads the Version).
+ **Archive vs Correction race.**
+ 
+ Archive updates the decision identity row (`status`, `archived_at`).
+-Correction inserts into the correction table. These touch different tables.
+-The concurrency outcome depends on **OD-S3-15**:
+-
+-- If OD-S3-15 allows Corrections on Archived Decisions: the Correction INSERT
+-  trigger accepts `status = 'confirmed'` or `'archived'`. Archive and
+-  Correction can proceed independently with no conflict.
+-- If OD-S3-15 forbids Corrections on Archived Decisions: the Correction
+-  INSERT trigger accepts only `status = 'confirmed'`. If Archive commits
+-  first, the Correction fails with 409 (lifecycle conflict). If Correction
+-  commits first, Archive proceeds normally.
++Correction inserts into the correction table and locks the decision identity
++row (`SELECT FOR UPDATE`). Both operations lock the same decision identity
++and serialize through that lock. Since Archived Decisions may receive
++Corrections (OD-S3-15 Option A), the Correction INSERT trigger accepts
++`status = 'confirmed'` or `'archived'`. After the lock is acquired, the
++Correction re-validates the status. Archive and Correction can proceed
++without conflict regardless of ordering.
+ 
+ **Concurrent Corrections.**
+ 
+-The concurrency model depends on **OD-S3-14**:
+-
+-- If OD-S3-14 Option A (per-decision sequential numbering): both Correction
+-  appends acquire `SELECT FOR UPDATE` on the decision identity row. They
+-  serialize through the row lock. Each computes `MAX(correction_number) + 1`
+-  within the lock. Both succeed with distinct per-decision numbers. Rollback
+-  of one does not leave a gap in the other's committed numbering, but a
+-  failed-and-retried Correction may receive a different number on retry.
+-- If OD-S3-14 Option B (global database identity): both Correction appends
+-  INSERT independently. The table-level IDENTITY sequence assigns distinct
+-  `correction_sequence_number` values. Rollback may leave sequence gaps (this
+-  is normal PostgreSQL behavior and is permitted). Both succeed.
+-- If OD-S3-14 Option C (no business number): both INSERT independently with
+-  UUID primary keys. Ordering uses `created_at` + UUID. Both succeed.
++Both Correction appends acquire `SELECT FOR UPDATE` on the decision identity
++row (per OD-S3-14 Option A). They serialize through the row lock. Each
++computes `MAX(correction_number) + 1` within the lock. Both succeed with
++distinct per-decision numbers. Rollback of one does not leave a gap in the
++other's committed numbering. A failed-and-retried Correction may receive a
++different number on retry. Corrections on different Decisions proceed
++independently and concurrently.
+ 
+ ### 7.3 Optimistic Revision
+ 
+@@ -1417,11 +1396,10 @@ Connection pool reuse is handled by `pool_pre_ping=True`.
+ - Discard on a Decision that is no longer in draft status.
+ - Confirm with a Policy Version that is no longer published.
+ - Archive on a Decision that is not confirmed.
+-- Correction append on a Decision whose status does not permit Correction
+-  (conditional on OD-S3-15: if Archived is forbidden, 409 on archived status).
+-- Confirm loser when OD-S3-13 Option B (discarded status): confirm on a
+-  discarded Decision returns 409 (lifecycle conflict). If OD-S3-13 Option A
+-  (atomic deletion), the same loser scenario returns 404 instead.
++- Correction append on a Decision whose status is `draft` (trigger rejects;
++  Correction requires `confirmed` or `archived`).
++- Confirm loser when discard wins (atomic identity deletion): returns 404
++  (entity no longer exists).
+ 
+ ### 7.8 Unrelated IntegrityError
+ 
+@@ -1501,9 +1479,9 @@ applicable.
+ | Request | `{ expected_revision: int }` |
+ | Response | `204` No Content |
+ | Errors | `404` (not found), `409` (stale revision, not in draft status) |
+-| Transaction | SELECT FOR UPDATE decision + draft → validate revision → DELETE draft → handle identity per OD-S3-13 → INSERT AuditEvent |
+-| Identity handling (pending OD-S3-13) | **Option A** (atomic deletion): DELETE decision identity row (only if `status = 'draft'` and never Confirmed). **Option B** (discarded status): UPDATE decision identity `status = 'discarded'`. The design prohibits committed orphan state (`status = 'draft'` with no Draft row) under either option. |
+-| Audit | `decision.draft.discarded`, entity_id = stable Decision UUID (preserved in AuditEvent even if identity is deleted under Option A) |
++| Transaction | SELECT FOR UPDATE decision + draft → validate revision and never-Confirmed → INSERT AuditEvent → DELETE draft → DELETE decision identity → commit |
++| Identity handling | Atomic identity deletion (OD-S3-13 Option A): DELETE decision identity row only when `status = 'draft'` and the Decision has never been Confirmed. The DELETE guard trigger rejects DELETE on confirmed or archived identities. |
++| Audit | `decision.draft.discarded`, entity_id = stable Decision UUID (AuditEvent has no FK to decision identity; the event survives identity deletion) |
+ 
+ ### 8.6 Confirm Draft
+ 
+@@ -1538,14 +1516,11 @@ applicable.
+     snapshot. The recommended approach is to return the original snapshot
+     content in this field (not null), so the client always has a usable
+     effective view without conditional logic.
+-  - If Corrections exist: the effective snapshot is derived from the latest
+-    Correction record. Under OD-S3-8 Option A (full replacement), this is the
+-    latest Correction's complete field snapshot. Under OD-S3-8 Option B (field
+-    patch) or Option C (explanatory only), the effective snapshot shape would
+-    differ conditionally.
++  - If Corrections exist: the effective snapshot is the latest Correction's
++    complete field replacement snapshot (per OD-S3-8: full replacement model).
+ - `latest_correction_metadata`: present only when Corrections exist.
+-  Includes `correction_id` (UUID), `correction_number` (conditional on
+-  OD-S3-14), `created_at`, `correction_reason`. Does **not** include
++  Includes `correction_id` (UUID), `correction_number` (per-decision
++  sequential), `created_at`, `correction_reason`. Does **not** include
+   correction body fields (those are in `effective_snapshot`).
+ - `corrections_count`: total number of Corrections, computed at read time
+   from the Correction list query (not from audit metadata). This is safe
+@@ -1591,10 +1566,10 @@ displays `effective_snapshot`. Both are always consistent with the API.
+ | Method | `POST` |
+ | Path | `/api/decisions/{decision_id}/corrections` |
+ | Request | Full replacement snapshot: all correctable fields + `correction_reason` (required, 1-8000 chars) |
+-| Response | `201` with the new Correction record (all fields, `correction_number` per OD-S3-14, `created_at`) |
+-| Errors | `404` (decision not found), `409` (decision not in correctable status — see OD-S3-15), `422` (schema) |
+-| Transaction | SELECT FOR UPDATE decision → validate status is correctable per OD-S3-15 → compute correction_number per OD-S3-14 → INSERT correction → INSERT AuditEvent |
+-| Audit | `decision.correction.appended`, metadata `{ "correction_number": N }` (see §5.3 — this is the individual number, not a total count) |
++| Response | `201` with the new Correction record (all fields, `correction_number`, `created_at`) |
++| Errors | `404` (decision not found), `409` (decision status is `draft` — Correction requires `confirmed` or `archived`), `422` (schema) |
++| Transaction | SELECT FOR UPDATE decision → validate `status IN ('confirmed', 'archived')` → compute `correction_number = MAX(correction_number)+1` for this decision_id → INSERT correction → INSERT AuditEvent |
++| Audit | `decision.correction.appended`, metadata `{ "correction_number": N }` (see §5.3 — this is the individual Correction's number, not a total count) |
+ | Direct SQL | INSERT-only trigger on corrections table |
+ 
+ ### 8.11 Correction List
+@@ -1603,7 +1578,7 @@ displays `effective_snapshot`. Both are always consistent with the API.
+ |---|---|
+ | Method | `GET` |
+ | Path | `/api/decisions/{decision_id}/corrections` |
+-| Response | `200` with `{ items: [...] }` ordered per OD-S3-14: by `correction_number` ASC if Option A, by `correction_sequence_number` ASC if Option B, or by `created_at` ASC + UUID if Option C |
++| Response | `200` with `{ items: [...] }` ordered by `correction_number` ASC |
+ | Errors | `404` (decision not found) |
+ | Note | `corrections_count` is computed from this list at read time, not from audit metadata |
+ 
+@@ -1706,10 +1681,9 @@ confirm time.
+ snapshot. If no Corrections exist, this is identical to the Original view.
+ 
+ **Correction history.** Chronological list of all Corrections, each showing
+-the correction identifier (per OD-S3-14: `correction_number` if Option A/B,
+-or date/UUID if Option C), `created_at`, `correction_reason`, and the
+-corrected fields. The "Append Correction" action is available on Confirmed
+-Decisions and, conditionally on OD-S3-15, on Archived Decisions.
++`correction_number`, `created_at`, `correction_reason`, and the corrected
++fields. The "Append Correction" action is available on Confirmed Decisions
++and on Archived Decisions.
+ 
+ **Audit timeline.** Chronological list of AuditEvents for this Decision,
+ showing `action`, `occurred_at`, `sequence_number`, and metadata.
+@@ -1723,7 +1697,35 @@ prevent stale audit or correction list responses from overwriting newer state.
+ This follows the same pattern established in Slice 2C for Policy history and
+ audit reads.
+ 
+-### 9.3 UI Rules
++### 9.3 UI Copy and Rules
++
++**Provisional non-advisory copy (OD-S3-11).**
++
++The system continues to operate within the local-only, non-production,
++no-authentication boundary.
++
++Draft/Confirm flow displays:
++
++> "CompoundOS records information you enter. It does not evaluate whether an
++> investment decision is appropriate or suitable. It does not provide
++> investment advice, recommendations, or trade instructions."
++
++Before Confirm:
++
++> "Confirming creates an immutable record linked to the current Published
++> Investment Policy Version. Future changes require an appended Correction;
++> the original record remains unchanged."
++
++Before Correction:
++
++> "Appending a Correction does not replace or delete the original Confirmed
++> Decision. The original and every Correction remain visible in the history."
++
++This copy is provisional MVP text. It has not been reviewed by a lawyer.
++Production, commercial, or remote use requires legal/compliance review.
++No consent persistence or legal conclusion is added.
++
++**UI Rules.**
+ 
+ - Explicit Save for Draft edits. No autosave.
+ - Explicit Confirm with non-advisory copy. No automatic confirmation.
+@@ -1744,11 +1746,10 @@ The following retention rules are maintained from prior slices:
+ - Archived Decisions must not be hard-deleted.
+ - DecisionCorrections must not be hard-deleted.
+ - AuditEvents must not be hard-deleted.
+-- Drafts may be explicitly discarded (which deletes the Draft row). The
+-  disposition of the decision identity row after discard depends on OD-S3-13:
+-  Option A deletes the identity row (only for never-Confirmed decisions);
+-  Option B sets `status = 'discarded'` and preserves the identity. Under
+-  either option, the design prohibits the orphan state where `status = 'draft'`
++- Drafts may be explicitly discarded. Discard atomically deletes both the
++  Draft row and the decision identity row in the same transaction, only when
++  `status = 'draft'` and the Decision has never been Confirmed (OD-S3-13
++  Option A). The design prohibits the orphan state where `status = 'draft'`
+   exists with no corresponding Draft row. Confirmed, Archived, and Corrected
+   decisions must never be hard-deleted.
+ - Database reset (dropping and recreating all tables) is a development tool,
+@@ -1757,9 +1758,8 @@ The following retention rules are maintained from prior slices:
+ - Production retention, compliance deletion, right-to-erasure, and legal hold
+   remain deferred.
+ 
+-If any recommended approach requires new deletion, replacement, or restoration
+-semantics beyond what is described above, it is recorded as a blocking Open
+-Decision and must not be self-approved.
++All deletion, replacement, and restoration semantics are resolved by Project
++Owner decisions (OD-S3-1 through OD-S3-15, 2026-07-16).
+ 
+ ---
+ 
+@@ -1813,9 +1813,10 @@ Decision and must not be self-approved.
+   not present in audit metadata; only `correction_number` (per OD-S3-14).
+ - Pagination: Decision audit endpoint supports cursor-based pagination with
+   `before_sequence_number` and `limit`.
+-- **Standalone Draft discard** (conditional on OD-S3-13): discard a Draft
+-  that has never been Confirmed; verify the final state matches the chosen
+-  option (identity deleted under A, status = discarded under B).
++- **Standalone Draft discard**: discard a Draft that has never been Confirmed;
++  verify the Draft row and the decision identity row are both deleted in the
++  same transaction. Verify the discard AuditEvent retains the stable Decision
++  UUID.
+ - **No orphan Decision identity**: after any discard operation, verify that
+   no decision row exists with `status = 'draft'` and no corresponding Draft
+   row. This is a direct SQL consistency check.
+@@ -1837,22 +1838,21 @@ Decision and must not be self-approved.
+   with a `selected_policy_version_id` from a different Household's Policy;
+   verify the operation is rejected (by composite FK, trigger, or service
+   validation per §6.11).
+-- **Correction numbering across two Decisions** (conditional on OD-S3-14):
+-  append Corrections to two different Decisions and verify numbering
+-  semantics — per-decision sequence (Option A) or global sequence (Option B)
+-  or UUID-only (Option C).
+-- **Correction rollback and gaps**: a Correction append that fails mid-
+-  transaction rolls back completely. Under Option B, verify that sequence
+-  gaps from rollback are permitted and do not break ordering.
+-- **Archived Correction eligibility** (conditional on OD-S3-15): if Option A,
+-  verify Correction can be appended to an Archived Decision; if Option B,
+-  verify Correction on Archived Decision returns 409.
+-- **Archive/Correction race** (conditional on OD-S3-15): if Option B, simulate
+-  concurrent Archive and Correction; verify Correction fails 409 when
+-  Archive commits first.
+-- **Household timeline inclusion/exclusion** (conditional on OD-S3-10):
+-  verify whether Decision events appear in the existing Household audit
+-  timeline per the chosen option.
++- **Correction numbering across two Decisions**: append Corrections to two
++  different Decisions and verify each Decision's Corrections are numbered
++  independently starting from 1 (per-decision sequential).
++- **Correction rollback**: a Correction append that fails mid-transaction
++  rolls back completely. Verify the correction_number is not committed and
++  a retry computes a fresh number under a new lock.
++- **Archived Correction eligibility**: verify Correction can be appended to
++  an Archived Decision (status = 'archived' is correctable). Verify the
++  Correction does not change archived status, archived_at, or archive_reason.
++- **Archive/Correction race**: simulate concurrent Archive and Correction;
++  verify both can succeed regardless of ordering (both statuses are
++  correctable). Verify lock serialization through the decision identity row.
++- **Household timeline inclusion**: verify Decision AuditEvents appear in
++  the existing Household audit timeline. Verify UI labels and tests safely
++  display Decision actions.
+ - **Decision-filtered audit**: verify the Decision-filtered endpoint
+   returns only events for the specified decision_id and respects
+   `household_id` ownership.
+@@ -1863,23 +1863,18 @@ Decision and must not be self-approved.
+   Decisions.
+ - Concurrent Draft update: second update with stale revision returns 409.
+ - Concurrent Confirm: second confirm returns 409 (decision no longer draft).
+-- **Confirm/Discard race** (conditional on OD-S3-13): loser response depends
+-  on chosen option. Under Option A (identity deletion): discard winner causes
+-  confirm to return 404; confirm winner causes discard to return 409. Under
+-  Option B (discarded status): both losers return 409.
++- **Confirm/Discard race**: discard winner (atomic identity deletion) causes
++  confirm to return 404. Confirm winner causes discard to return 409
++  (Decision no longer in draft status).
+ - Confirm/Policy supersession race: confirm fails with 409 if the Policy
+   Version is superseded during the confirm transaction.
+-- **Archive/Correction race** (conditional on OD-S3-15): under Option A both
+-  proceed independently; under Option B, Correction fails 409 if Archive
+-  commits first.
+-- **Concurrent Corrections** (conditional on OD-S3-14): under Option A,
+-  Corrections serialize through Decision row lock and both succeed with
+-  distinct per-decision numbers. Under Option B, both INSERT independently
+-  with distinct global sequence numbers. Under Option C, both INSERT
+-  independently with UUID keys.
+-- **Correction numbering across two Decisions** (conditional on OD-S3-14):
+-  verify per-decision isolation under Option A (each Decision's Corrections
+-  start at 1) vs. global monotonic under Option B.
++- **Archive/Correction race**: verify both proceed without conflict regardless
++  of ordering (Archived status is correctable per OD-S3-15 Option A).
++- **Concurrent Corrections**: Corrections on the same Decision serialize
++  through the Decision row lock and both succeed with distinct per-decision
++  numbers. Corrections on different Decisions proceed concurrently.
++- **Correction numbering across two Decisions**: verify each Decision's
++  Corrections start at 1 and are numbered independently.
+ - **Correction rollback and session reuse**: a Correction append that fails
+   mid-transaction rolls back completely. The database session is reusable
+   for subsequent requests without stale state.
+@@ -1920,41 +1915,38 @@ Decision and must not be self-approved.
+   content. When Corrections exist, the Effective view reflects the latest
+   Correction. The UI must not require the client to guess which view is
+   active — `latest_correction_metadata` presence disambiguates.
+-- **List/detail boundary with discarded identity** (conditional on OD-S3-13):
+-  under Option B (discarded status), verify that discarded Decisions appear
+-  or are hidden from the list per the owner's visibility decision, and that
+-  the detail view handles discarded status gracefully. Under Option A (atomic
+-  deletion), verify discarded Decisions do not appear in list or detail.
++- **List/detail boundary after discard**: verify discarded never-Confirmed
++  Decisions do not appear in list or detail (atomic identity deletion leaves
++  no record to display).
+ - **Session reuse after conflict**: after receiving a 409 (stale revision
+   or lifecycle conflict), verify the UI can issue a fresh request without
+   stale state from the failed attempt.
+ 
+ ---
+ 
+-## 12. Open Decisions
+-
+-All items below are **Open — Owner Decision Required**. None may be marked
+-Resolved without explicit owner approval.
+-
+-| ID | Decision | Recommended | Alternatives | Product Impact | Schema/API/UI Impact | Risk | Blocking |
+-|---|---|---|---|---|---|---|---|
+-| **OD-S3-1** | Draft cardinality: one Draft per Household or multiple independent Drafts | Multiple independent Drafts (Option B) | Singleton Draft (Option A) | Multiple Drafts better match journal use case | List API, list UI, no singleton constraint | Low | Yes — affects API path design and UI navigation |
+-| **OD-S3-2** | Minimum fields and Confirm required fields | As specified in §4.3: title, decision_summary, rationale, decision_date required at confirm; all others optional | Require all 14 fields at confirm | More required fields increase friction | Pydantic validators, CHECK constraints, confirm service | Low | Yes — affects schema and confirm logic |
+-| **OD-S3-3** | Decision classification or tags | No classification initially (Option A) | Fixed neutral categories (Option B), user-defined tags (Option C) | Classification aids filtering but adds complexity | Optional future column addition, no restructuring | Low | No — can be deferred |
+-| **OD-S3-4** | decision_date type, backdating, and future dates | DATE type, allow backdating, allow future dates | TIMESTAMPTZ, forbid backdating, forbid future dates | Restricting dates may prevent legitimate use cases | Column type, Pydantic validator, UI date picker | Low | Yes — affects schema and UI |
+-| **OD-S3-5** | Policy Version reference: current Published only or any historical Version | Current Published only (Option A) | Any historical immutable Version (Option B) | Historical Versions increase mis-selection risk | Confirm service validation, UI Version selector | Medium — historical Version selection may cause confusion | Yes — affects confirm logic and UI |
+-| **OD-S3-6** | Confirm: in-place Draft transition or consume-and-snapshot | Consume Draft, create immutable snapshot (Option B, natural under Approach C) | In-place UPDATE (Option A) | Snapshot provides clean immutability | Two-table confirm transaction, Draft deletion | Low | Yes — affects confirm transaction design |
+-| **OD-S3-7** | Archive and unarchive semantics | Archive = list hiding, allow unarchive, optional archive_reason | No unarchive, required archive_reason | Unarchive adds flexibility | Decision identity columns, archive/unarchive endpoints | Low | Yes — affects archive design |
+-| **OD-S3-8** | Correction data model | Full replacement snapshot (Approach A) | Field-level patch (Approach B), explanatory only (Approach C) | Full snapshot is clearest but highest storage cost | Correction table schema, correction API request shape | Low | Yes — affects correction table and API |
+-| **OD-S3-9** | Correction correctable fields, multiple corrections, and correction-of-correction | All text fields + dates correctable; multiple corrections allowed; no correction-of-correction; `selected_policy_version_id` not correctable | Forbid decision_date correction, allow Policy Version correction | Correcting Policy Version reference retroactively changes context | Correction table fields, correction API validation | Medium — Policy Version correction may confuse provenance | Yes — affects correction validation |
+-| **OD-S3-10** | Audit read: Decision-filtered endpoint, Household timeline scope, and pagination | (A) Decision-filtered endpoint + Household timeline includes Decision events; (B) Decision-filtered only + restrict Household timeline; (C) New combined activity endpoint | (A) matches existing Policy pattern but expands Household timeline scope; (B) preserves existing boundary but requires query change; (C) avoids mutation but adds endpoint | Household timeline content scope, pagination design, response size growth | Audit endpoint query, response shape, possible query filter change | Low–Medium | No — can start with Decision-filtered endpoint |
+-| **OD-S3-11** | Temporary non-advisory, confirm, and correction UI copy | Mechanical confirm copy; correction notice that original is preserved | Richer educational copy | Longer copy may improve user understanding but adds maintenance | UI text strings, i18n preparation | Low | No — copy can evolve |
+-| **OD-S3-12** | Slice 3 implementation splitting | 3A: persistence + immutability, 3B: backend workflow + API, 3C: frontend workflow | Smaller or larger slices | Smaller slices reduce review scope per PR | Branch and PR strategy | Low | No — slicing is a project management decision |
+-| **OD-S3-13** | Draft discard identity semantics: what happens to the decision identity row when a Draft is discarded | (A) Atomic identity deletion — DELETE the identity row only if `status = 'draft'` and never Confirmed; AuditEvent retains the stable UUID; no new lifecycle status. Confirmed/Archived/Correction/AuditEvent are never hard-deleted. (B) Discarded status — UPDATE identity to `status = 'discarded'`, delete Draft row, preserve identity for list/detail/API/UI (define visibility rules and whether reopen is allowed). (C) Keep `status = 'draft'` with no Draft row — **Not Recommended**, produces orphan/inconsistent state with unclear API/constraint/UI semantics. | See §7.2, §8.5, §10 | Determines discard transaction, loser response codes (404 vs 409), list/detail visibility, lifecycle trigger rules, FK cascade behavior | Discard service, decision identity trigger, list/detail API, UI | Medium — affects identity lifecycle and referential integrity | Yes — affects discard transaction, concurrency, and test matrix |
+-| **OD-S3-14** | Correction numbering and ordering | (A) Per-decision sequential: lock Decision, compute `MAX(correction_number)+1`, explicit insert, `UNIQUE(decision_id, correction_number)`. Concurrent Corrections serialize through Decision row lock. Rollback leaves no committed gap. (B) Global database identity: `correction_sequence_number BIGINT GENERATED ALWAYS AS IDENTITY`, table-level monotonic, rollback gaps permitted, not per-decision contiguous. UI must not display as "Correction 1, 2, 3 per Decision" unless separately computed. (C) No separate business number: use Correction UUID as identity, order by `created_at` + UUID, UI displays date/order not human numbers. | See §6.5 | Affects correction concurrency model (shared lock vs independent), API response shape, UI labels, audit metadata | Correction table schema, correction service, correction list API, UI | Medium — Option A requires Decision lock per Correction | Yes — affects correction concurrency, numbering, and test matrix |
+-| **OD-S3-15** | Correction eligibility for Archived Decisions | (A) Archived may receive Corrections — Archive only affects default list visibility; Correction trigger accepts `confirmed` or `archived`; Archive/Correction can proceed concurrently. (B) Archived may not receive Corrections — must unarchive first (if OD-S3-7 allows); Correction trigger accepts only `confirmed`; Archive/Correction race resolves deterministically (Correction fails 409 if Archive commits first). (C) Archive permanently closes Correction — even unarchive does not restore Correction eligibility; requires additional state/history semantics; **Not Recommended** unless owner explicitly requires. | See §4.7 | Affects whether Archived Decisions are read-only or still correctable, archive/unarchive workflow | Correction INSERT trigger, correction API status check, UI Append Correction availability | Low–Medium | Yes — affects correction trigger and API validation |
+-
+-OD-S3-1 through OD-S3-15 remain unresolved.
++## 12. Resolved Owner Decisions
++
++All items below were **Resolved by Project Owner — 2026-07-16**.
++
++| ID | Decision | Selected | Rejected/Deferred | Status |
++|---|---|---|---|---|
++| **OD-S3-1** | Draft cardinality | Multiple independent Drafts; each Draft creates independent Decision identity; API uses Decision ID; UI provides Draft list | Singleton Draft per Household | Resolved — 2026-07-16 |
++| **OD-S3-2** | Minimum fields and Confirm requirements | Confirm requires: title, decision_summary, rationale, decision_date (trim non-blank, valid date). Other fields optional. Draft allows incomplete. Only presence/type/date/length validation. No amount/position/trade/score fields. | Require all 14 fields | Resolved — 2026-07-16 |
++| **OD-S3-3** | Classification and tags | No classification in Slice 3 MVP. No fixed types, no user tags, no system classification, no AI classification. Future classification requires separate approved Sprint. | Fixed categories, user tags | Resolved — 2026-07-16 |
++| **OD-S3-4** | Decision date type and rules | DATE type, strict ISO YYYY-MM-DD. Allow today and past dates. **Forbid future decision_date**. created_at and confirmed_at use system TIMESTAMPTZ. User input decision_date must not impersonate system audit time. review_date is optional DATE, may be future, does not trigger notification/Guardian/automated behavior. All date rules are record integrity rules, not investment rules. | Allow future dates, TIMESTAMPTZ | Resolved — 2026-07-16 |
++| **OD-S3-5** | Policy Version reference | Confirm only references the current Published Policy Version after locking investment_policies row. No Draft Policy, no Superseded, no arbitrary historical Version. If request carries selected_policy_version_id, it must exactly equal the locked current Published Version ID. Mismatch returns 409. Confirmed snapshot permanently stores that Version reference. Subsequent Policy supersession does not alter Decision reference. Future historical reference requires separate approval. | Any historical Version | Resolved — 2026-07-16 |
++| **OD-S3-6** | Confirm semantics | Confirm uses expected_revision + explicit confirmation. Consumes Draft, creates immutable confirmed snapshot. Transaction: lock Policy → re-verify current Published Version → lock Decision → lock Draft → validate revision + required fields → INSERT snapshot → DELETE Draft → UPDATE status to confirmed → INSERT AuditEvent → commit. Rollback on failure. No editable Draft after Confirm. No Confirmed→Draft or reopen. Changes only through DecisionCorrection. | In-place UPDATE | Resolved — 2026-07-16 |
++| **OD-S3-7** | Archive and unarchive | Confirmed Decision can Archive. Archive only affects default list visibility, not deletion. Archived remains readable. Unarchive allowed: archived → confirmed. archive_reason optional, max 4000 Unicode chars. archived_at system-generated. Unarchive clears archived_at and archive_reason. Archive and Unarchive each create AuditEvent. Neither modifies Confirmed snapshot or Correction. No Archived→Draft. No hard delete. | No unarchive, permanent archive | Resolved — 2026-07-16 |
++| **OD-S3-8** | Correction data model | Full replacement snapshot. Each Correction saves all allowed fields' complete effective values after the Correction. Original Confirmed snapshot never changes. Effective view = latest Correction's full replacement snapshot. No Correction: effective_snapshot = original_snapshot. API returns: original_snapshot, effective_snapshot, latest_correction_metadata, corrections_count (read-time computed). No field patch chain. No explanatory-only model. Correction is append-only, immutable, not deletable. | Field patch, explanatory only | Resolved — 2026-07-16 |
++| **OD-S3-9** | Correctable fields and rules | Correctable: title, decision_summary, rationale, alternatives_considered, risks_and_uncertainties, evidence_or_sources, expected_outcome, review_trigger, decision_date, review_date, notes. Not correctable: Decision ID, Household ID, selected_policy_version_id, created_at, confirmed_at, actor, AuditEvent, archive lifecycle metadata, prior Correction records. correction_reason required. Multiple Corrections allowed. Each Correction based on current effective snapshot creating full replacement. No overwrite of old Corrections. No correction-of-correction reference. Original view always visible. Latest Correction = effective view. decision_date correction must follow OD-S3-4 date rules. | Forbid decision_date correction | Resolved — 2026-07-16 |
++| **OD-S3-10** | Audit reads and Household timeline | (1) New Decision-filtered audit endpoint: reads only specified Decision's AuditEvents, before_sequence_number cursor, limit default 50 max 100, database selects by DESC returns ASC. (2) Decision AuditEvents enter existing Household timeline — explicitly approved user-visible resource content expansion. Update UI labels/tests in Slice 3 to safely display Decision actions. No change to Policy-filtered audit endpoint. (3) Household timeline full cursor pagination not in Slice 3; existing Backlog preserved. (4) sequence_number is database insertion sequence, not commit order, may have rollback gaps, client cannot set. | Restrict Household timeline, new combined endpoint | Resolved — 2026-07-16 |
++| **OD-S3-11** | Provisional UI copy | Local-only, non-production, no-authentication boundary. Three provisional MVP copy texts (Draft/Confirm flow, Confirm notice, Correction notice). Not lawyer-reviewed. Production/commercial/remote use requires legal/compliance review. No consent persistence or legal conclusion added. | Richer educational copy | Resolved — 2026-07-16 |
++| **OD-S3-12** | Implementation split | Three independent Slices: 3A (persistence + immutability), 3B (backend workflow + API), 3C (frontend workflow). Each requires separate explicit authorization, independent branch and Draft PR, full CI, independent review, merge after approval. No later Slice starts early. Technical Design merge does not constitute Slice 3A authorization. | Smaller/larger slices | Resolved — 2026-07-16 |
++| **OD-S3-13** | Draft discard identity semantics | Option A: Atomic identity deletion for never-Confirmed Draft. Discard only when status=draft and never Confirmed. Same transaction deletes Draft and Decision identity. AuditEvent retains stable Decision UUID (no FK). Confirmed/Archived/snapshot/Correction/AuditEvent never hard-deleted. Discard locks Decision+Draft, checks expected_revision. No discarded/abandoned lifecycle status. No discarded Decision list/detail/restore. Discard wins→Confirm 404. Confirm wins→Discard 409. Unrelated missing ID always 404. DELETE guard trigger allows only status=draft. | Discarded status, orphan identity | Resolved — 2026-07-16 |
++| **OD-S3-14** | Correction numbering | Option A: Per-decision sequential. SELECT FOR UPDATE on Decision identity before append. Compute MAX(correction_number)+1 within lock. First Correction = 1. UNIQUE(decision_id, correction_number). Same-Decision concurrent Corrections serialize through Decision row lock. Different-Decision Corrections concurrent. List by correction_number ASC. Latest effective = max correction_number. Failed transaction: number not committed, retry recomputes. AuditEvent may record correction_number but not total count. corrections_count computed at read time only. Not AuditEvent sequence_number, not commit time. | Global IDENTITY, UUID | Resolved — 2026-07-16 |
++| **OD-S3-15** | Archived Decision correction eligibility | Option A: Archived Decision still allows appended Correction. Archive only affects default list visibility. Correction trigger allows Decision status confirmed or archived. Archived detail can display Append Correction. Correction does not change archived status, archived_at, or archive_reason. Archive and Correction lock same Decision identity and serialize through it. Correction re-validates status after lock. Future rule change requires separate approval. | Forbidden (must unarchive first), permanently closed | Resolved — 2026-07-16 |
++
++OD-S3-1 through OD-S3-15 are all Resolved by Project Owner — 2026-07-16.
+ 
+ ---
+ 
+@@ -1997,7 +1989,8 @@ implementation complexity warrants it.
+ **Important:** Merging this Technical Design does **not** constitute Slice 3A
+ implementation authorization. Each implementation slice requires separate
+ explicit authorization. Each implementation slice requires independent review
+-after completion.
++after completion. Slice 3 Implementation remains **Not Authorized**. Slice 3A,
++3B, and 3C remain **Not Started**.
+ 
+ ---
+ 
+@@ -2068,17 +2061,17 @@ The following are explicitly out of scope for Slice 3:
+ 
+ ## 18. Document Status
+ 
+-This document is a **proposal** on the
+-`planning/sprint-002-slice-3-decision-journal` branch. It is not merged and
+-does not authorize implementation.
++This document records **Resolved Owner Decisions** as of 2026-07-16 on the
++`planning/sprint-002-slice-3-decision-journal` branch (PR #10, Draft). It is
++not merged and does not authorize implementation.
++
++OD-S3-1 through OD-S3-15 are all Resolved.
+ 
+ Next steps:
+ 
+-1. Independent Technical Design Review.
+-2. Project owner answers OD-S3-1 through OD-S3-15.
+-3. Design revisions based on review and owner decisions.
+-4. Merge approved design into `main`.
+-5. Only then: separate decision on whether to authorize Slice 3A.
++1. Final consistency review of Owner Decision integration.
++2. Merge approved design into `main` (does not authorize Slice 3A).
++3. Only then: separate decision on whether to authorize Slice 3A.
+ 
+ ---
+ 
