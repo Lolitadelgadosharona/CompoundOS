@@ -12,6 +12,7 @@ export default function HomePage() {
         <Link href="/policy">Open Investment Policy</Link>
         <Link href="/portfolio">Open Portfolio</Link>
         <Link href="/decisions">Open Decision Journal</Link>
+        <Link href="/guardian">Open Guardian Monitoring</Link>
       </nav>
     </main>
   );
