@@ -26,6 +26,7 @@ from apps.api.services.portfolios import (
     DraftConflictError,
     DraftNotFoundError,
     HouseholdRequiredError,
+    InvalidCashUnitPriceError,
     NoChangesError,
     PortfolioAlreadyExistsError,
     PortfolioNotFoundError,
@@ -62,8 +63,10 @@ def _translate(exc: Exception) -> HTTPException:
         )
     if isinstance(exc, NoChangesError):
         return HTTPException(status_code=400, detail="No portfolio changes provided")
-    if isinstance(exc, ValueError):
-        return HTTPException(status_code=422, detail=str(exc))
+    if isinstance(exc, InvalidCashUnitPriceError):
+        return HTTPException(
+            status_code=422, detail="Cash holdings must have unit_price = 1.00"
+        )
     raise exc
 
 

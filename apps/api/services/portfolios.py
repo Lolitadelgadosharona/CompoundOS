@@ -82,6 +82,11 @@ class SnapshotNotFoundError(PortfolioError):
     pass
 
 
+class InvalidCashUnitPriceError(PortfolioError):
+    """Cash holdings must have unit_price = 1.00 (OD-S3-012)."""
+    pass
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -176,7 +181,7 @@ def create_portfolio(
 ) -> tuple[Portfolio, PortfolioDraft, list[PortfolioDraftHolding]]:
     """Create portfolio with initial draft. Idempotent: returns existing if present."""
     try:
-        with session.begin_nested():
+        with session.begin():
             household = _require_household(session)
             try:
                 portfolio = add_portfolio(session, household.id)
@@ -209,16 +214,16 @@ def read_or_create_portfolio(
 
     Returns (portfolio, draft, holdings, created).
     """
-    household = _require_household(session)
-    existing = get_portfolio(session, household.id)
-    if existing is not None:
-        draft = get_draft(session, existing.id)
-        if draft is not None:
-            holdings = list_draft_holdings(session, existing.id)
-            return existing, draft, holdings, False
-        # Portfolio exists but no draft (e.g., after confirm).
-        # Create a new draft (via internal transaction).
-        with session.begin_nested():
+    with session.begin():
+        household = _require_household(session)
+        existing = get_portfolio(session, household.id)
+        if existing is not None:
+            draft = get_draft(session, existing.id)
+            if draft is not None:
+                holdings = list_draft_holdings(session, existing.id)
+                return existing, draft, holdings, False
+            # Portfolio exists but no draft (e.g., after confirm).
+            # Create a new draft.
             draft = add_draft(session, existing.id)
             add_portfolio_audit_event(
                 session,
@@ -227,8 +232,8 @@ def read_or_create_portfolio(
                 action="portfolio.draft.created",
                 metadata={"draft_revision": draft.expected_revision},
             )
-        return existing, draft, [], True
-    return (*create_portfolio(session), True)
+            return existing, draft, [], True
+        return (*create_portfolio(session), True)
 
 
 def read_current_state(
@@ -256,7 +261,7 @@ def read_current_state(
 def update_draft(
     session: Session, payload: PortfolioDraftUpdate
 ) -> PortfolioDraftResponse:
-    with session.begin_nested():
+    with session.begin():
         household = _require_household(session)
         portfolio = _require_portfolio(session, household.id, for_update=True)
         draft = _require_draft(session, portfolio.id, for_update=True)
@@ -298,7 +303,7 @@ def update_draft(
 def replace_holdings(
     session: Session, payload: HoldingsReplaceRequest
 ) -> PortfolioDraftResponse:
-    with session.begin_nested():
+    with session.begin():
         household = _require_household(session)
         portfolio = _require_portfolio(session, household.id, for_update=True)
         draft = _require_draft(session, portfolio.id, for_update=True)
@@ -314,7 +319,7 @@ def replace_holdings(
         # Cash holdings must have unit_price = 1.00 (OD-S3-012)
         for v in values:
             if v["asset_category"].strip().lower() == "cash" and v["unit_price"] != Decimal("1.00"):
-                raise ValueError("Cash holdings must have unit_price = 1.00")
+                raise InvalidCashUnitPriceError
 
         # Idempotency check
         existing_sig = [
@@ -366,7 +371,7 @@ def replace_holdings(
 def confirm_draft(
     session: Session, payload: ConfirmDraftRequest
 ) -> PortfolioSnapshotDetail:
-    with session.begin_nested():
+    with session.begin():
         household = _require_household(session)
         portfolio = _require_portfolio(session, household.id, for_update=True)
         draft = _require_draft(session, portfolio.id, for_update=True)
@@ -437,7 +442,7 @@ def confirm_draft(
 def discard_draft(
     session: Session, payload: DiscardDraftRequest
 ) -> Optional[PortfolioSnapshotDetail]:
-    with session.begin_nested():
+    with session.begin():
         household = _require_household(session)
         portfolio = _require_portfolio(session, household.id, for_update=True)
         draft = _require_draft(session, portfolio.id, for_update=True)

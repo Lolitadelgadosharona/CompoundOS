@@ -360,6 +360,10 @@ def upgrade() -> None:
             "sort_order >= 0",
             name="ck_portfolio_draft_holdings_sort_order_nonnegative",
         ),
+        sa.CheckConstraint(
+            "LOWER(asset_category) != 'cash' OR unit_price = 1.00",
+            name="ck_portfolio_draft_holdings_cash_unit_price",
+        ),
         sa.ForeignKeyConstraint(
             ["portfolio_id"],
             ["portfolio_drafts.portfolio_id"],
@@ -448,6 +452,10 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "sort_order >= 0",
             name="ck_portfolio_snapshot_holdings_sort_order_nonnegative",
+        ),
+        sa.CheckConstraint(
+            "LOWER(asset_category) != 'cash' OR unit_price = 1.00",
+            name="ck_portfolio_snapshot_holdings_cash_unit_price",
         ),
         sa.ForeignKeyConstraint(
             ["snapshot_id"],
