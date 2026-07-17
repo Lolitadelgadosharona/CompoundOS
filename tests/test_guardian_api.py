@@ -646,3 +646,62 @@ class TestAuditAndEventIsolation:
         """Old /runs/{run_id} path returns 404."""
         resp = api_client.get("/api/guardian/runs/00000000-0000-0000-0000-000000000001")
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Cross-request discard tests — verify data persists after HTTP response
+# ---------------------------------------------------------------------------
+
+
+class TestDiscardPersistence:
+    """Discard data must survive session close (real commit)."""
+
+    def test_discard_never_confirmed_deletes_all(self, api_client) -> None:
+        """Discard a never-confirmed check — identity + draft gone."""
+        _create_household_via_api(api_client)
+        resp = api_client.post("/api/guardian/checks", json={
+            "name": "DelAll", "check_type": "drift",
+            "threshold_value": "5.00",
+            "target_category": "eq", "target_holding_category": "eq",
+        })
+        cid = resp.json()["identity"]["id"]
+        assert resp.status_code == 201
+
+        # Discard via HTTP
+        discard_resp = api_client.post(f"/api/guardian/checks/{cid}/draft/discard",
+                                        json={"confirmation": True})
+        assert discard_resp.status_code == 204
+
+        # New request — GET should 404
+        get_resp = api_client.get(f"/api/guardian/checks/{cid}")
+        assert get_resp.status_code == 404
+
+    def test_discard_after_confirm_retains_identity(self, api_client) -> None:
+        """Discard after confirm deletes draft but retains identity + version."""
+        _create_household_via_api(api_client)
+        resp = api_client.post("/api/guardian/checks", json={
+            "name": "KeepIdent", "check_type": "drift",
+            "threshold_value": "5.00",
+            "target_category": "eq", "target_holding_category": "eq",
+        })
+        cid = resp.json()["identity"]["id"]
+        draft_rev = resp.json()["draft"]["expected_revision"]
+
+        # Confirm via HTTP
+        confirm_resp = api_client.post(f"/api/guardian/checks/{cid}/draft/confirm",
+                                        json={"expected_revision": draft_rev, "confirmation": True})
+        assert confirm_resp.status_code == 200
+        assert confirm_resp.json()["latest_version"]["version_number"] == 1
+
+        # Discard via HTTP
+        discard_resp = api_client.post(f"/api/guardian/checks/{cid}/draft/discard",
+                                        json={"confirmation": True})
+        assert discard_resp.status_code == 204
+
+        # New request — identity exists, draft gone, version retained
+        get_resp = api_client.get(f"/api/guardian/checks/{cid}")
+        assert get_resp.status_code == 200
+        body = get_resp.json()
+        assert body["identity"]["status"] == "draft"
+        assert body["draft"] is None
+        assert body["latest_version"]["version_number"] == 1

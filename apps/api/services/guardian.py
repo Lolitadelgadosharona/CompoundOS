@@ -354,8 +354,7 @@ def discard_guardian_check(session: Session, check_id: UUID) -> None:
         _audit(session, hid, "guardian.check.deleted", str(cid),
                {"had_confirmed": False})
 
-
-# ---------------------------------------------------------------------------
+    session.commit()
 # Evaluation engine — single transaction
 # ---------------------------------------------------------------------------
 
