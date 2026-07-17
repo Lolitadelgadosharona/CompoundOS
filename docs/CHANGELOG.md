@@ -1,5 +1,44 @@
 # Changelog
 
+## Sprint 003 — Portfolio Snapshot + Holdings Foundation — Done (2026-07-17)
+
+### Slice A: Portfolio Persistence (PR #20, e9743a5)
+- Alembic revision 0004: portfolios, portfolio_drafts, portfolio_draft_holdings,
+  portfolio_snapshots, portfolio_snapshot_holdings
+- Named CHECK and UNIQUE constraints on all five tables
+- PL/pgSQL triggers: fn_portfolio_snapshot_immutability,
+  fn_portfolio_draft_consistency, fn_portfolio_lifecycle
+- SQLAlchemy ORM models aligned with migration
+- 130 real PostgreSQL tests (0 skipped)
+
+### Slice B: Portfolio Backend API (PR #21)
+- Pydantic request/response schemas with decimal-string contracts
+- Repository queries with FOR UPDATE support
+- Service transaction boundaries with lock ordering (Household→Portfolio→Draft)
+- 9 endpoints under /api/portfolio: POST /draft, GET, PATCH /draft,
+  PUT /draft/holdings, POST /draft/confirm, POST /draft/discard,
+  GET /snapshots, GET /snapshots/{id}, GET /audit
+- Concurrency tests, rollback tests, revision conflict tests
+- Portfolio-filtered AuditEvent reads
+- Cash unit_price = 1.00 enforcement via migration 0005 (additive CHECK)
+- Controlled status transition current→superseded via migration 0006 (additive)
+- Future-proof JSONB row comparison in immutability trigger
+
+### Slice C: Portfolio Frontend (PR #22, 0a841d4)
+- /portfolio page with typed Portfolio API client
+- All 18 UI states from Technical Design §11 covered
+- BigInt-based client-side total_value estimation (non-authoritative)
+- Decimal strings throughout API boundary; no Number/parseFloat
+- Cash unit_price 1.00 with neutral technical hint
+- Zero holdings warning with explicit confirmation
+- 409 conflict preserves local input with explicit reload
+- Separate abort controllers for core, history, audit, and snapshot detail
+- Pre-confirm view state restoration for cancel from review
+- 80 new frontend tests (55 API client + 25 component)
+- Independent blind review: APPROVE WITH NON-BLOCKING FOLLOWUP
+  (0 BLOCKER, 0 HIGH, 0 MEDIUM after fix; 2 LOW all resolved)
+- CI: 6/6 checks green on final HEAD before merge
+
 ## [Unreleased] - Sprint 003 Slice B (In Review)
 
 ### Added
