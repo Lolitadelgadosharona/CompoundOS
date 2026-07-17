@@ -65,8 +65,9 @@ def create_household(client: TestClient) -> None:
 
 
 def create_portfolio(client: TestClient) -> dict:
+    """First creation — always expects 201."""
     response = client.post("/api/portfolio/draft", json={})
-    assert response.status_code in (200, 201), response.text
+    assert response.status_code == 201, response.text
     return response.json()
 
 
@@ -77,7 +78,7 @@ def replace_holdings_call(
         "/api/portfolio/draft/holdings",
         json={"expected_revision": expected_revision, "items": items},
     )
-    assert response.status_code in (200, 400), response.text
+    assert response.status_code == 200, response.text
     return response.json()
 
 
@@ -129,7 +130,10 @@ def test_create_and_get_portfolio(api_client: TestClient) -> None:
 def test_create_portfolio_is_idempotent(api_client: TestClient) -> None:
     create_household(api_client)
     first = create_portfolio(api_client)
-    second = create_portfolio(api_client)
+    # Second call — draft already exists, idempotent
+    r = api_client.post("/api/portfolio/draft", json={})
+    assert r.status_code == 200, r.text
+    second = r.json()
     assert second["portfolio"]["id"] == first["portfolio"]["id"]
     assert second["draft"]["portfolio_id"] == first["draft"]["portfolio_id"]
     assert second["draft"]["expected_revision"] == 1

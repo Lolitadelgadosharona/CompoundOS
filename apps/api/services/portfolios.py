@@ -31,6 +31,7 @@ from apps.api.repositories.portfolios import (
     add_draft,
     add_portfolio,
     add_portfolio_audit_event,
+    get_current_snapshot,
     get_draft,
     get_latest_snapshot,
     get_portfolio,
@@ -195,8 +196,8 @@ def read_or_create_portfolio(
                 return existing, draft, holdings, False
 
             # Portfolio exists but no draft (e.g., after confirm).
-            # Must set status back to 'draft' — deferred trigger
-            # fn_portfolio_draft_holdings_consistency rejects active+draft.
+            # active → draft transition (0004 fn_portfolio_lifecycle allows this).
+            # Deferred trigger needs draft status to match draft existence at COMMIT.
             existing.status = "draft"
             draft = add_draft(session, existing.id)
             add_portfolio_audit_event(
@@ -369,10 +370,11 @@ def confirm_draft(
 
         version_number = next_version_number(session, portfolio.id)
 
-        # New snapshot becomes the current; prior snapshots remain
-        # with their original status (fn_portfolio_snapshot_immutability
-        # rejects ALL UPDATE operations, so we cannot set status='superseded').
-        # "Current" is determined by MAX(version_number).
+        # Supersede prior current snapshot (0006 allows status-only UPDATE)
+        current_snap = get_current_snapshot(session, portfolio.id)
+        if current_snap is not None:
+            current_snap.status = "superseded"
+            session.flush()
 
         now = datetime.now(timezone.utc)
         snapshot = PortfolioSnapshot(
