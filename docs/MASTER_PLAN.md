@@ -22,10 +22,10 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   - Slice 3B: Decision Journal Backend Workflow and API — Done
   - Slice 3C: Decision Journal Frontend — Done
   - Safe Autopilot Foundation — Done
-- Sprint 003: Portfolio Snapshot + Holdings Foundation — In Progress
+- Sprint 003: Portfolio Snapshot + Holdings Foundation — Done
   - Slice A (Persistence): Done (PR #20, merge e9743a5)
-  - Slice B (Backend API): In Review (PR #21)
-  - Slice C (Frontend): Not Authorized / Not Started
+  - Slice B (Backend API): Done (PR #21)
+  - Slice C (Frontend): Done (PR #22, merge 0a841d4)
 - Sprint 004: Not Authorized / Not Started
 
 ## Backlog
@@ -51,7 +51,7 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 
 ## In Progress
 
-- Sprint 003: Not Authorized / Not Started
+- Sprint 004: Not Authorized / Not Started
 
 ## Done
 
@@ -133,6 +133,17 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   (circuit breaker open). Auto-merge globally disabled pending independent
   security review. PR #13 squash-merged after two rounds of independent blind
   review with all BLOCKER/HIGH/MEDIUM findings resolved.
+- Sprint 003: Portfolio Snapshot + Holdings Foundation — Done.
+- Sprint 003 Slice A: Portfolio Persistence (PR #20, e9743a5) — Alembic
+  revision 0004 with five tables, named constraints, PL/pgSQL triggers,
+  ORM models, 130 real PostgreSQL tests.
+- Sprint 003 Slice B: Portfolio Backend API (PR #21) — Pydantic schemas,
+  decimal-string contracts, repository queries, service transactions,
+  all /api/portfolio endpoints.
+- Sprint 003 Slice C: Portfolio Frontend (PR #22, 0a841d4) — /portfolio
+  page with typed API client, draft editor, snapshot history and detail,
+  audit timeline, 80 new frontend tests (55 API + 25 component), BigInt-based
+  client-side estimation, separate abort controllers for core/history/audit.
 
 ## Decision Log
 
@@ -400,6 +411,12 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - 2026-07-16: Slice 3B adds no frontend, migration, dependency, Compose, CI,
   authentication, recommendation, Guardian, AI, Broker, trading, or Slice 3C
   behavior.
+- 2026-07-17: Sprint 003 Slice C (Portfolio Frontend) authorized by Owner.
+  Implemented /portfolio page with typed API client, decimal-string contracts,
+  18 UI states from Technical Design §11, 80 new frontend tests. Independent
+  blind review concluded APPROVE WITH NON-BLOCKING FOLLOWUP (0 BLOCKER/HIGH,
+  zero MEDIUM after fix). PR #22 squash-merged as 0a841d4. Sprint 003 is Done.
+  Sprint 004 remains Not Authorized.
 - 2026-07-16: Slice 3B enters Review. Sprint 002 remains In Progress. Slice 3C
   remains Not Authorized and Not Started.
 - 2026-07-16: Slice 3B review completed — APPROVE WITH NON-BLOCKING FOLLOW-UP.

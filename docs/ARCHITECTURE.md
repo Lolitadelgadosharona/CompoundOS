@@ -298,3 +298,37 @@ and CI toolchain.
   holdings — `asset_category != 'cash' OR unit_price = 1.00`.
 - 0006 (`portfolio_snapshot_status`): controlled status transition.
   All migrations are additive after 0004; 0004 and 0005 are unchanged.
+
+## Sprint 003 Slice C Architecture
+
+Slice C adds the approved browser workflow without changing the Slice B API
+or Slice A persistence design:
+
+- `frontend/app/portfolio/page.tsx` defines the App Router boundary and
+  delegates all interactive behavior to a client component.
+- `frontend/app/portfolio/portfolio-client.tsx` keeps the saved server draft
+  and latest snapshot separate from local holding edits. The core workspace,
+  snapshot history, selected detail, and audit timeline have independent
+  loading and error states.
+- `frontend/lib/portfolio-api.ts` is the typed browser boundary for the
+  approved Portfolio endpoints. Reads may be aborted to prevent stale
+  responses from replacing newer state; mutations are never automatically
+  retried. Decimal strings are used for all numeric values; `estimateTotal`
+  uses BigInt arithmetic and is explicitly labeled non-authoritative.
+- Core draft/holdings state is isolated from auxiliary history/audit
+  failures. History, audit, and snapshot detail each use separate abort
+  controllers with generation guards. 409 conflicts preserve local input
+  and offer explicit reload.
+- Held metadata saves send only changed fields with expected revision.
+  Successful responses become the new saved draft; failed mutations retain
+  local edits. The workspace owns holdings-dirty and metadata-dirty flags.
+  Confirm is disabled while either editor differs from its latest server
+  snapshot, and any reload that would replace dirty editor state requires
+  explicit page-level confirmation.
+- Snapshot history is read-only and cursor-paginated newest first. Audit
+  events preserve server-returned sequence order. Both auxiliary resources
+  have GET-only recovery that never replays a mutation.
+
+Slice C adds no backend module, database change, dependency, authentication,
+recommendation, Guardian, AI, Broker, trading, market data, or Sprint 004
+behavior.
