@@ -421,12 +421,12 @@ def add_audit_event(
     entity_id: str,
     metadata: dict,
 ) -> None:
-    from apps.api.models import AuditEvent
+    import json
     session.execute(
         text(
             "INSERT INTO audit_events (id, household_id, actor, action,"
             " entity_type, entity_id, metadata, occurred_at)"
-            " VALUES (:id, :hid, :actor, :action, :etype, :eid, :meta, :now)"
+            " VALUES (:id, :hid, :actor, :action, :etype, :eid, :meta::jsonb, :now)"
         ),
         {
             "id": id,
@@ -435,7 +435,7 @@ def add_audit_event(
             "action": action,
             "etype": entity_type,
             "eid": str(entity_id),
-            "meta": metadata,
+            "meta": json.dumps(metadata),
             "now": datetime.now(timezone.utc),
         },
     )
