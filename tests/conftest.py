@@ -23,13 +23,28 @@ from apps.api.main import app  # noqa: E402
 
 def postgres_test_database_url() -> str:
     database_url = os.environ.get("TEST_DATABASE_URL", "").strip()
-    if database_url:
-        return database_url
-    if os.environ.get("COMPOUNDOS_REQUIRE_POSTGRES_TESTS") == "1":
+    if not database_url:
+        if os.environ.get("COMPOUNDOS_REQUIRE_POSTGRES_TESTS") == "1":
+            pytest.fail(
+                "CompoundOS CI requires real PostgreSQL tests,"
+                " but TEST_DATABASE_URL is missing"
+            )
+        pytest.skip("TEST_DATABASE_URL is required for PostgreSQL integration tests")
+    # Safety: database name must end with _test
+    db_name = _extract_db_name(database_url)
+    if not db_name.endswith("_test"):
         pytest.fail(
-            "CompoundOS CI requires real PostgreSQL tests, but TEST_DATABASE_URL is missing"
+            f"TEST_DATABASE_URL points to database '{db_name}',"
+            " which does not end with '_test'."
+            " Destructive tests must never run against a non-test database."
         )
-    pytest.skip("TEST_DATABASE_URL is required for PostgreSQL integration tests")
+    return database_url
+
+
+def _extract_db_name(url: str) -> str:
+    """Extract database name from a SQLAlchemy database URL."""
+    # Format: postgresql+psycopg://user:pass@host:port/dbname
+    return url.rsplit("/", 1)[-1].split("?")[0]
 
 
 @pytest.fixture(scope="session")

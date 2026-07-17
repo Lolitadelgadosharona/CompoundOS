@@ -381,6 +381,7 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.func.now(),
         ),
+        sa.Column("check_type", sa.Text(), nullable=False),
         sa.Column("drift_pp", sa.Numeric(5, 2), nullable=True),
         sa.Column("exposure_pct", sa.Numeric(5, 2), nullable=True),
         sa.Column("staleness_days_actual", sa.Integer(), nullable=True),
@@ -392,14 +393,19 @@ def upgrade() -> None:
         ),
         sa.Column("as_of_date", sa.Date(), nullable=False),
         sa.PrimaryKeyConstraint("id", name="pk_guardian_events"),
-        sa.UniqueConstraint(
-            "check_version_id", "policy_version_id", "portfolio_snapshot_id",
-            name="uq_guardian_events_drift_exposure",
-        ),
-        sa.UniqueConstraint(
-            "check_version_id", "portfolio_snapshot_id", "as_of_date",
-            name="uq_guardian_events_staleness",
-        ),
+    )
+
+    op.execute(
+        "CREATE UNIQUE INDEX uq_guardian_events_drift_exposure"
+        " ON guardian_events"
+        " (check_version_id, policy_version_id, portfolio_snapshot_id)"
+        " WHERE check_type IN ('drift', 'category_exposure')"
+    )
+    op.execute(
+        "CREATE UNIQUE INDEX uq_guardian_events_staleness"
+        " ON guardian_events"
+        " (check_version_id, portfolio_snapshot_id, as_of_date)"
+        " WHERE check_type = 'staleness'"
     )
 
     op.execute(
@@ -429,6 +435,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.execute("DROP INDEX IF EXISTS uq_guardian_events_drift_exposure")
+    op.execute("DROP INDEX IF EXISTS uq_guardian_events_staleness")
     op.execute("DROP TRIGGER IF EXISTS trg_guardian_events_immutability ON guardian_events")
     op.execute("DROP TRIGGER IF EXISTS trg_guardian_evaluation_runs_immutability ON guardian_evaluation_runs")
     op.execute("DROP TRIGGER IF EXISTS trg_guardian_check_confirmed_immutability ON guardian_check_confirmed")

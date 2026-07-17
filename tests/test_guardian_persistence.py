@@ -1,3 +1,7 @@
+# ruff: noqa: E501
+# PostgreSQL integration tests embed SQL strings that exceed the line length limit.
+# This follows the same convention as other test files in the repository.
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -12,6 +16,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError, OperationalError
 
 pytestmark = pytest.mark.postgres
+
 
 HEAD_REVISION = "0007_guardian_foundation"
 PREVIOUS_REVISION = "0006_portfolio_snapshot_status"
@@ -247,24 +252,27 @@ def _create_policy_version(conn, pvid: str, hid: str) -> None:
     )
 
 
-def _create_portfolio_snapshot(conn, sid: str, hid: str) -> None:
-    """Create the minimum FK chain: portfolio → snapshot."""
-    port_id = str(uuid4())
+def _create_portfolio_snapshot(
+    conn, sid: str, hid: str,
+    existing_portfolio_id: str = None, version: int = 1,
+) -> str:
+    """Create the minimum FK chain: portfolio → snapshot. Returns portfolio_id."""
+    if existing_portfolio_id is not None:
+        port_id = existing_portfolio_id
+    else:
+        port_id = str(uuid4())
+        conn.execute(
+            text("INSERT INTO portfolios (id, household_id, status) VALUES (:id, :hid, 'active')"),
+            {"id": port_id, "hid": hid},
+        )
     conn.execute(
         text(
-            "INSERT INTO portfolios (id, household_id, status)"
-            " VALUES (:id, :hid, 'active')"
+            "INSERT INTO portfolio_snapshots (id, portfolio_id, version_number, status, valuation_date)"
+            " VALUES (:id, :pid, :version, 'current', '2026-07-01')"
         ),
-        {"id": port_id, "hid": hid},
+        {"id": sid, "pid": port_id, "version": version},
     )
-    conn.execute(
-        text(
-            "INSERT INTO portfolio_snapshots"
-            " (id, portfolio_id, version_number, status, valuation_date)"
-            " VALUES (:id, :pid, 1, 'current', '2026-07-01')"
-        ),
-        {"id": sid, "pid": port_id},
-    )
+    return port_id
 
 
 def test_drift_draft_requires_threshold_and_categories(fresh_db: Engine) -> None:
@@ -680,9 +688,9 @@ def test_event_delete_forbidden(fresh_db: Engine) -> None:
             text(
                 "INSERT INTO guardian_events"
                 " (id, evaluation_run_id, household_id, check_id, check_version_id,"
-                "  policy_version_id, portfolio_snapshot_id, drift_pp, as_of_date)"
+                "  check_type, policy_version_id, portfolio_snapshot_id, drift_pp, as_of_date)"
                 " VALUES (:id, :run, :hid, :cid, :cvid,"
-                "  :pid, :sid, 3.50, '2026-07-17')"
+                "  'drift', :pid, :sid, 3.50, '2026-07-17')"
             ),
             {
                 "id": eid, "run": run_id, "hid": hid, "cid": cid, "cvid": cvid,
@@ -798,8 +806,8 @@ def test_drift_exposure_fingerprint_rejects_duplicate(fresh_db: Engine) -> None:
             text(
                 "INSERT INTO guardian_events"
                 " (id, evaluation_run_id, household_id, check_id, check_version_id,"
-                "  policy_version_id, portfolio_snapshot_id, drift_pp, as_of_date)"
-                " VALUES (:id, :run, :hid, :cid, :cvid, :pid, :sid, 3.50, '2026-07-17')"
+                "  check_type, policy_version_id, portfolio_snapshot_id, drift_pp, as_of_date)"
+                " VALUES (:id, :run, :hid, :cid, :cvid, 'drift', :pid, :sid, 3.50, '2026-07-17')"
             ),
             {"id": str(uuid4()), "run": run_id, "hid": hid, "cid": cid, "cvid": cvid,
              "pid": pid, "sid": sid},
@@ -810,164 +818,104 @@ def test_drift_exposure_fingerprint_rejects_duplicate(fresh_db: Engine) -> None:
                 text(
                     "INSERT INTO guardian_events"
                     " (id, evaluation_run_id, household_id, check_id, check_version_id,"
-                    "  policy_version_id, portfolio_snapshot_id, drift_pp, as_of_date)"
-                    " VALUES (:id, :run, :hid, :cid, :cvid, :pid, :sid, 3.50, '2026-07-17')"
+                    "  check_type, policy_version_id, portfolio_snapshot_id, drift_pp, as_of_date)"
+                    " VALUES (:id, :run, :hid, :cid, :cvid, 'drift', :pid, :sid, 3.50, '2026-07-17')"
                 ),
                 {"id": str(uuid4()), "run": run_id, "hid": hid, "cid": cid, "cvid": cvid,
                  "pid": pid, "sid": sid},
             )
 
 
-def test_staleness_fingerprint_includes_as_of_date(fresh_db: Engine) -> None:
-    """Two staleness events with same (check_version, snapshot) but different as_of_date — both succeed."""
+def test_staleness_same_date_conflict(fresh_db: Engine) -> None:
+    """Staleness: same (check_version, snapshot, as_of_date) → conflict on partial index."""
     with fresh_db.begin() as conn:
         _create_household(conn, str(uuid4()))
         hid = _get_household_id(conn)
-        run1 = str(uuid4())
-        run2 = str(uuid4())
-        conn.execute(
-            text(
-                "INSERT INTO guardian_evaluation_runs"
-                " (id, household_id, status, checks_evaluated, events_created, as_of_date)"
-                " VALUES (:id, :hid, 'completed', 1, 1, :dt)"
-            ),
-            {"id": run1, "hid": hid, "dt": "2026-07-17"},
-        )
-        conn.execute(
-            text(
-                "INSERT INTO guardian_evaluation_runs"
-                " (id, household_id, status, checks_evaluated, events_created, as_of_date)"
-                " VALUES (:id, :hid, 'completed', 1, 1, :dt)"
-            ),
-            {"id": run2, "hid": hid, "dt": "2026-07-18"},
-        )
+        r1 = str(uuid4())
+        r2 = str(uuid4())
+        conn.execute(text("INSERT INTO guardian_evaluation_runs (id, household_id, status, checks_evaluated, events_created, as_of_date) VALUES (:id, :hid, 'completed', 1, 1, '2026-07-17')"), {"id": r1, "hid": hid})
+        conn.execute(text("INSERT INTO guardian_evaluation_runs (id, household_id, status, checks_evaluated, events_created, as_of_date) VALUES (:id, :hid, 'completed', 1, 1, '2026-07-17')"), {"id": r2, "hid": hid})
         cid = str(uuid4())
-        _create_check(conn, cid, hid, "StaleDedup", "staleness")
-        conn.execute(
-            text(
-                "INSERT INTO guardian_check_drafts"
-                " (check_id, threshold_value, staleness_days)"
-                " VALUES (:cid, 1.00, 30)"
-            ),
-            {"cid": cid},
-        )
+        _create_check(conn, cid, hid, "SSDC", "staleness")
+        conn.execute(text("INSERT INTO guardian_check_drafts (check_id, threshold_value, staleness_days) VALUES (:cid, 1.00, 30)"), {"cid": cid})
         cvid = str(uuid4())
-        conn.execute(
-            text(
-                "INSERT INTO guardian_check_confirmed"
-                " (id, check_id, version_number, check_type, threshold_value, staleness_days, severity)"
-                " VALUES (:id, :cid, 1, 'staleness', 0, 30, 'info')"
-            ),
-            {"id": cvid, "cid": cid},
-        )
+        conn.execute(text("INSERT INTO guardian_check_confirmed (id, check_id, version_number, check_type, threshold_value, staleness_days, severity) VALUES (:id, :cid, 1, 'staleness', 1.00, 30, 'info')"), {"id": cvid, "cid": cid})
         pid = str(uuid4())
         sid = str(uuid4())
         _create_policy_version(conn, pid, hid)
         _create_portfolio_snapshot(conn, sid, hid)
-        # Two events with same (check_version, portfolio_snapshot, policy_version)
-        # but different as_of_date — staleness fingerprint includes as_of_date.
-        # The drift/exposure fingerprint fires because same (check_version, policy_version, snapshot).
-        # But we test TWO different check_confirmed versions so drift/exposure fingerprint differs.
-        cvid2 = str(uuid4())
-        conn.execute(
-            text(
-                "INSERT INTO guardian_check_confirmed"
-                " (id, check_id, version_number, check_type, threshold_value, staleness_days, severity)"
-                " VALUES (:id, :cid, 2, 'staleness', 1.00, 15, 'info')"
-            ),
-            {"id": cvid2, "cid": cid},
-        )
-        conn.execute(
-            text(
-                "INSERT INTO guardian_events"
-                " (id, evaluation_run_id, household_id, check_id, check_version_id,"
-                "  policy_version_id, portfolio_snapshot_id, staleness_days_actual, as_of_date)"
-                " VALUES (:id, :run, :hid, :cid, :cvid, :pid, :sid, 10, '2026-07-17')"
-            ),
-            {"id": str(uuid4()), "run": run1, "hid": hid, "cid": cid, "cvid": cvid,
-             "pid": pid, "sid": sid},
-        )
-        conn.execute(
-            text(
-                "INSERT INTO guardian_events"
-                " (id, evaluation_run_id, household_id, check_id, check_version_id,"
-                "  policy_version_id, portfolio_snapshot_id, staleness_days_actual, as_of_date)"
-                " VALUES (:id, :run, :hid, :cid, :cvid, :pid, :sid, 11, '2026-07-18')"
-            ),
-            {"id": str(uuid4()), "run": run2, "hid": hid, "cid": cid, "cvid": cvid2,
-             "pid": pid, "sid": sid},
-        )
-
-
-def test_drift_fingerprint_ignores_as_of_date(fresh_db: Engine) -> None:
-    """Two drift events with same (check_version, policy, snapshot) but different as_of_date — second REJECTED."""
-    with fresh_db.begin() as conn:
-        _create_household(conn, str(uuid4()))
-        hid = _get_household_id(conn)
-        run1 = str(uuid4())
-        run2 = str(uuid4())
-        conn.execute(
-            text(
-                "INSERT INTO guardian_evaluation_runs (id, household_id, status,"
-                " checks_evaluated, events_created, as_of_date)"
-                " VALUES (:id, :hid, 'completed', 1, 1, :dt)"
-            ),
-            {"id": run1, "hid": hid, "dt": "2026-07-17"},
-        )
-        conn.execute(
-            text(
-                "INSERT INTO guardian_evaluation_runs (id, household_id, status,"
-                " checks_evaluated, events_created, as_of_date)"
-                " VALUES (:id, :hid, 'completed', 1, 1, :dt)"
-            ),
-            {"id": run2, "hid": hid, "dt": "2026-07-18"},
-        )
-        cid = str(uuid4())
-        _create_check(conn, cid, hid, "DriftAsOf", "drift")
-        conn.execute(
-            text(
-                "INSERT INTO guardian_check_drafts"
-                " (check_id, threshold_value, target_category, target_holding_category)"
-                " VALUES (:cid, 5.00, 'eq', 'eq')"
-            ),
-            {"cid": cid},
-        )
-        cvid = str(uuid4())
-        conn.execute(
-            text(
-                "INSERT INTO guardian_check_confirmed (id, check_id, version_number,"
-                " check_type, threshold_value, target_category, target_holding_category, severity)"
-                " VALUES (:id, :cid, 1, 'drift', 5.00, 'eq', 'eq', 'info')"
-            ),
-            {"id": cvid, "cid": cid},
-        )
-        pid = str(uuid4())
-        sid = str(uuid4())
-        _create_policy_version(conn, pid, hid)
-        _create_portfolio_snapshot(conn, sid, hid)
-        # First event
-        conn.execute(
-            text(
-                "INSERT INTO guardian_events (id, evaluation_run_id, household_id,"
-                " check_id, check_version_id, policy_version_id, portfolio_snapshot_id,"
-                " drift_pp, as_of_date)"
-                " VALUES (:id, :run, :hid, :cid, :cvid, :pid, :sid, 3.50, '2026-07-17')"
-            ),
-            {"id": str(uuid4()), "run": run1, "hid": hid, "cid": cid, "cvid": cvid,
-             "pid": pid, "sid": sid},
-        )
-        # Same (check_version, policy, snapshot) — different as_of_date should NOT matter
+        conn.execute(text("INSERT INTO guardian_events (id, evaluation_run_id, household_id, check_id, check_version_id, check_type, policy_version_id, portfolio_snapshot_id, staleness_days_actual, as_of_date) VALUES (:id, :r, :hid, :cid, :cvid, 'staleness', :pid, :sid, 10, '2026-07-17')"), {"id": str(uuid4()), "r": r1, "hid": hid, "cid": cid, "cvid": cvid, "pid": pid, "sid": sid})
         with pytest.raises(IntegrityError):
-            conn.execute(
-                text(
-                    "INSERT INTO guardian_events (id, evaluation_run_id, household_id,"
-                    " check_id, check_version_id, policy_version_id, portfolio_snapshot_id,"
-                    " drift_pp, as_of_date)"
-                    " VALUES (:id, :run, :hid, :cid, :cvid, :pid, :sid, 3.50, '2026-07-18')"
-                ),
-                {"id": str(uuid4()), "run": run2, "hid": hid, "cid": cid, "cvid": cvid,
-                 "pid": pid, "sid": sid},
-            )
+            conn.execute(text("INSERT INTO guardian_events (id, evaluation_run_id, household_id, check_id, check_version_id, check_type, policy_version_id, portfolio_snapshot_id, staleness_days_actual, as_of_date) VALUES (:id, :r, :hid, :cid, :cvid, 'staleness', :pid, :sid, 10, '2026-07-17')"), {"id": str(uuid4()), "r": r2, "hid": hid, "cid": cid, "cvid": cvid, "pid": pid, "sid": sid})
+
+
+def test_staleness_different_date_succeeds(fresh_db: Engine) -> None:
+    """Staleness: same (check_version, snapshot), different as_of_date → both succeed."""
+    with fresh_db.begin() as conn:
+        _create_household(conn, str(uuid4()))
+        hid = _get_household_id(conn)
+        r1 = str(uuid4())
+        r2 = str(uuid4())
+        conn.execute(text("INSERT INTO guardian_evaluation_runs (id, household_id, status, checks_evaluated, events_created, as_of_date) VALUES (:id, :hid, 'completed', 1, 1, '2026-07-17')"), {"id": r1, "hid": hid})
+        conn.execute(text("INSERT INTO guardian_evaluation_runs (id, household_id, status, checks_evaluated, events_created, as_of_date) VALUES (:id, :hid, 'completed', 1, 1, '2026-07-18')"), {"id": r2, "hid": hid})
+        cid = str(uuid4())
+        _create_check(conn, cid, hid, "SDDS", "staleness")
+        conn.execute(text("INSERT INTO guardian_check_drafts (check_id, threshold_value, staleness_days) VALUES (:cid, 1.00, 30)"), {"cid": cid})
+        cvid = str(uuid4())
+        conn.execute(text("INSERT INTO guardian_check_confirmed (id, check_id, version_number, check_type, threshold_value, staleness_days, severity) VALUES (:id, :cid, 1, 'staleness', 1.00, 30, 'info')"), {"id": cvid, "cid": cid})
+        pid = str(uuid4())
+        sid = str(uuid4())
+        _create_policy_version(conn, pid, hid)
+        _create_portfolio_snapshot(conn, sid, hid)
+        conn.execute(text("INSERT INTO guardian_events (id, evaluation_run_id, household_id, check_id, check_version_id, check_type, policy_version_id, portfolio_snapshot_id, staleness_days_actual, as_of_date) VALUES (:id, :r, :hid, :cid, :cvid, 'staleness', :pid, :sid, 10, '2026-07-17')"), {"id": str(uuid4()), "r": r1, "hid": hid, "cid": cid, "cvid": cvid, "pid": pid, "sid": sid})
+        conn.execute(text("INSERT INTO guardian_events (id, evaluation_run_id, household_id, check_id, check_version_id, check_type, policy_version_id, portfolio_snapshot_id, staleness_days_actual, as_of_date) VALUES (:id, :r, :hid, :cid, :cvid, 'staleness', :pid, :sid, 11, '2026-07-18')"), {"id": str(uuid4()), "r": r2, "hid": hid, "cid": cid, "cvid": cvid, "pid": pid, "sid": sid})
+
+
+def test_drift_same_inputs_different_asof_conflict(fresh_db: Engine) -> None:
+    """Drift: same (cvid, pid, sid), different as_of_date → conflict (as_of_date not in partial index)."""
+    with fresh_db.begin() as conn:
+        _create_household(conn, str(uuid4()))
+        hid = _get_household_id(conn)
+        r1 = str(uuid4())
+        r2 = str(uuid4())
+        conn.execute(text("INSERT INTO guardian_evaluation_runs (id, household_id, status, checks_evaluated, events_created, as_of_date) VALUES (:id, :hid, 'completed', 1, 1, '2026-07-17')"), {"id": r1, "hid": hid})
+        conn.execute(text("INSERT INTO guardian_evaluation_runs (id, household_id, status, checks_evaluated, events_created, as_of_date) VALUES (:id, :hid, 'completed', 1, 1, '2026-07-18')"), {"id": r2, "hid": hid})
+        cid = str(uuid4())
+        _create_check(conn, cid, hid, "DSIDAC", "drift")
+        conn.execute(text("INSERT INTO guardian_check_drafts (check_id, threshold_value, target_category, target_holding_category) VALUES (:cid, 5.00, 'eq', 'eq')"), {"cid": cid})
+        cvid = str(uuid4())
+        conn.execute(text("INSERT INTO guardian_check_confirmed (id, check_id, version_number, check_type, threshold_value, target_category, target_holding_category, severity) VALUES (:id, :cid, 1, 'drift', 5.00, 'eq', 'eq', 'info')"), {"id": cvid, "cid": cid})
+        pid = str(uuid4())
+        sid = str(uuid4())
+        _create_policy_version(conn, pid, hid)
+        _create_portfolio_snapshot(conn, sid, hid)
+        conn.execute(text("INSERT INTO guardian_events (id, evaluation_run_id, household_id, check_id, check_version_id, check_type, policy_version_id, portfolio_snapshot_id, drift_pp, as_of_date) VALUES (:id, :r, :hid, :cid, :cvid, 'drift', :pid, :sid, 3.50, '2026-07-17')"), {"id": str(uuid4()), "r": r1, "hid": hid, "cid": cid, "cvid": cvid, "pid": pid, "sid": sid})
+        with pytest.raises(IntegrityError):
+            conn.execute(text("INSERT INTO guardian_events (id, evaluation_run_id, household_id, check_id, check_version_id, check_type, policy_version_id, portfolio_snapshot_id, drift_pp, as_of_date) VALUES (:id, :r, :hid, :cid, :cvid, 'drift', :pid, :sid, 3.50, '2026-07-18')"), {"id": str(uuid4()), "r": r2, "hid": hid, "cid": cid, "cvid": cvid, "pid": pid, "sid": sid})
+
+
+def test_drift_different_inputs_succeed(fresh_db: Engine) -> None:
+    """Drift: different check_version → both succeed."""
+    with fresh_db.begin() as conn:
+        _create_household(conn, str(uuid4()))
+        hid = _get_household_id(conn)
+        r1 = str(uuid4())
+        r2 = str(uuid4())
+        conn.execute(text("INSERT INTO guardian_evaluation_runs (id, household_id, status, checks_evaluated, events_created, as_of_date) VALUES (:id, :hid, 'completed', 1, 1, '2026-07-17')"), {"id": r1, "hid": hid})
+        conn.execute(text("INSERT INTO guardian_evaluation_runs (id, household_id, status, checks_evaluated, events_created, as_of_date) VALUES (:id, :hid, 'completed', 1, 1, '2026-07-17')"), {"id": r2, "hid": hid})
+        cid = str(uuid4())
+        _create_check(conn, cid, hid, "DDIS", "drift")
+        conn.execute(text("INSERT INTO guardian_check_drafts (check_id, threshold_value, target_category, target_holding_category) VALUES (:cid, 5.00, 'eq', 'eq')"), {"cid": cid})
+        cvid1 = str(uuid4())
+        cvid2 = str(uuid4())
+        conn.execute(text("INSERT INTO guardian_check_confirmed (id, check_id, version_number, check_type, threshold_value, target_category, target_holding_category, severity) VALUES (:id, :cid, 1, 'drift', 5.00, 'eq', 'eq', 'info')"), {"id": cvid1, "cid": cid})
+        conn.execute(text("INSERT INTO guardian_check_confirmed (id, check_id, version_number, check_type, threshold_value, target_category, target_holding_category, severity) VALUES (:id, :cid, 2, 'drift', 5.00, 'eq', 'eq', 'info')"), {"id": cvid2, "cid": cid})
+        pid = str(uuid4())
+        sid = str(uuid4())
+        _create_policy_version(conn, pid, hid)
+        _create_portfolio_snapshot(conn, sid, hid)
+        conn.execute(text("INSERT INTO guardian_events (id, evaluation_run_id, household_id, check_id, check_version_id, check_type, policy_version_id, portfolio_snapshot_id, drift_pp, as_of_date) VALUES (:id, :r, :hid, :cid, :cvid, 'drift', :pid, :sid, 3.50, '2026-07-17')"), {"id": str(uuid4()), "r": r1, "hid": hid, "cid": cid, "cvid": cvid1, "pid": pid, "sid": sid})
+        conn.execute(text("INSERT INTO guardian_events (id, evaluation_run_id, household_id, check_id, check_version_id, check_type, policy_version_id, portfolio_snapshot_id, drift_pp, as_of_date) VALUES (:id, :r, :hid, :cid, :cvid, 'drift', :pid, :sid, 3.50, '2026-07-17')"), {"id": str(uuid4()), "r": r2, "hid": hid, "cid": cid, "cvid": cvid2, "pid": pid, "sid": sid})
 
 
 # ---------------------------------------------------------------------------
@@ -1082,8 +1030,8 @@ def test_confirm_and_event_in_same_transaction_rollback(fresh_db: Engine) -> Non
                 text(
                     "INSERT INTO guardian_events"
                     " (id, evaluation_run_id, household_id, check_id, check_version_id,"
-                    "  policy_version_id, portfolio_snapshot_id, drift_pp, as_of_date)"
-                    " VALUES (:id, :run, :hid, :cid, :cvid, :pid, :sid, 3.50, '2026-07-17')"
+                    "  check_type, policy_version_id, portfolio_snapshot_id, drift_pp, as_of_date)"
+                    " VALUES (:id, :run, :hid, :cid, :cvid, 'drift', :pid, :sid, 3.50, '2026-07-17')"
                 ),
                 {
                     "id": str(uuid4()), "run": str(uuid4()), "hid": hid, "cid": cid, "cvid": cvid,
@@ -1134,7 +1082,7 @@ def test_downgrade_leaves_0006_usable(fresh_db: Engine) -> None:
     _downgrade_to(fresh_db, PREVIOUS_REVISION)
     with fresh_db.connect() as conn:
         # Can still query portfolio tables
-        row = conn.execute(text("SELECT 1 FROM household_profiles LIMIT 0")).fetchone()
+        conn.execute(text("SELECT 1 FROM household_profiles LIMIT 0")).fetchone()
         # No guardian tables
         insp = inspect(fresh_db)
         existing = set(insp.get_table_names())

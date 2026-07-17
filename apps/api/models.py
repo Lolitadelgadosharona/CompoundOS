@@ -1080,14 +1080,6 @@ class GuardianEvaluationRun(Base):
 class GuardianEvent(Base):
     __tablename__ = "guardian_events"
     __table_args__ = (
-        UniqueConstraint(
-            "check_version_id", "policy_version_id", "portfolio_snapshot_id",
-            name="uq_guardian_events_drift_exposure",
-        ),
-        UniqueConstraint(
-            "check_version_id", "portfolio_snapshot_id", "as_of_date",
-            name="uq_guardian_events_staleness",
-        ),
         Index("ix_guardian_events_check", "check_id"),
         Index("ix_guardian_events_run", "evaluation_run_id"),
     )
@@ -1144,6 +1136,7 @@ class GuardianEvent(Base):
     detected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    check_type: Mapped[str] = mapped_column(Text, nullable=False)
     drift_pp: Mapped[Optional[Decimal]] = mapped_column(
         Numeric(5, 2), nullable=True
     )
