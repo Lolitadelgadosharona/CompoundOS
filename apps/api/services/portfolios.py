@@ -233,7 +233,10 @@ def read_or_create_portfolio(
                 metadata={"draft_revision": draft.expected_revision},
             )
             return existing, draft, [], True
-        return (*create_portfolio(session), True)
+        # Create portfolio + initial draft (create_portfolio already
+        # manages its own transaction — call it outside our begin block)
+        session.rollback()  # release our transaction first
+    return (*create_portfolio(session), True)
 
 
 def read_current_state(
