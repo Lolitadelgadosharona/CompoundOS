@@ -17,9 +17,19 @@ from tests.conftest import postgres_test_database_url
 
 pytestmark = pytest.mark.postgres
 
-HEAD_REVISION = "0003_decision_journal_foundation"
+HEAD_REVISION = "0004_portfolio_foundation"
+SLICE_3_REVISION = "0003_decision_journal_foundation"
 SLICE_2_REVISION = "0002_investment_policy_foundation"
 SLICE_1_REVISION = "0001_household_persistence"
+
+PORTFOLIO_TABLES = {
+    "portfolios",
+    "accounts",
+    "portfolio_drafts",
+    "portfolio_draft_holdings",
+    "portfolio_snapshots",
+    "portfolio_snapshot_holdings",
+}
 
 DECISION_JOURNAL_TABLES = {
     "decisions",
@@ -253,6 +263,7 @@ def test_fresh_base_to_head_includes_all_slice_3_tables(
 
         inspector = inspect(migration_engine)
         table_names = set(inspector.get_table_names())
+        assert PORTFOLIO_TABLES <= table_names
         assert DECISION_JOURNAL_TABLES <= table_names
         assert SLICE_2_TABLES <= table_names
         assert {"household_profiles", "audit_events"} <= table_names

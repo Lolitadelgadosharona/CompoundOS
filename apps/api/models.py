@@ -671,3 +671,239 @@ class DecisionCorrection(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+# ---------------------------------------------------------------------------
+# Portfolio (Sprint 003 Slice A)
+# ---------------------------------------------------------------------------
+
+
+class Portfolio(Base):
+    __tablename__ = "portfolios"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft', 'active')",
+            name="ck_portfolios_status",
+        ),
+        UniqueConstraint(
+            "household_id",
+            name="uq_portfolios_household_id",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    household_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "household_profiles.id",
+            name="fk_portfolios_household_id_household_profiles",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class Account(Base):
+    __tablename__ = "accounts"
+    __table_args__ = (
+        CheckConstraint(
+            "char_length(name) <= 200",
+            name="ck_accounts_name_length",
+        ),
+        CheckConstraint(
+            "sort_order >= 0",
+            name="ck_accounts_sort_order_nonnegative",
+        ),
+        Index("ix_accounts_portfolio_id_sort_order", "portfolio_id", "sort_order"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    portfolio_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "portfolios.id",
+            name="fk_accounts_portfolio_id_portfolios",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    sort_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+
+
+class PortfolioDraft(Base):
+    __tablename__ = "portfolio_drafts"
+    __table_args__ = (
+        CheckConstraint(
+            "expected_revision >= 1",
+            name="ck_portfolio_drafts_revision_positive",
+        ),
+        CheckConstraint(
+            "valuation_date IS NULL OR valuation_date <= CURRENT_DATE",
+            name="ck_portfolio_drafts_valuation_date",
+        ),
+    )
+
+    portfolio_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "portfolios.id",
+            name="fk_portfolio_drafts_portfolio_id_portfolios",
+            ondelete="CASCADE",
+        ),
+        primary_key=True,
+    )
+    expected_revision: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
+    valuation_date: Mapped[Optional[Any]] = mapped_column(Date, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class PortfolioDraftHolding(Base):
+    __tablename__ = "portfolio_draft_holdings"
+    __table_args__ = (
+        CheckConstraint(
+            "quantity > 0",
+            name="ck_portfolio_draft_holdings_quantity_positive",
+        ),
+        CheckConstraint(
+            "unit_price >= 0",
+            name="ck_portfolio_draft_holdings_price_nonnegative",
+        ),
+        CheckConstraint(
+            "valuation_date <= CURRENT_DATE",
+            name="ck_portfolio_draft_holdings_valuation_date",
+        ),
+        CheckConstraint(
+            "sort_order >= 0",
+            name="ck_portfolio_draft_holdings_sort_order_nonnegative",
+        ),
+        Index(
+            "ix_portfolio_draft_holdings_portfolio_sort",
+            "portfolio_id",
+            "sort_order",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    portfolio_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "portfolio_drafts.portfolio_id",
+            name="fk_portfolio_draft_holdings_portfolio_id_drafts",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    )
+    asset_name: Mapped[str] = mapped_column(Text, nullable=False)
+    asset_category: Mapped[str] = mapped_column(Text, nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
+    total_value: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    valuation_date: Mapped[Any] = mapped_column(Date, nullable=False)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    account_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            "accounts.id",
+            name="fk_portfolio_draft_holdings_account_id_accounts",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
+    sort_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+
+
+class PortfolioSnapshot(Base):
+    __tablename__ = "portfolio_snapshots"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('current', 'superseded')",
+            name="ck_portfolio_snapshots_status",
+        ),
+        CheckConstraint(
+            "valuation_date <= CURRENT_DATE",
+            name="ck_portfolio_snapshots_date",
+        ),
+        CheckConstraint(
+            "holding_count IS NULL OR holding_count >= 0",
+            name="ck_portfolio_snapshots_holding_count_nonnegative",
+        ),
+        UniqueConstraint(
+            "portfolio_id",
+            "version_number",
+            name="uq_portfolio_snapshots_portfolio_version",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    portfolio_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "portfolios.id",
+            name="fk_portfolio_snapshots_portfolio_id_portfolios",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, default="current", server_default=text("'current'")
+    )
+    confirmed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    holding_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    valuation_date: Mapped[Any] = mapped_column(Date, nullable=False)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class PortfolioSnapshotHolding(Base):
+    __tablename__ = "portfolio_snapshot_holdings"
+    __table_args__ = (
+        CheckConstraint(
+            "quantity > 0",
+            name="ck_portfolio_snapshot_holdings_quantity_positive",
+        ),
+        CheckConstraint(
+            "unit_price >= 0",
+            name="ck_portfolio_snapshot_holdings_price_nonnegative",
+        ),
+        CheckConstraint(
+            "sort_order >= 0",
+            name="ck_portfolio_snapshot_holdings_sort_order_nonnegative",
+        ),
+        Index(
+            "ix_portfolio_snapshot_holdings_snapshot_sort",
+            "snapshot_id",
+            "sort_order",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    snapshot_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "portfolio_snapshots.id",
+            name="fk_portfolio_snapshot_holdings_snapshot_id_snapshots",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    asset_name: Mapped[str] = mapped_column(Text, nullable=False)
+    asset_category: Mapped[str] = mapped_column(Text, nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
+    total_value: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    valuation_date: Mapped[Any] = mapped_column(Date, nullable=False)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    account_id: Mapped[Optional[UUID]] = mapped_column(nullable=True)
+    sort_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
