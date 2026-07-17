@@ -124,7 +124,6 @@ def api_list_checks(session: DatabaseSession) -> GuardianCheckListResponse:
 @router.get("/checks/{check_id}")
 def api_get_check(check_id: UUID, session: DatabaseSession):
     _hid(session)
-    from apps.api.services.guardian import get_check_detail
     try:
         result = get_check_detail(session, check_id)
     except Exception as exc:
