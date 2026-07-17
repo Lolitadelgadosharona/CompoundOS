@@ -41,7 +41,10 @@ def db_session(postgres_engine: Engine) -> Generator[Session, None, None]:
     with postgres_engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE TABLE decision_corrections, decision_confirmed_snapshots,"
+                "TRUNCATE TABLE portfolio_snapshot_holdings, portfolio_snapshots,"
+                " portfolio_draft_holdings, portfolio_drafts,"
+                " accounts, portfolios,"
+                " decision_corrections, decision_confirmed_snapshots,"
                 " decision_drafts, decisions, audit_events,"
                 " investment_policy_version_allocations,"
                 " investment_policy_draft_allocations,"
@@ -60,7 +63,10 @@ def api_client(postgres_engine: Engine) -> Generator[TestClient, None, None]:
     with postgres_engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE TABLE decision_corrections, decision_confirmed_snapshots,"
+                "TRUNCATE TABLE portfolio_snapshot_holdings, portfolio_snapshots,"
+                " portfolio_draft_holdings, portfolio_drafts,"
+                " accounts, portfolios,"
+                " decision_corrections, decision_confirmed_snapshots,"
                 " decision_drafts, decisions, audit_events,"
                 " investment_policy_version_allocations,"
                 " investment_policy_draft_allocations,"
