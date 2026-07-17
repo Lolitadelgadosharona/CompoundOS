@@ -167,8 +167,8 @@ function HoldingRow({
     ? "Price must be >= 0, up to 4 decimal places"
     : "";
   const cashPriceError =
-    isCash(holding.asset_category) && holding.unit_price && holding.unit_price !== "1"
-    ? 'Cash holdings must have unit_price 1.00'
+    isCash(holding.asset_category) && holding.unit_price && holding.unit_price.replace(/0+$/, "").replace(/\.$/, "") !== "1"
+    ? "Cash holdings must have unit_price 1.00"
     : "";
   const dateError = holding.valuation_date && isFutureValuationDate(holding.valuation_date)
     ? "Date must not be in the future"
@@ -704,6 +704,8 @@ export function PortfolioClient() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [preConfirmViewKind, setPreConfirmViewKind] = useState<"draft-editor" | "draft-and-snapshot" | null>(null);
+  const prevSnapshotRef = useRef<PortfolioSnapshotDetail | null>(null);
   const [holdsDirty, setHoldsDirty] = useState(false);
 
   // Local holding edits
@@ -736,6 +738,7 @@ export function PortfolioClient() {
   const abortRef = useRef<AbortController | null>(null);
   const histAbortRef = useRef<AbortController | null>(null);
   const auditAbortRef = useRef<AbortController | null>(null);
+  const snapAbortRef = useRef<AbortController | null>(null);
   const histGenRef = useRef(0);
   const auditGenRef = useRef(0);
 
@@ -896,12 +899,11 @@ export function PortfolioClient() {
     } catch (error) {
       if (error instanceof PortfolioApiError && error.status === 409) {
         setConflictMessage(error.message);
-        loadCore();
         return;
       }
       setSaveError(neutralMessage(error));
     }
-  }, [loadCore, loadHistory, loadAudit]);
+  }, [loadHistory, loadAudit]);
 
   const handleSaveHoldings = useCallback(async () => {
     if (view.kind !== "draft-editor" && view.kind !== "draft-and-snapshot") return;
@@ -994,6 +996,8 @@ export function PortfolioClient() {
   const handleEnterConfirmReview = useCallback(() => {
     if (view.kind !== "draft-editor" && view.kind !== "draft-and-snapshot") return;
     const draft = view.draft;
+    setPreConfirmViewKind(view.kind);
+    prevSnapshotRef.current = view.kind === "draft-and-snapshot" ? view.snapshot : null;
     setView({ kind: "confirm-review", draft, zeroHoldings: draft.holdings.length === 0 });
   }, [view]);
 
@@ -1133,17 +1137,20 @@ export function PortfolioClient() {
   const handleSelectSnapshot = useCallback(async (id: string) => {
     setSelectedSnapshot(null);
     setSnapshotDetailLoading(true);
-    const { signal, generation } = nextGen();
+    snapAbortRef.current?.abort();
+    const controller = new AbortController();
+    snapAbortRef.current = controller;
+    const signal = controller.signal;
     try {
       const detail = await getSnapshotDetail(id, signal);
-      if (generation !== genRef.current) return;
       setSelectedSnapshot(detail);
     } catch (error) {
       if (isAbort(error)) return;
+      // Silently fail — snapshot detail is auxiliary
     } finally {
-      if (generation === genRef.current) setSnapshotDetailLoading(false);
+      setSnapshotDetailLoading(false);
     }
-  }, [nextGen]);
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Render
@@ -1319,11 +1326,17 @@ export function PortfolioClient() {
           draft={view.draft}
           onConfirm={handleConfirmExecute}
           onCancel={() => {
-            setView({
-              kind: "draft-editor",
-              draft: view.draft,
-              savedHoldings: view.draft.holdings,
-            });
+            const kind = preConfirmViewKind ?? "draft-editor";
+            if (kind === "draft-and-snapshot" && prevSnapshotRef.current) {
+              setView({
+                kind: "draft-and-snapshot",
+                draft: view.draft,
+                snapshot: prevSnapshotRef.current,
+                savedHoldings: view.draft.holdings,
+              });
+            } else {
+              setView({ kind: "draft-editor", draft: view.draft, savedHoldings: view.draft.holdings });
+            }
           }}
           confirming={confirming}
           zeroHoldings={view.zeroHoldings}
