@@ -1,5 +1,21 @@
 # Changelog
 
+## [Unreleased] - Sprint 003 Slice B (In Review)
+
+### Added
+
+- Portfolio persistence foundation: six tables, CHECK constraints, PL/pgSQL triggers (0004)
+- Portfolio API: 9 endpoints under /api/portfolio (Slice B)
+- Cash unit_price = 1.00 DB constraint (0005, additive)
+- Controlled snapshot status transition current→superseded (0006, additive)
+- Future-proof JSONB row comparison trigger for immutability
+- 41 API tests + 20 gate tests + 20 trigger/confirm/migration tests
+
+### Fixed
+
+- 0004 snapshot immutability trigger defect: allowed controlled status-only UPDATE
+- 0004 deferred trigger active+draft semantics clarified
+
 ## [Unreleased] - Sprint 002 Slice 3B Complete
 
 ### Added

@@ -455,10 +455,14 @@ def test_concurrent_confirm_one_current(
 # ---------------------------------------------------------------------------
 
 
-def test_all_0006_revision_id_length() -> None:
-    """Return the actual byte-length of the revision ID for reporting."""
-    rev = "0006_portfolio_snapshot_status"
-    assert len(rev) == 31, f"Revision ID is {len(rev)} chars, expected 31"
+def validate_revision_ids(revision_ids: list[str]) -> None:
+    """Validate all revision IDs are non-empty and ≤ 32 chars."""
+    if not revision_ids:
+        raise AssertionError("No revision IDs provided — guard must not run empty")
+    for rev_id in revision_ids:
+        assert 0 < len(rev_id) <= 32, (
+            f"Revision '{rev_id}' is {len(rev_id)} chars (max 32, min 1)"
+        )
 
 
 def test_alembic_revision_chain_valid(postgres_engine) -> None:
@@ -471,19 +475,12 @@ def test_alembic_revision_chain_valid(postgres_engine) -> None:
     script = ScriptDirectory.from_config(config)
 
     revisions = list(script.walk_revisions())
-    assert len(revisions) >= 4, (
-        f"Expected at least 4 revisions, got {len(revisions)}"
-    )
+    rev_ids = [r.revision for r in revisions]
+    validate_revision_ids(rev_ids)
 
-    rev_ids = set()
-    for rev in revisions:
-        assert len(rev.revision) <= 32, (
-            f"Revision '{rev.revision}' is {len(rev.revision)} chars (max 32)"
-        )
-        assert rev.revision not in rev_ids, (
-            f"Duplicate revision ID: {rev.revision}"
-        )
-        rev_ids.add(rev.revision)
+    assert len(set(rev_ids)) == len(rev_ids), (
+        f"Duplicate revision IDs in chain: {rev_ids}"
+    )
 
     heads = list(script.get_revisions("heads"))
     assert len(heads) == 1, f"Expected 1 head, got {len(heads)}: {heads}"
@@ -493,13 +490,16 @@ def test_alembic_revision_chain_valid(postgres_engine) -> None:
     )
 
 
-def test_revision_length_guard_rejects_overlong() -> None:
-    """Proof that the guard catches violations (no false passes)."""
-    long_id = "0006_portfolio_snapshot_status_transition"
-    assert len(long_id) > 32, (
-        f"Old revision ID '{long_id}' is {len(long_id)} chars — "
-        "should have been caught. Test guard is working."
-    )
+def test_validate_revision_ids_rejects_overlong() -> None:
+    """validate_revision_ids rejects IDs > 32 chars."""
+    with pytest.raises(AssertionError, match="0006_portfolio_snapshot_status_transition"):
+        validate_revision_ids(["0006_portfolio_snapshot_status_transition"])
+
+
+def test_validate_revision_ids_rejects_empty() -> None:
+    """validate_revision_ids rejects empty list (no silent pass)."""
+    with pytest.raises(AssertionError, match="empty|No revision"):
+        validate_revision_ids([])
 
 
 # ---------------------------------------------------------------------------
@@ -573,8 +573,9 @@ def test_0006_bypass_per_column(col: str, postgres_engine) -> None:
         with pytest.raises(Exception) as exc_info:
             conn.execute(text(tamper_sql))
         err = str(exc_info.value)
+        # Must be our trigger error, not SQL syntax or unrelated constraint
         assert "column_not_allowed" in err, (
-            f"Column '{col}': expected 'column_not_allowed' error, got: {err}"
+            f"Column '{col}': expected 'column_not_allowed', got: {err[:200]}"
         )
 
 

@@ -261,8 +261,6 @@ calculations are performed.
   `superseded` (allowed by 0006 fn_portfolio_snapshot_immutability).
 - Never-confirmed discard: atomic identity deletion.
 - After-confirm discard: delete draft only; `draft → active`; snapshot unchanged.
-                              (repeat)
-```
 
 ### Draft
 

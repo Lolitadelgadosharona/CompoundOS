@@ -24,7 +24,7 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   - Safe Autopilot Foundation — Done
 - Sprint 003: Portfolio Snapshot + Holdings Foundation — In Progress
   - Slice A (Persistence): Done (PR #20, merge e9743a5)
-  - Slice B (Backend API): Done (PR #21, In Review)
+  - Slice B (Backend API): In Review (PR #21)
   - Slice C (Frontend): Not Authorized / Not Started
 - Sprint 004: Not Authorized / Not Started
 
