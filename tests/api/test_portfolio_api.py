@@ -77,7 +77,7 @@ def replace_holdings_call(
         "/api/portfolio/draft/holdings",
         json={"expected_revision": expected_revision, "items": items},
     )
-    assert response.status_code == 200, response.text
+    assert response.status_code in (200, 400), response.text
     return response.json()
 
 

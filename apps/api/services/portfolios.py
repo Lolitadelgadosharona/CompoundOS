@@ -31,7 +31,6 @@ from apps.api.repositories.portfolios import (
     add_draft,
     add_portfolio,
     add_portfolio_audit_event,
-    get_current_snapshot,
     get_draft,
     get_latest_snapshot,
     get_portfolio,
@@ -370,11 +369,10 @@ def confirm_draft(
 
         version_number = next_version_number(session, portfolio.id)
 
-        # Supersede previous current snapshot
-        current_snap = get_current_snapshot(session, portfolio.id)
-        if current_snap is not None:
-            current_snap.status = "superseded"
-            session.flush()
+        # New snapshot becomes the current; prior snapshots remain
+        # with their original status (fn_portfolio_snapshot_immutability
+        # rejects ALL UPDATE operations, so we cannot set status='superseded').
+        # "Current" is determined by MAX(version_number).
 
         now = datetime.now(timezone.utc)
         snapshot = PortfolioSnapshot(
@@ -453,7 +451,9 @@ def discard_draft(
             )
             return None
 
-        # Scenario (b): Confirmed snapshots exist — discard draft only
+        # Scenario (b): Confirmed snapshots exist — discard draft only.
+        # Set status to 'active' since draft is deleted and snapshots exist.
+        portfolio.status = "active"
         session.delete(draft)
         session.flush()
         add_portfolio_audit_event(
