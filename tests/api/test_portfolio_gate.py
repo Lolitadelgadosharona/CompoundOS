@@ -68,9 +68,9 @@ def test_confirm_then_new_draft(api_client: TestClient) -> None:
     )
     assert c.status_code == 201, c.text
 
-    # Create new draft
+    # Create new draft — a fresh draft was created, semantics is "created"
     r = api_client.post(BASE, json={})
-    assert r.status_code == 200, r.text  # portfolio exists, draft is new
+    assert r.status_code == 201, r.text  # new draft created after confirm
     assert r.json()["draft"]["expected_revision"] == 1
 
 
