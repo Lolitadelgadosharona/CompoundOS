@@ -12,6 +12,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Identity,
     Index,
     Integer,
@@ -1084,6 +1085,12 @@ class GuardianEvaluationRun(Base):
 class GuardianEvent(Base):
     __tablename__ = "guardian_events"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["check_version_id", "check_type"],
+            ["guardian_check_confirmed.id", "guardian_check_confirmed.check_type"],
+            name="fk_guardian_events_check_version_type",
+            ondelete="RESTRICT",
+        ),
         Index("ix_guardian_events_check", "check_id"),
         Index("ix_guardian_events_run", "evaluation_run_id"),
     )
@@ -1114,13 +1121,9 @@ class GuardianEvent(Base):
         nullable=False,
     )
     check_version_id: Mapped[UUID] = mapped_column(
-        ForeignKey(
-            "guardian_check_confirmed.id",
-            name="fk_guardian_events_check_version_id",
-            ondelete="RESTRICT",
-        ),
         nullable=False,
     )
+    check_type: Mapped[str] = mapped_column(Text, nullable=False)
     policy_version_id: Mapped[UUID] = mapped_column(
         ForeignKey(
             "investment_policy_versions.id",
@@ -1140,7 +1143,6 @@ class GuardianEvent(Base):
     detected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
-    check_type: Mapped[str] = mapped_column(Text, nullable=False)
     drift_pp: Mapped[Optional[Decimal]] = mapped_column(
         Numeric(5, 2), nullable=True
     )

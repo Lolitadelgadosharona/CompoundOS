@@ -259,18 +259,26 @@ def _create_portfolio_snapshot(
     """Create the minimum FK chain: portfolio → snapshot. Returns portfolio_id."""
     if existing_portfolio_id is not None:
         port_id = existing_portfolio_id
+        # Supersede previous current snapshot
+        conn.execute(
+            text("UPDATE portfolio_snapshots SET status = 'superseded'"
+                 " WHERE portfolio_id = :pid AND status = 'current'"),
+            {"pid": port_id},
+        )
+        status = "current"
     else:
         port_id = str(uuid4())
         conn.execute(
             text("INSERT INTO portfolios (id, household_id, status) VALUES (:id, :hid, 'active')"),
             {"id": port_id, "hid": hid},
         )
+        status = "current"
     conn.execute(
         text(
             "INSERT INTO portfolio_snapshots (id, portfolio_id, version_number, status, valuation_date)"
-            " VALUES (:id, :pid, :version, 'current', '2026-07-01')"
+            " VALUES (:id, :pid, :version, :status, '2026-07-01')"
         ),
-        {"id": sid, "pid": port_id, "version": version},
+        {"id": sid, "pid": port_id, "version": version, "status": status},
     )
     return port_id
 
@@ -982,11 +990,58 @@ def test_category_exposure_same_inputs_conflict(fresh_db: Engine) -> None:
             conn.execute(text("INSERT INTO guardian_events (id, evaluation_run_id, household_id, check_id, check_version_id, check_type, policy_version_id, portfolio_snapshot_id, exposure_pct, as_of_date) VALUES (:id, :r, :hid, :cid, :cvid, 'category_exposure', :pid, :sid, 25.00, '2026-07-18')"), {"id": str(uuid4()), "r": r2, "hid": hid, "cid": cid, "cvid": cvid, "pid": pid, "sid": sid})
 
 
+# ---------------------------------------------------------------------------\n# Diff-snapshot fingerprint: same version, different portfolio_snapshot → succeed\n# ---------------------------------------------------------------------------
+
+
+def test_drift_diff_snapshot_succeeds(fresh_db: Engine) -> None:
+    """Drift: same (cvid, pid), different sid → both succeed."""
+    with fresh_db.begin() as conn:
+        _create_household(conn, str(uuid4()))
+        hid = _get_household_id(conn)
+        r1 = str(uuid4()); r2 = str(uuid4())
+        conn.execute(text("INSERT INTO guardian_evaluation_runs (id, household_id, status, checks_evaluated, events_created, as_of_date) VALUES (:id, :hid, 'completed', 1, 1, '2026-07-17')"), {"id": r1, "hid": hid})
+        conn.execute(text("INSERT INTO guardian_evaluation_runs (id, household_id, status, checks_evaluated, events_created, as_of_date) VALUES (:id, :hid, 'completed', 1, 1, '2026-07-17')"), {"id": r2, "hid": hid})
+        cid = str(uuid4()); _create_check(conn, cid, hid, "DriftDiffSnap", "drift")
+        conn.execute(text("INSERT INTO guardian_check_drafts (check_id, threshold_value, target_category, target_holding_category) VALUES (:cid, 5.00, 'eq', 'eq')"), {"cid": cid})
+        cvid = str(uuid4())
+        conn.execute(text("INSERT INTO guardian_check_confirmed (id, check_id, version_number, check_type, threshold_value, target_category, target_holding_category, severity) VALUES (:id, :cid, 1, 'drift', 5.00, 'eq', 'eq', 'info')"), {"id": cvid, "cid": cid})
+        pid = str(uuid4()); sid1 = str(uuid4()); sid2 = str(uuid4())
+        _create_policy_version(conn, pid, hid)
+        port_id = _create_portfolio_snapshot(conn, sid1, hid)
+        _create_portfolio_snapshot(conn, sid2, hid, existing_portfolio_id=port_id, version=2)
+        # v1 snapshot
+        conn.execute(text("INSERT INTO guardian_events (id, evaluation_run_id, household_id, check_id, check_version_id, check_type, policy_version_id, portfolio_snapshot_id, drift_pp, as_of_date) VALUES (:id, :r, :hid, :cid, :cvid, 'drift', :pid, :sid, 3.50, '2026-07-17')"), {"id": str(uuid4()), "r": r1, "hid": hid, "cid": cid, "cvid": cvid, "pid": pid, "sid": sid1})
+        # v2 snapshot — different fingerprint, should succeed
+        conn.execute(text("INSERT INTO guardian_events (id, evaluation_run_id, household_id, check_id, check_version_id, check_type, policy_version_id, portfolio_snapshot_id, drift_pp, as_of_date) VALUES (:id, :r, :hid, :cid, :cvid, 'drift', :pid, :sid, 3.50, '2026-07-17')"), {"id": str(uuid4()), "r": r2, "hid": hid, "cid": cid, "cvid": cvid, "pid": pid, "sid": sid2})
+
+
+def test_category_exposure_diff_snapshot_succeeds(fresh_db: Engine) -> None:
+    """Category_exposure: same (cvid, pid), different sid → both succeed."""
+    with fresh_db.begin() as conn:
+        _create_household(conn, str(uuid4()))
+        hid = _get_household_id(conn)
+        r1 = str(uuid4()); r2 = str(uuid4())
+        conn.execute(text("INSERT INTO guardian_evaluation_runs (id, household_id, status, checks_evaluated, events_created, as_of_date) VALUES (:id, :hid, 'completed', 1, 1, '2026-07-17')"), {"id": r1, "hid": hid})
+        conn.execute(text("INSERT INTO guardian_evaluation_runs (id, household_id, status, checks_evaluated, events_created, as_of_date) VALUES (:id, :hid, 'completed', 1, 1, '2026-07-17')"), {"id": r2, "hid": hid})
+        cid = str(uuid4()); _create_check(conn, cid, hid, "CEXPDiffSnap", "category_exposure")
+        conn.execute(text("INSERT INTO guardian_check_drafts (check_id, threshold_value, target_holding_category) VALUES (:cid, 20.00, 'equity')"), {"cid": cid})
+        cvid = str(uuid4())
+        conn.execute(text("INSERT INTO guardian_check_confirmed (id, check_id, version_number, check_type, threshold_value, target_holding_category, severity) VALUES (:id, :cid, 1, 'category_exposure', 20.00, 'equity', 'info')"), {"id": cvid, "cid": cid})
+        pid = str(uuid4()); sid1 = str(uuid4()); sid2 = str(uuid4())
+        _create_policy_version(conn, pid, hid)
+        port_id = _create_portfolio_snapshot(conn, sid1, hid)
+        _create_portfolio_snapshot(conn, sid2, hid, existing_portfolio_id=port_id, version=2)
+        # v1 snapshot
+        conn.execute(text("INSERT INTO guardian_events (id, evaluation_run_id, household_id, check_id, check_version_id, check_type, policy_version_id, portfolio_snapshot_id, exposure_pct, as_of_date) VALUES (:id, :r, :hid, :cid, :cvid, 'category_exposure', :pid, :sid, 25.00, '2026-07-17')"), {"id": str(uuid4()), "r": r1, "hid": hid, "cid": cid, "cvid": cvid, "pid": pid, "sid": sid1})
+        # v2 snapshot — different fingerprint
+        conn.execute(text("INSERT INTO guardian_events (id, evaluation_run_id, household_id, check_id, check_version_id, check_type, policy_version_id, portfolio_snapshot_id, exposure_pct, as_of_date) VALUES (:id, :r, :hid, :cid, :cvid, 'category_exposure', :pid, :sid, 25.00, '2026-07-17')"), {"id": str(uuid4()), "r": r2, "hid": hid, "cid": cid, "cvid": cvid, "pid": pid, "sid": sid2})
+
+
 # ---------------------------------------------------------------------------\n# Discard semantics\n# ---------------------------------------------------------------------------
 
 
 def test_discard_before_first_confirm_deletes_draft(fresh_db: Engine) -> None:
-    """Never-confirmed check: delete draft only, identity persists for now (Slice A: DB-level, not service-level)."""
+    """Never-confirmed check: delete draft only, identity persists."""
     with fresh_db.begin() as conn:
         _create_household(conn, str(uuid4()))
         hid = _get_household_id(conn)
