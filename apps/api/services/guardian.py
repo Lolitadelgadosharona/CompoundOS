@@ -726,7 +726,7 @@ def _load_check_detail(session: Session, check_id: UUID) -> dict:
     crow = session.execute(
         text(
             "SELECT id, household_id, name, canonical_name, check_type, status,"
-            " created_at, updated_at FROM guardian_checks WHERE id = :cid"
+            " started_at, updated_at FROM guardian_checks WHERE id = :cid"
         ),
         {"cid": check_id},
     ).fetchone()
@@ -757,7 +757,7 @@ def _load_check_detail(session: Session, check_id: UUID) -> dict:
         "identity": {
             "id": crow[0], "household_id": crow[1], "name": crow[2],
             "canonical_name": crow[3], "check_type": crow[4], "status": crow[5],
-            "created_at": crow[6], "updated_at": crow[7],
+            "started_at": crow[6], "updated_at": crow[7],
         },
         "draft": {
             "threshold_value": str(drow[0]), "target_category": drow[1],
@@ -780,7 +780,7 @@ def _load_eval_result(session: Session, run_id: UUID) -> dict:
     rrow = session.execute(
         text(
             "SELECT id, household_id, status, skip_reason, checks_evaluated,"
-            " events_created, as_of_date, created_at"
+            " events_created, as_of_date, started_at"
             " FROM guardian_evaluation_runs WHERE id = :rid"
         ),
         {"rid": run_id},
@@ -807,7 +807,7 @@ def _load_eval_result(session: Session, run_id: UUID) -> dict:
             "status": rrow[2], "skip_reason": rrow[3],
             "checks_evaluated": rrow[4], "events_created": rrow[5],
             "as_of_date": str(rrow[6]) if rrow[6] else None,
-            "created_at": rrow[7],
+            "started_at": rrow[7],
         },
         "events": [
             {
