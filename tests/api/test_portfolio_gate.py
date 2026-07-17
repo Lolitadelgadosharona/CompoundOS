@@ -79,7 +79,7 @@ def test_confirm_then_new_draft(api_client: TestClient) -> None:
     )
     c = api_client.post(
         "/api/portfolio/draft/confirm",
-        json={"expected_revision": rev + 1},
+        json={"confirmation": True, "expected_revision": rev + 1},
     )
     assert c.status_code == 201, c.text
 
@@ -111,7 +111,7 @@ def test_independent_session_verifies_persistence(
     )
     api_client.post(
         "/api/portfolio/draft/confirm",
-        json={"expected_revision": rev + 1},
+        json={"confirmation": True, "expected_revision": rev + 1},
     )
 
     # Open independent SQLAlchemy session
@@ -207,7 +207,7 @@ def test_confirm_failure_rolls_back_everything(
     # Confirm with wrong revision → 409, transaction must roll back
     r = api_client.post(
         "/api/portfolio/draft/confirm",
-        json={"expected_revision": 99999},
+        json={"confirmation": True, "expected_revision": 99999},
     )
     assert r.status_code == 409, r.text
 
@@ -256,7 +256,7 @@ def test_session_reuse_after_rollback(
     # Wrong revision → 409
     r1 = api_client.post(
         "/api/portfolio/draft/confirm",
-        json={"expected_revision": 99999},
+        json={"confirmation": True, "expected_revision": 99999},
     )
     assert r1.status_code == 409
 
@@ -264,7 +264,7 @@ def test_session_reuse_after_rollback(
     p2 = api_client.get("/api/portfolio").json()
     r2 = api_client.post(
         "/api/portfolio/draft/confirm",
-        json={"expected_revision": p2["draft"]["expected_revision"]},
+        json={"confirmation": True, "expected_revision": p2["draft"]["expected_revision"]},
     )
     assert r2.status_code == 201, r2.text
 
@@ -286,7 +286,7 @@ def test_zero_holdings_confirm_succeeds(
     # Confirm with no holdings
     r = api_client.post(
         "/api/portfolio/draft/confirm",
-        json={"expected_revision": rev},
+        json={"confirmation": True, "expected_revision": rev},
     )
     assert r.status_code == 201, r.text
     data = r.json()
@@ -561,7 +561,7 @@ def test_decimal_api_db_consistency(
     )
     c = api_client.post(
         "/api/portfolio/draft/confirm",
-        json={"expected_revision": rev + 1},
+        json={"confirmation": True, "expected_revision": rev + 1},
     )
     assert c.status_code == 201, c.text
     api_tv = c.json()["holdings"][0]["total_value"]

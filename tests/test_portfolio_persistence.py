@@ -18,7 +18,7 @@ from tests.conftest import postgres_test_database_url
 
 pytestmark = pytest.mark.postgres
 
-HEAD_REVISION = "0004_portfolio_foundation"
+HEAD_REVISION = "0006_portfolio_snapshot_status"
 SLICE_3_REVISION = "0003_decision_journal_foundation"
 SLICE_2_REVISION = "0002_investment_policy_foundation"
 SLICE_1_REVISION = "0001_household_persistence"
@@ -1241,7 +1241,7 @@ def test_snapshot_update_any_field_fails(
 
         assert_db_error(
             conn,
-            "portfolio_snapshot_update_forbidden",
+            'portfolio_snapshot_status_transition_forbidden',
             lambda: conn.execute(
                 text(
                     "UPDATE portfolio_snapshots "
@@ -1267,7 +1267,7 @@ def test_snapshot_delete_fails(
 
         assert_db_error(
             conn,
-            "portfolio_snapshot_delete_forbidden",
+            'portfolio_snapshot_status_transition_forbidden',
             lambda: conn.execute(
                 text(
                     "DELETE FROM portfolio_snapshots WHERE id = :id"
@@ -1292,7 +1292,7 @@ def test_snapshot_multi_row_update_fails(
         # Any UPDATE to portfolio_snapshots is rejected (single or multi-row)
         assert_db_error(
             conn,
-            "portfolio_snapshot_update_forbidden",
+            'portfolio_snapshot_status_transition_forbidden',
             lambda: conn.execute(
                 text("UPDATE portfolio_snapshots SET notes = 'Mass update'")
             ),
@@ -1317,7 +1317,7 @@ def test_snapshot_holding_update_fails(
 
         assert_db_error(
             conn,
-            "portfolio_snapshot_holding_update_forbidden",
+            'portfolio_snapshot_status_transition_forbidden',
             lambda: conn.execute(
                 text(
                     "UPDATE portfolio_snapshot_holdings "
@@ -1494,7 +1494,7 @@ def test_snapshot_update_cross_transaction_fails(
     with postgres_engine.connect() as conn:
         assert_db_error(
             conn,
-            "portfolio_snapshot_update_forbidden",
+            'portfolio_snapshot_status_transition_forbidden',
             lambda: conn.execute(
                 text(
                     "UPDATE portfolio_snapshots "
@@ -1523,7 +1523,7 @@ def test_snapshot_delete_cross_transaction_fails(
     with postgres_engine.connect() as conn:
         assert_db_error(
             conn,
-            "portfolio_snapshot_delete_forbidden",
+            'portfolio_snapshot_status_transition_forbidden',
             lambda: conn.execute(
                 text("DELETE FROM portfolio_snapshots WHERE id = :id"),
                 {"id": sid},
