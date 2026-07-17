@@ -6,17 +6,17 @@
 - Define governance boundaries and architectural principles.
 - Add minimal health and validation infrastructure.
 
-## Phase 2 - Platform Services
+## Phase 2 - Platform Services (Sprint 002: Complete)
 
-- Expand backend services and shared contracts.
-- Add persistence and configuration management.
-- Introduce more meaningful observability.
+- Household and Investment Policy persistence with immutable version history.
+- Decision Journal with append-only corrections.
+- Safe Autopilot infrastructure for automated development and review.
 
-## Phase 3 - Decision Support
+## Phase 3 - Portfolio Foundation (Sprint 003: Planning)
 
-- Add review workflows for the AI Investment Committee.
-- Add Guardian monitoring and escalation patterns.
-- Prepare future integrations with read-only data sources.
+- Manual Portfolio Snapshot and Holdings Foundation.
+- User-entered valuations, immutable audit trail.
+- Foundation for Guardian monitoring and policy allocation comparison.
 
 ## TODO
 
