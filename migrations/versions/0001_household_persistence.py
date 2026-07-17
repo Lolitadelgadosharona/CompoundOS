@@ -29,10 +29,10 @@ def upgrade() -> None:
         sa.Column("risk_statement", sa.Text(), nullable=False),
         sa.Column("notes", sa.Text(), nullable=False),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False  # noqa: E501
         ),
         sa.Column(
-            "updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False  # noqa: E501
         ),
         sa.CheckConstraint("singleton_key", name="ck_household_profiles_singleton_key"),
         sa.CheckConstraint(
@@ -71,7 +71,7 @@ def upgrade() -> None:
         sa.Column("entity_type", sa.String(length=50), nullable=False),
         sa.Column("entity_id", sa.Uuid(), nullable=False),
         sa.Column(
-            "occurred_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "occurred_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False  # noqa: E501
         ),
         sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
         sa.ForeignKeyConstraint(
