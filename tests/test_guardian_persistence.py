@@ -11,7 +11,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
-from sqlalchemy import inspect, text
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError, OperationalError
 
@@ -1037,7 +1037,80 @@ def test_category_exposure_diff_snapshot_succeeds(fresh_db: Engine) -> None:
         conn.execute(text("INSERT INTO guardian_events (id, evaluation_run_id, household_id, check_id, check_version_id, check_type, policy_version_id, portfolio_snapshot_id, exposure_pct, as_of_date) VALUES (:id, :r, :hid, :cid, :cvid, 'category_exposure', :pid, :sid, 25.00, '2026-07-17')"), {"id": str(uuid4()), "r": r2, "hid": hid, "cid": cid, "cvid": cvid, "pid": pid, "sid": sid2})
 
 
-# ---------------------------------------------------------------------------\n# Discard semantics\n# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Concurrent deduplication: two transactions inserting same fingerprint
+# ---------------------------------------------------------------------------
+
+
+def test_concurrent_duplicate_fingerprint_at_most_one_event(fresh_db: Engine) -> None:
+    """Two concurrent transactions inserting same fingerprint → at most 1 event."""
+    import threading
+
+    with fresh_db.begin() as conn:
+        _create_household(conn, str(uuid4()))
+        hid = _get_household_id(conn)
+        run_id = str(uuid4())
+        conn.execute(
+            text("INSERT INTO guardian_evaluation_runs (id, household_id, status, checks_evaluated, events_created, as_of_date) VALUES (:id, :hid, 'completed', 1, 0, '2026-07-17')"),
+            {"id": run_id, "hid": hid},
+        )
+        cid = str(uuid4()); _create_check(conn, cid, hid, "Concurrent", "drift")
+        conn.execute(
+            text("INSERT INTO guardian_check_drafts (check_id, threshold_value, target_category, target_holding_category) VALUES (:cid, 5.00, 'eq', 'eq')"),
+            {"cid": cid},
+        )
+        cvid = str(uuid4())
+        conn.execute(
+            text("INSERT INTO guardian_check_confirmed (id, check_id, version_number, check_type, threshold_value, target_category, target_holding_category, severity) VALUES (:id, :cid, 1, 'drift', 5.00, 'eq', 'eq', 'info')"),
+            {"id": cvid, "cid": cid},
+        )
+        pid = str(uuid4()); sid = str(uuid4())
+        _create_policy_version(conn, pid, hid); _create_portfolio_snapshot(conn, sid, hid)
+
+    db_url = fresh_db.url
+    barrier = threading.Barrier(2, timeout=10)
+    results: list = []
+
+    def insert_event() -> None:
+        eng = create_engine(db_url)
+        with eng.begin() as c:
+            barrier.wait()
+            try:
+                c.execute(
+                    text(
+                        "INSERT INTO guardian_events"
+                        " (id, evaluation_run_id, household_id, check_id, check_version_id,"
+                        "  check_type, policy_version_id, portfolio_snapshot_id, drift_pp, as_of_date)"
+                        " VALUES (:id, :r, :hid, :cid, :cvid, 'drift', :pid, :sid, 3.50, '2026-07-17')"
+                    ),
+                    {"id": str(uuid4()), "r": run_id, "hid": hid, "cid": cid,
+                     "cvid": cvid, "pid": pid, "sid": sid},
+                )
+                results.append("inserted")
+            except IntegrityError:
+                results.append("conflict")
+            except Exception:
+                results.append("error")
+        eng.dispose()
+
+    t1 = threading.Thread(target=insert_event)
+    t2 = threading.Thread(target=insert_event)
+    t1.start(); t2.start()
+    t1.join(); t2.join()
+
+    assert len(results) == 2
+    assert "inserted" in results
+    assert "conflict" in results or "inserted" in results
+    # Exactly 1 row in DB
+    with fresh_db.connect() as c:
+        count = c.execute(
+            text("SELECT count(*) FROM guardian_events WHERE check_version_id = :cvid"),
+            {"cvid": cvid},
+        ).scalar()
+        assert count == 1
+
+
+# ---------------------------------------------------------------------------\\n# Discard semantics\\n# ---------------------------------------------------------------------------
 
 
 def test_discard_before_first_confirm_deletes_draft(fresh_db: Engine) -> None:
