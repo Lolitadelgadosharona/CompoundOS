@@ -196,6 +196,9 @@ def read_or_create_portfolio(
                 return existing, draft, holdings, False
 
             # Portfolio exists but no draft (e.g., after confirm).
+            # Must set status back to 'draft' — deferred trigger
+            # fn_portfolio_draft_holdings_consistency rejects active+draft.
+            existing.status = "draft"
             draft = add_draft(session, existing.id)
             add_portfolio_audit_event(
                 session,

@@ -66,7 +66,7 @@ def create_household(client: TestClient) -> None:
 
 def create_portfolio(client: TestClient) -> dict:
     response = client.post("/api/portfolio/draft", json={})
-    assert response.status_code == 201, response.text
+    assert response.status_code in (200, 201), response.text
     return response.json()
 
 
