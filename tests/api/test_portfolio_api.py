@@ -65,7 +65,7 @@ def create_household(client: TestClient) -> None:
 
 
 def create_portfolio(client: TestClient) -> dict:
-    response = client.post("/api/portfolio", json={})
+    response = client.post("/api/portfolio/draft", json={})
     assert response.status_code == 201, response.text
     return response.json()
 
@@ -106,7 +106,7 @@ def setup_portfolio_with_holdings(
 
 
 def test_create_portfolio_requires_household(api_client: TestClient) -> None:
-    response = api_client.post("/api/portfolio")
+    response = api_client.post("/api/portfolio/draft")
     assert response.status_code == 404
     assert response.json()["detail"] == "Household profile not found"
 
