@@ -12,8 +12,13 @@ AUDIT_ACTOR = "local-owner"
 HOUSEHOLD_ENTITY_TYPE = "HouseholdProfile"
 
 
-def get_current_household(session: Session) -> HouseholdProfile | None:
-    return session.scalar(select(HouseholdProfile))
+def get_current_household(
+    session: Session, *, for_update: bool = False
+) -> HouseholdProfile | None:
+    stmt = select(HouseholdProfile)
+    if for_update:
+        stmt = stmt.with_for_update()
+    return session.scalar(stmt)
 
 
 def add_household(session: Session, values: dict[str, Any]) -> HouseholdProfile:
