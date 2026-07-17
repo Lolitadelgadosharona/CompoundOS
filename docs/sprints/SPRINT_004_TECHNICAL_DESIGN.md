@@ -215,6 +215,10 @@ non-advisory Guardian Events.
 - No scheduled/cron-based evaluation in Sprint 004 — evaluation is
   manual (Owner triggers) or on-demand (after Portfolio Confirm).
 - No authentication or public deployment.
+- No hard-delete or retirement lifecycle for Confirmed Checks — once
+  confirmed, a Check identity persists indefinitely, matching the
+  Policy Version and Portfolio Snapshot immutability patterns. The
+  Owner can stop using a Check without deleting it.
 
 ---
 
@@ -223,12 +227,13 @@ non-advisory Guardian Events.
 | Term | Definition |
 |------|-----------|
 | Guardian Check | A named, Owner-defined rule configuration (e.g., "Equity drift > 5%") |
-| Guardian Event | An immutable record of a single evaluation pass. Contains the Check ID, the Policy Version and Portfolio Snapshot evaluated, and the result. |
+| Guardian Event | An immutable record of a single evaluation pass. Contains the Check ID, the Policy Version and Portfolio Snapshot evaluated, and the result. The `exceeded` boolean field is TRUE when the threshold was breached, FALSE when within bounds. |
 | Threshold | A numeric boundary that triggers a detection. Always Owner-configured, never system-generated. |
 | Severity | A fixed label on each Check: `info`, `warning`, `critical`. Purely organizational — no automatic escalation. |
 | Staleness | A Check that fires when `valuation_date` of the latest Portfolio Snapshot is older than N days from evaluation time. |
 | Drift | The absolute difference between a Policy allocation's target percentage and the corresponding Portfolio holding's actual percentage of total portfolio value. |
 | Concentration | A single holding category exceeding X% of total Portfolio value. |
+| Confirmed | The immutable lifecycle state of a Guardian Check after the Owner confirms its Draft. Analogous to Policy "Published" and Portfolio "Active." The Decision Journal established "Confirmed" as the preferred term for newer domains; Guardian follows this precedent. |
 
 ---
 
@@ -314,7 +319,7 @@ guardian_events
   drift_percentage NUMERIC(5,2) — for drift checks, the computed difference
   concentration_percentage NUMERIC(5,2) — for concentration checks
   staleness_days_actual INTEGER — for staleness checks, the actual age
-  passed BOOLEAN NOT NULL — TRUE if threshold exceeded, FALSE if within bounds
+  exceeded BOOLEAN NOT NULL — TRUE if threshold breached, FALSE if within bounds
   — BEFORE INSERT/UPDATE/DELETE trigger prohibits all modification
 ```
 
@@ -364,31 +369,56 @@ Confirm, the system can optionally trigger evaluation automatically
 
 For each Policy allocation category named in `target_category`, find the
 corresponding Portfolio holding category named in `target_holding_category`.
+Both names are NFKC-normalized before comparison, matching the Policy
+allocation normalization convention.
 
 ```
 policy_pct = allocation.target_percentage (as Decimal)
 portfolio_pct = (sum of holdings in category × unit_price) / (sum of all holdings × unit_price) × 100
 drift = abs(policy_pct - portfolio_pct)
-passed = drift > threshold_value
+exceeded = drift > threshold_value
 ```
 
+If total portfolio value is zero (empty snapshot or all zero-value assets):
+skip drift checks for this evaluation run. No baseline exists for comparison.
+
 If the Policy category has no matching Portfolio holdings: drift = policy_pct,
-passed = true (100% drift unless threshold > 100).
+exceeded = true (100% of target allocation is absent) unless threshold > 100.
 
 ### Concentration Check
 
 ```
 portfolio_pct = (sum of holdings in target_holding_category × unit_price)
               / (sum of all holdings × unit_price) × 100
-passed = portfolio_pct > threshold_value
+exceeded = portfolio_pct > threshold_value
 ```
+
+If total portfolio value is zero: skip concentration checks.
 
 ### Staleness Check
 
 ```
 age_days = evaluation_date - latest_snapshot.valuation_date
-passed = age_days > staleness_days
+exceeded = age_days > staleness_days
 ```
+
+If no confirmed Portfolio Snapshot exists (portfolio.status='draft' with no
+prior confirm, or no portfolio at all): skip staleness checks. The Owner is
+already aware of the empty-portfolio state from the Portfolio UI. See OD-S4-005.
+
+### Per-Check-Type Field Validation
+
+The following fields are required based on `check_type`:
+
+| check_type | Required fields | Optional fields |
+|-----------|----------------|-----------------|
+| drift | threshold_value, target_category, target_holding_category | severity, notes |
+| concentration | threshold_value, target_holding_category | severity, notes |
+| staleness | staleness_days | severity, notes |
+
+A Draft that omits required fields for its type is rejected at the API
+boundary (422). Fields not relevant to the type (e.g., staleness_days
+on a drift check) are ignored and stored as NULL.
 
 ---
 
@@ -417,6 +447,13 @@ Evaluation runs in a single transaction per evaluation pass:
 Lock order: Household → (read Policy, Portfolio, Checks). No write locks
 on Policy or Portfolio — they are immutable reads. This avoids deadlock
 with Policy/Portfolio mutations (which lock Household → Policy/Portfolio).
+
+Concurrent evaluation: the Household FOR UPDATE lock serializes evaluation
+at the database level. A second evaluation request while one is in progress
+blocks on the lock. If the wait exceeds a configurable timeout (default 30s),
+the API returns 409 Conflict with "Evaluation already in progress."
+The UI disables the Evaluate button during an active evaluation and shows
+a progress indicator.
 
 Concurrent evaluation + Check Confirm:
 - Confirm locks Household → guardian_checks FOR UPDATE → inserts Confirmed.
@@ -526,7 +563,7 @@ triggers. Additive only — no modification to existing 0001-0006.
 
 Each evaluation run writes one AuditEvent per Check evaluated, with
 metadata: check_id, check_version, policy_version_id, portfolio_snapshot_id,
-passed, drift_percentage (if applicable). No financial values (quantities,
+exceeded, drift_percentage (if applicable). No financial values (quantities,
 prices) in audit metadata — only structural identifiers and computed
 percentages.
 
