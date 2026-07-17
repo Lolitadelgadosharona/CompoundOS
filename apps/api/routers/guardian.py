@@ -6,23 +6,25 @@ from decimal import Decimal as _Decimal
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from apps.api.database import get_session
 from apps.api.guardian_schemas import (
     GuardianCheckConfirm,
-    GuardianCheckDetailResponse,
     GuardianCheckDiscard,
     GuardianCheckDraftCreate,
     GuardianCheckDraftUpdate,
     GuardianCheckListResponse,
     GuardianEvaluateRequest,
-    GuardianEvaluateResponse,
-    GuardianEvaluationRunListResponse,
-    GuardianEvaluationRunResponse,
-    GuardianEventListResponse,
-    GuardianEventResponse,
+)
+from apps.api.repositories.guardian import (
+    get_evaluation_run,
+    get_events_by_run,
+    list_checks,
+    list_evaluation_runs,
+    list_events,
 )
 from apps.api.services.guardian import (
     CheckNotFoundError,
@@ -39,17 +41,6 @@ from apps.api.services.guardian import (
     evaluate_one_check,
     update_guardian_draft,
 )
-from apps.api.repositories.guardian import (
-    get_current_household_id,
-    get_check,
-    get_draft,
-    get_latest_confirmed_version,
-    list_checks,
-    list_evaluation_runs,
-    list_events,
-    get_evaluation_run,
-    get_events_by_run,
-)
 
 router = APIRouter(prefix="/api/guardian", tags=["guardian"])
 DatabaseSession = Annotated[Session, Depends(get_session)]
@@ -62,9 +53,6 @@ def _hid(session: Session) -> str:
     if row is None:
         raise HTTPException(status_code=404, detail="Household profile not found")
     return str(row[0])
-
-
-from sqlalchemy import text
 
 
 def _translate(exc: Exception) -> HTTPException:

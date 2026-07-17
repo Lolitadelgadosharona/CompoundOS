@@ -1,39 +1,33 @@
 """Guardian Slice B tests: pure evaluator + service integration + API."""
+# ruff: noqa: E501  # SQL strings in PostgreSQL integration tests
 
 from __future__ import annotations
 
-import threading
 from datetime import date
 from decimal import Decimal
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from apps.api.services.guardian import (
+    DraftConflictError,
+    InvalidCheckTypeFieldsError,
+    NameConflictError,
+    confirm_guardian_check,
+    create_guardian_check,
+    discard_guardian_check,
+    evaluate_all_checks,
+    evaluate_one_check,
+    update_guardian_draft,
+)
 from apps.api.services.guardian_evaluator import (
     CheckInput,
     PolicyAllocation,
-    PortfolioHolding,
-    build_category_map,
-    compute_total_value,
-    evaluate_drift,
     evaluate_category_exposure,
+    evaluate_drift,
     evaluate_staleness,
-)
-from apps.api.services.guardian import (
-    create_guardian_check,
-    confirm_guardian_check,
-    discard_guardian_check,
-    update_guardian_draft,
-    evaluate_all_checks,
-    evaluate_one_check,
-    CheckNotFoundError,
-    DraftConflictError,
-    NameConflictError,
-    InvalidCheckTypeFieldsError,
-    ConfirmRequiresDraftError,
-    DraftNotFoundError,
 )
 
 pytestmark = pytest.mark.postgres
@@ -434,8 +428,8 @@ class TestGuardianEvaluation:
             expected_revision=r["draft"]["expected_revision"],
         )
         r1 = evaluate_all_checks(db_session, household_id=hid, as_of_date=date(2026, 7, 17))
-        r2 = evaluate_all_checks(db_session, household_id=hid, as_of_date=date(2026, 7, 17))
-        # First evaluation creates event(s)
+        evaluate_all_checks(db_session, household_id=hid, as_of_date=date(2026, 7, 17))
+        # Both evaluations ran — verify dedup via events table count
         assert r1["evaluation_run"]["events_created"] >= 1
         # Dedup verified via actual events table: at most 1 event for same fingerprint
         from sqlalchemy import text

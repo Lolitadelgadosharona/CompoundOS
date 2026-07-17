@@ -12,8 +12,7 @@ from __future__ import annotations
 
 import json
 import unicodedata
-from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date
 from decimal import Decimal
 from typing import Optional, Sequence
 from uuid import UUID, uuid4
@@ -24,11 +23,9 @@ from sqlalchemy.orm import Session
 from apps.api.guardian_schemas import canonicalize_name
 from apps.api.services.guardian_evaluator import (
     CheckInput,
-    EvaluationInput,
     EvaluationResult,
     PolicyAllocation,
     PortfolioHolding,
-    SnapshotInfo,
     build_category_map,
     compute_total_value,
     evaluate_category_exposure,
@@ -776,7 +773,8 @@ def _load_check_detail(session: Session, check_id: UUID) -> dict:
         "identity": {
             "id": str(crow[0]), "household_id": str(crow[1]), "name": crow[2],
             "canonical_name": crow[3], "check_type": crow[4], "status": crow[5],
-            "created_at": str(crow[6]) if crow[6] else None, "updated_at": str(crow[7]) if crow[7] else None,
+            "created_at": str(crow[6]) if crow[6] else None,
+            "updated_at": str(crow[7]) if crow[7] else None,
         },
         "draft": {
             "threshold_value": str(drow[0]), "target_category": drow[1],
