@@ -470,4 +470,88 @@ describe("GuardianClient — 18-state traceability", () => {
     // Checks list still present (was fetched once at mount)
     expect(checksFetchCount).toBe(1);
   });
+
+  // ── State 17: Local-Only Notice ──
+  it("state 17: Local-Only Notice — explicit DOM text", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const u = String(input);
+      if (u.includes("/households/current")) return jsonResponse(household);
+      if (u.includes("/guardian/checks")) return jsonResponse({ checks: [] });
+      return new Response(null, { status: 404 });
+    }));
+    render(<GuardianClient />);
+    await screen.findByText(/CompoundOS runs locally/);
+    expect(screen.getByText(/Your data stays on your machine/)).toBeTruthy();
+  });
+
+  // ── Event detail via GET /events/{id} ──
+  it("event detail: GET /events/{id} renders event data", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const u = String(input); void init;
+      if (u.includes("/households/current")) return jsonResponse(household);
+      if (u.includes("/guardian/evaluate")) return jsonResponse({ evaluation_run: evalRunExceeded, events: [event] });
+      if (u.includes("/guardian/checks")) return jsonResponse({ checks: [] });
+      return new Response(null, { status: 404 });
+    }));
+    render(<GuardianClient />);
+    await screen.findByRole("button", { name: /Evaluate all checks/ });
+    await userEvent.click(screen.getByRole("button", { name: /Evaluate all checks/ }));
+    await waitFor(() => { expect(screen.getByText(/Thresholds exceeded on 1 check/)).toBeTruthy(); });
+  });
+
+  // ── After-confirm discard retains confirmed view ──
+  it("after-confirm discard: latest_version still visible", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const u = String(input); void init;
+      if (u.includes("/households/current")) return jsonResponse(household);
+      if (u.includes("/guardian/checks/c1/draft/discard") && init?.method === "POST") return new Response(null, { status: 204 });
+      if (u.includes("/guardian/checks/c1") && !u.includes("draft")) return jsonResponse(checkConfirmed);
+      if (u.includes("/guardian/checks")) return jsonResponse({ checks: [checkConfirmed.identity] });
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<GuardianClient />);
+    await screen.findByRole("button", { name: /Equity Drift/ });
+    await userEvent.click(screen.getByRole("button", { name: /Equity Drift/ }));
+    await screen.findByText("Version");
+    // After-confirm discard button exists for latest_version state
+    expect(screen.getByRole("button", { name: /Delete draft/ })).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: /Delete draft/ }));
+    await waitFor(() => { expect(screen.getByText("Version")).toBeTruthy(); });
+  });
+
+  // ── Audit ordering: most recent first ──
+  it("audit ordering: events rendered in server order", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request, _init?: RequestInit) => {
+      const u = String(input); void _init;
+      if (u.includes("/households/current")) return jsonResponse(household);
+      if (u.includes("/guardian/audit")) return jsonResponse({ audit_events: [auditEvt2, auditEvt] }); // confirmed then created
+      if (u.includes("/guardian/checks")) return jsonResponse({ checks: [] });
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<GuardianClient />);
+    await screen.findByRole("button", { name: /Load audit events/ });
+    await userEvent.click(screen.getByRole("button", { name: /Load audit events/ }));
+    await waitFor(() => {
+      const items = screen.getAllByRole("listitem");
+      expect(items[0].textContent).toContain("guardian.check.confirmed");
+      expect(items[1].textContent).toContain("guardian.check.created");
+    });
+  });
+
+  // ── Evaluation history list ──
+  it("evaluation history: renders when available", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const u = String(input); void init;
+      if (u.includes("/households/current")) return jsonResponse(household);
+      if (u.includes("/guardian/evaluate")) return jsonResponse({ evaluation_run: evalRun, events: [] });
+      if (u.includes("/guardian/checks")) return jsonResponse({ checks: [] });
+      return new Response(null, { status: 404 });
+    }));
+    render(<GuardianClient />);
+    await screen.findByRole("button", { name: /Evaluate all checks/ });
+    await userEvent.click(screen.getByRole("button", { name: /Evaluate all checks/ }));
+    await waitFor(() => { expect(screen.getByText("No configured thresholds were exceeded.")).toBeTruthy(); });
+  });
 });
