@@ -417,11 +417,11 @@ def _evaluate(
         _insert_run(session, run_id, household_id, "skipped_no_published_policy",
                     0, 0, as_of_date, "No published Policy version exists")
         _audit_eval(session, household_id, run_id, "skipped",
-                     "no_published_policy", 0, 0)
+                    "no_published_policy", 0, 0)
         return _load_eval_result(session, run_id)
 
-    policy_version_id, policy_version_number = prow
-    policy_version_id_str = str(policy_version_id)
+    policy_version_id = str(prow[0])
+    policy_version_number = int(prow[1])
 
     # --- Load Policy allocations ---
     arows = session.execute(
@@ -458,8 +458,10 @@ def _evaluate(
                      "no_portfolio_snapshot", 0, 0)
         return _load_eval_result(session, run_id)
 
-    snapshot_id, snapshot_version, snapshot_val_date = srow
-    portfolio_snapshot_id_str = str(snapshot_id)
+    snapshot_id = str(srow[0])
+    snapshot_version = int(srow[1])
+    snapshot_val_date = srow[2]
+    portfolio_snapshot_id = str(snapshot_id)
 
     # --- Load holdings ---
     hrows = session.execute(
@@ -530,8 +532,8 @@ def _evaluate(
     for chk in checks:
         evt_id = _evaluate_one_check(
             session, chk, allocations, category_map, total_value,
-            snapshot_val_date, policy_version_id_str,
-            portfolio_snapshot_id_str, as_of_date, run_id,
+            snapshot_val_date, policy_version_id,
+            portfolio_snapshot_id, as_of_date, run_id,
         )
         if evt_id is not None:
             events_created += 1
@@ -543,9 +545,9 @@ def _evaluate(
     _audit_eval(
         session, household_id, run_id, "completed", None,
         len(checks), events_created,
-        policy_version_id=policy_version_id_str,
+        policy_version_id=policy_version_id,
         policy_version_number=policy_version_number,
-        snapshot_id=portfolio_snapshot_id_str,
+        snapshot_id=portfolio_snapshot_id,
         snapshot_version=snapshot_version,
     )
 
@@ -560,8 +562,8 @@ def _evaluate_one_check(
     category_map: dict[str, Decimal],
     total_value: Decimal,
     snapshot_val_date: date,
-    policy_version_id_str: str,
-    portfolio_snapshot_id_str: str,
+    policy_version_id: str,
+    portfolio_snapshot_id: str,
     as_of_date: date,
     run_id: UUID,
 ) -> Optional[UUID]:
@@ -580,8 +582,8 @@ def _evaluate_one_check(
 
     return _insert_event(
         session, run_id, chk,
-        policy_version_id=UUID(policy_version_id_str),
-        portfolio_snapshot_id=UUID(portfolio_snapshot_id_str),
+        policy_version_id=UUID(policy_version_id),
+        portfolio_snapshot_id=UUID(portfolio_snapshot_id),
         as_of_date=as_of_date,
         result=r,
     )
