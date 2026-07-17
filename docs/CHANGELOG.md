@@ -4,17 +4,21 @@
 
 ### Added
 
-- Portfolio persistence foundation: six tables, CHECK constraints, PL/pgSQL triggers (0004)
-- Portfolio API: 9 endpoints under /api/portfolio (Slice B)
-- Cash unit_price = 1.00 DB constraint (0005, additive)
-- Controlled snapshot status transition current→superseded (0006, additive)
-- Future-proof JSONB row comparison trigger for immutability
-- 41 API tests + 20 gate tests + 20 trigger/confirm/migration tests
+- Portfolio API: 9 endpoints under /api/portfolio
+- Cash unit_price = 1.00 database CHECK constraint (migration 0005, additive)
+- Controlled snapshot status transition current→superseded (migration 0006, additive)
+- Future-proof JSONB row comparison in immutability trigger
+- Comprehensive API, gate, trigger, migration, and concurrency tests
+
+### Changed
+
+- Portfolio status semantics: 'draft' = draft exists; 'active' = confirmed, no draft
+- Snapshot current→superseded transition allowed per Owner Decision Option A
 
 ### Fixed
 
-- 0004 snapshot immutability trigger defect: allowed controlled status-only UPDATE
-- 0004 deferred trigger active+draft semantics clarified
+- 0004 snapshot immutability trigger: allowed controlled status-only UPDATE via 0006
+- Deferred trigger active+draft semantics clarified per Owner Decision
 
 ## [Unreleased] - Sprint 002 Slice 3B Complete
 

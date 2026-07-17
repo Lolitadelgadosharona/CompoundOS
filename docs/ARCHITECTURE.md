@@ -270,3 +270,31 @@ and CI toolchain.
   architecture requires separate approval.
 - Full Docker runtime and browser-path validation remains pending.
 - Decision Journal work remains outside Slice 2 and unauthorized as Slice 3.
+
+## Portfolio Architecture (Sprint 003)
+
+### Status Semantics
+
+- `portfolio.status = 'draft'`: an editable draft row exists.
+  The most recent confirmed snapshot remains `current` and readable.
+- `portfolio.status = 'active'`: no draft row; at least one confirmed snapshot.
+- Portfolio lifecycle trigger (0004) permits `draft↔active` transitions only.
+
+### Snapshot Immutability
+
+- Snapshot rows and snapshot holdings are immutable.
+- Exception: `current→superseded` status transition, allowed via migration 0006.
+  All other UPDATE and all DELETE are rejected.
+- Future-proof JSONB row comparison: `(to_jsonb(NEW) - 'status')`
+  `IS NOT DISTINCT FROM (to_jsonb(OLD) - 'status')`.
+  Any column added to portfolio_snapshots in future migrations is automatically
+  protected without trigger modification.
+
+### Migration Chain
+
+- 0004 (`portfolio_foundation`): six tables, triggers, constraints (Slice A).
+  Unmodified since merge.
+- 0005 (`portfolio_cash_unit_price`): additive CHECK constraint for cash
+  holdings — `asset_category != 'cash' OR unit_price = 1.00`.
+- 0006 (`portfolio_snapshot_status`): controlled status transition.
+  All migrations are additive after 0004; 0004 and 0005 are unchanged.

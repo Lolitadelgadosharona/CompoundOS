@@ -570,12 +570,18 @@ def test_0006_bypass_per_column(col: str, postgres_engine) -> None:
         )
 
         tamper_sql = _tamper_sql(col, snid)
-        with pytest.raises(Exception) as exc_info:
+        from sqlalchemy.exc import DBAPIError
+
+        with pytest.raises(DBAPIError) as exc_info:
             conn.execute(text(tamper_sql))
-        err = str(exc_info.value)
-        # Must be our trigger error, not SQL syntax or unrelated constraint
-        assert "column_not_allowed" in err, (
-            f"Column '{col}': expected 'column_not_allowed', got: {err[:200]}"
+        primary = getattr(
+            getattr(exc_info.value.orig, "diag", None),
+            "message_primary",
+            None,
+        )
+        assert primary == "portfolio_snapshot_update_column_not_allowed", (
+            f"Column '{col}': expected message_primary "
+            f"'portfolio_snapshot_update_column_not_allowed', got {primary!r}"
         )
 
 
