@@ -118,7 +118,7 @@ def upsert_draft(
 ) -> GuardianCheckDraft:
     draft = session.get(GuardianCheckDraft, check_id)
     if draft is None:
-        draft = GuardianCheckDraft(check_id=check_id)
+        draft = GuardianCheckDraft(check_id=check_id, expected_revision=0)
         session.add(draft)
     draft.threshold_value = threshold_value
     draft.target_category = target_category
