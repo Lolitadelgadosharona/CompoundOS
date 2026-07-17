@@ -58,7 +58,7 @@ Correction means a new snapshot. Simple, auditable. Rejected — no draft
 workflow for user editing, and "correction by new snapshot" conflates distinct
 intents.
 
-### Approach C: Stable Identity + Draft + Immutable Snapshot (RECOMMENDED)
+### Approach C: Stable Identity + Draft + Immutable Snapshot (RECOMMENDED — OD-S3-002 Resolved: Option C)
 
 Reuses the proven Policy/Decision pattern:
 
@@ -141,7 +141,7 @@ portfolio_snapshot_holdings
   prohibits all UPDATE and DELETE on snapshots and snapshot_holdings
 - `fn_portfolio_draft_consistency`: DEFERRED CONSTRAINT TRIGGER — verifies at
   COMMIT that draft state (portfolio_drafts row) has at least one holding when
-  status transitions from draft to active (pending OD-S3-011)
+  status transitions from draft to active (OD-S3-011 Resolved: Option B — zero holdings allowed)
 - `fn_portfolio_lifecycle`: BEFORE UPDATE on portfolios — permits only
   draft→active transition
 
@@ -149,22 +149,24 @@ portfolio_snapshot_holdings
 
 ## 3. Asset Fields
 
-### Required Fields per Holding (pending OD-S3-005/006)
+### Required Fields per Holding (OD-S3-005 Resolved: Option B, OD-S3-006 Resolved: Option B)
 
 | Field | Type | Constraint | Notes |
 |-------|------|------------|-------|
-| asset_name | VARCHAR(500) | NOT NULL, trimmed | User-defined; no symbol validation |
-| quantity | NUMERIC(20,8) | > 0 | Fractional quantities allowed |
-| unit_price | NUMERIC(20,4) | >= 0 | User-entered; zero allowed for unknown |
-| total_value | NUMERIC(20,2) | COMPUTED | quantity × unit_price (authoritative per OD-S3-006 B) |
+| asset_name | VARCHAR(500) | NOT NULL, trimmed | User-defined |
+| asset_category | VARCHAR(200) | NOT NULL | User label |
+| quantity | NUMERIC(20,8) | NOT NULL, > 0 | Fractional allowed |
+| unit_price | NUMERIC(20,4) | NOT NULL, >= 0 | User-entered |
+| total_value | NUMERIC(20,2) | COMPUTED | quantity × unit_price (server-computed per OD-S3-006) |
+| valuation_date | DATE | NOT NULL, <= CURRENT_DATE | Required per OD-S3-005 |
 
 ### Optional Fields
 
 | Field | Type | Notes |
 |-------|------|-------|
-| asset_category | VARCHAR(200) | User label; not validated against enum |
-| valuation_date | DATE | Per-holding override; defaults to draft snapshot date |
-| notes | TEXT | Free text; no financial interpretation |
+| notes | TEXT | Free text |
+| account_id | UUID (nullable FK) | Optional Account label (OD-S3-004 Resolved: Option B) |
+| sort_order | INTEGER | Display ordering |
 
 ### Cash Position (OD-S3-012 — Resolved: Option A)
 
@@ -194,7 +196,7 @@ Private assets are allowed with the following constraints:
 
 ---
 
-## 4. Currency and Precision
+## 4. Currency and Precision (OD-S3-008 Resolved: Option A)
 
 ### Single Currency (OD-S3-008)
 
@@ -231,7 +233,7 @@ calculations are performed.
 
 ---
 
-## 5. Lifecycle
+## 5. Lifecycle (OD-S3-009 Resolved: Option A)
 
 ### States
 
@@ -311,7 +313,7 @@ common case: "I started Draft v3, changed my mind, keep what was Confirmed."
 
 ---
 
-## 6. Single Household and Portfolio
+## 6. Single Household and Portfolio (OD-S3-003 Resolved: Option A)
 
 - One Portfolio per Household (OD-S3-003 A)
 - Portfolio created automatically with first Draft (or explicit create)
@@ -419,7 +421,7 @@ transaction — commit or rollback together.
 
 ---
 
-## 10. AuditEvent
+## 10. AuditEvent (OD-S3-014 Resolved: Option B)
 
 ### Action Names (proposed)
 
@@ -553,7 +555,7 @@ Audit events contain zero financial values. Only structural metadata
 
 ---
 
-## 14. Implementation Slices
+## 14. Implementation Slices (OD-S3-015 Resolved: Option A)
 
 Each slice requires separate explicit Owner authorization.
 Naming uses "Sprint 003 Slice A/B/C" to avoid confusion with
