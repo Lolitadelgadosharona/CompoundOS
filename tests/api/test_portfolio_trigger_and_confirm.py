@@ -29,8 +29,8 @@ def test_0006_current_to_superseded_succeeds(postgres_engine) -> None:
     """current→superseded with no other column changes succeeds."""
     with postgres_engine.begin() as conn:
         conn.execute(
-            text("INSERT INTO household_profiles (id, household_name, base_currency, investment_horizon) "
-                 "VALUES (gen_random_uuid(), 'trig', 'USD')")
+            text("INSERT INTO household_profiles  (id, household_name, base_currency, investment_horizon) "  # noqa: E501
+                 "VALUES (gen_random_uuid(), 'trig', 'USD', '')")
         )
         hh = conn.execute(text("SELECT id FROM household_profiles")).fetchone()
         conn.execute(
@@ -71,8 +71,8 @@ def test_0006_superseded_to_current_fails(postgres_engine) -> None:
     """superseded→current is forbidden."""
     with postgres_engine.begin() as conn:
         conn.execute(
-            text("INSERT INTO household_profiles (id, household_name, base_currency, investment_horizon) "
-                 "VALUES (gen_random_uuid(), 'trig2', 'USD')")
+            text("INSERT INTO household_profiles  (id, household_name, base_currency, investment_horizon) "  # noqa: E501
+                 "VALUES (gen_random_uuid(), 'trig2', 'USD', '')")
         )
         hh = conn.execute(text("SELECT id FROM household_profiles")).fetchone()
         conn.execute(
@@ -107,8 +107,8 @@ def test_0006_current_update_business_field_fails(postgres_engine) -> None:
     """Changing any non-status column during status transition fails."""
     with postgres_engine.begin() as conn:
         conn.execute(
-            text("INSERT INTO household_profiles (id, household_name, base_currency, investment_horizon) "
-                 "VALUES (gen_random_uuid(), 'trig3', 'USD')")
+            text("INSERT INTO household_profiles  (id, household_name, base_currency, investment_horizon) "  # noqa: E501
+                 "VALUES (gen_random_uuid(), 'trig3', 'USD', '')")
         )
         hh = conn.execute(text("SELECT id FROM household_profiles")).fetchone()
         conn.execute(
@@ -144,8 +144,8 @@ def test_0006_superseded_business_field_update_fails(postgres_engine) -> None:
     """Updating a superseded snapshot's business fields fails."""
     with postgres_engine.begin() as conn:
         conn.execute(
-            text("INSERT INTO household_profiles (id, household_name, base_currency, investment_horizon) "
-                 "VALUES (gen_random_uuid(), 'trig4', 'USD')")
+            text("INSERT INTO household_profiles  (id, household_name, base_currency, investment_horizon) "  # noqa: E501
+                 "VALUES (gen_random_uuid(), 'trig4', 'USD', '')")
         )
         hh = conn.execute(text("SELECT id FROM household_profiles")).fetchone()
         conn.execute(
@@ -180,8 +180,8 @@ def test_0006_snapshot_delete_still_forbidden(postgres_engine) -> None:
     """DELETE on snapshots still rejected."""
     with postgres_engine.begin() as conn:
         conn.execute(
-            text("INSERT INTO household_profiles (id, household_name, base_currency, investment_horizon) "
-                 "VALUES (gen_random_uuid(), 'trig5', 'USD')")
+            text("INSERT INTO household_profiles  (id, household_name, base_currency, investment_horizon) "  # noqa: E501
+                 "VALUES (gen_random_uuid(), 'trig5', 'USD', '')")
         )
         hh = conn.execute(text("SELECT id FROM household_profiles")).fetchone()
         conn.execute(
@@ -213,8 +213,8 @@ def test_0006_snapshot_holdings_still_immutable(postgres_engine) -> None:
     """Snapshot holdings UPDATE and DELETE still forbidden."""
     with postgres_engine.begin() as conn:
         conn.execute(
-            text("INSERT INTO household_profiles (id, household_name, base_currency, investment_horizon) "
-                 "VALUES (gen_random_uuid(), 'trig6', 'USD')")
+            text("INSERT INTO household_profiles  (id, household_name, base_currency, investment_horizon) "  # noqa: E501
+                 "VALUES (gen_random_uuid(), 'trig6', 'USD', '')")
         )
         hh = conn.execute(text("SELECT id FROM household_profiles")).fetchone()
         conn.execute(
@@ -550,7 +550,7 @@ def test_0006_bypass_per_column(col: str, postgres_engine) -> None:
     """Cannot modify any non-status column during current→superseded."""
     with postgres_engine.begin() as conn:
         conn.execute(
-            text("INSERT INTO household_profiles (id, household_name, base_currency, investment_horizon) "
+            text("INSERT INTO household_profiles  (id, household_name, base_currency, investment_horizon) "  # noqa: E501
                  "VALUES (gen_random_uuid(), :n, 'USD', '')"),
             {"n": f"bp_{col}"},
         )
@@ -634,8 +634,8 @@ def test_0006_downgrade_restores_strict_immutability(postgres_engine) -> None:
     """After downgrade, ALL UPDATEs on snapshots are rejected again."""
     with postgres_engine.begin() as conn:
         conn.execute(
-            text("INSERT INTO household_profiles (id, household_name, base_currency, investment_horizon) "
-                 "VALUES (gen_random_uuid(), 'downgrade', 'USD')")
+            text("INSERT INTO household_profiles  (id, household_name, base_currency, investment_horizon) "  # noqa: E501
+                 "VALUES (gen_random_uuid(), 'downgrade', 'USD', '')")
         )
         hh = conn.execute(text("SELECT id FROM household_profiles")).fetchone()
         conn.execute(
