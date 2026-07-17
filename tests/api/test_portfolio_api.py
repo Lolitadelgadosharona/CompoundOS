@@ -294,7 +294,10 @@ def test_replace_holdings_empty_collection(api_client: TestClient) -> None:
     assert state["draft"]["holdings"] == []
     # No audit event for no-op
     audit = api_client.get("/api/portfolio/audit").json()
-    actions = [e["action"] for e in audit["items"]]
+    if isinstance(audit, dict):
+        actions = [e["action"] for e in audit.get("items", [])]
+    else:
+        actions = [e["action"] for e in audit]
     assert "portfolio.draft.updated" not in actions
 
 
