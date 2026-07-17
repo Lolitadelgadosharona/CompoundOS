@@ -68,7 +68,7 @@ def _create_policy(session: Session, hid: UUID) -> UUID:
     pid = uuid4()
     pvid = uuid4()
     session.execute(
-        text("INSERT INTO investment_policies (id, household_id, status) VALUES (:id, :hid, 'published')"),
+        text("INSERT INTO investment_policies (id, household_id) VALUES (:id, :hid)"),
         {"id": pid, "hid": hid},
     )
     session.execute(

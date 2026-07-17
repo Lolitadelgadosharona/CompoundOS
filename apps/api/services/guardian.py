@@ -755,9 +755,9 @@ def _load_check_detail(session: Session, check_id: UUID) -> dict:
 
     return {
         "identity": {
-            "id": crow[0], "household_id": crow[1], "name": crow[2],
+            "id": str(crow[0]), "household_id": str(crow[1]), "name": crow[2],
             "canonical_name": crow[3], "check_type": crow[4], "status": crow[5],
-            "created_at": crow[6], "updated_at": crow[7],
+            "created_at": str(crow[6]) if crow[6] else None, "updated_at": str(crow[7]) if crow[7] else None,
         },
         "draft": {
             "threshold_value": str(drow[0]), "target_category": drow[1],
@@ -766,11 +766,11 @@ def _load_check_detail(session: Session, check_id: UUID) -> dict:
             "expected_revision": drow[6], "updated_at": drow[7],
         } if drow else None,
         "latest_version": {
-            "id": lrow[0], "check_id": lrow[1], "version_number": lrow[2],
+            "id": str(lrow[0]), "check_id": str(lrow[1]), "version_number": lrow[2],
             "check_type": lrow[3], "threshold_value": str(lrow[4]),
             "target_category": lrow[5], "target_holding_category": lrow[6],
             "staleness_days": lrow[7], "severity": lrow[8],
-            "notes": lrow[9], "confirmed_at": lrow[10],
+            "notes": lrow[9], "confirmed_at": str(lrow[10]) if lrow[10] else None,
         } if lrow else None,
     }
 
