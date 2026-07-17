@@ -338,8 +338,9 @@ guardian_events
   exceeded BOOLEAN NOT NULL DEFAULT TRUE — always TRUE for events (only exceeded thresholds are recorded)
   as_of_date DATE NOT NULL — copied from parent evaluation run, enables staleness dedup
   — BEFORE INSERT/UPDATE/DELETE trigger prohibits all modification
-  — UNIQUE fingerprint on (check_version_id, policy_version_id, portfolio_snapshot_id, as_of_date)
-    for staleness; (check_version_id, policy_version_id, portfolio_snapshot_id) for drift/exposure
+  — UNIQUE fingerprint on (check_version_id, portfolio_snapshot_id, as_of_date)
+    for staleness; (check_version_id, policy_version_id, portfolio_snapshot_id) for drift/exposure.
+    as_of_date is NOT included in drift/exposure fingerprints.
 ```
 
 ---
