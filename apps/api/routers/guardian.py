@@ -161,7 +161,7 @@ def api_update_draft(
     return _build_detail(**result)
 
 
-@router.post("/checks/{check_id}/confirm")
+@router.post("/checks/{check_id}/draft/confirm")
 def api_confirm_check(
     check_id: UUID,
     body: GuardianCheckConfirm,
@@ -180,7 +180,7 @@ def api_confirm_check(
     return _build_detail(**result)
 
 
-@router.post("/checks/{check_id}/discard", status_code=status.HTTP_204_NO_CONTENT)
+@router.post("/checks/{check_id}/draft/discard", status_code=status.HTTP_204_NO_CONTENT)
 def api_discard_check(
     check_id: UUID,
     body: GuardianCheckDiscard,
@@ -244,7 +244,7 @@ def api_evaluate_one(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/runs")
+@router.get("/evaluations")
 def api_list_runs(
     session: DatabaseSession,
     limit: int = Query(50, ge=1, le=200),
@@ -266,7 +266,7 @@ def api_list_runs(
     }
 
 
-@router.get("/runs/{run_id}")
+@router.get("/evaluations/{run_id}")
 def api_get_run(run_id: UUID, session: DatabaseSession):
     _hid(session)
     run = get_evaluation_run(session, run_id)
@@ -326,5 +326,64 @@ def api_list_events(
                 "detected_at": e.detected_at,
             }
             for e in events
+        ]
+    }
+
+
+@router.get("/events/{event_id}")
+def api_get_event(event_id: UUID, session: DatabaseSession):
+    """Single event detail."""
+    _hid(session)
+    row = session.execute(
+        text(
+            "SELECT id, evaluation_run_id, check_id, check_version_id, check_type,"
+            " policy_version_id, portfolio_snapshot_id, exceeded,"
+            " drift_pp, exposure_pct, staleness_days_actual, as_of_date, detected_at"
+            " FROM guardian_events WHERE id = :eid"
+        ),
+        {"eid": event_id},
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Guardian event not found")
+    return {
+        "id": str(row[0]), "evaluation_run_id": str(row[1]),
+        "check_id": str(row[2]), "check_version_id": str(row[3]),
+        "check_type": row[4], "policy_version_id": str(row[5]),
+        "portfolio_snapshot_id": str(row[6]), "exceeded": row[7],
+        "drift_pp": str(row[8]) if row[8] else None,
+        "exposure_pct": str(row[9]) if row[9] else None,
+        "staleness_days_actual": row[10],
+        "as_of_date": str(row[11]) if row[11] else None,
+        "detected_at": row[12],
+    }
+
+
+@router.get("/audit")
+def api_get_audit(
+    session: DatabaseSession,
+    limit: int = Query(50, ge=1, le=200),
+):
+    """Cursor-paginated Guardian audit events. Metadata excludes financial values."""
+    hid = _hid(session)
+    rows = session.execute(
+        text(
+            "SELECT id, actor, action, entity_type, entity_id, metadata, occurred_at"
+            " FROM audit_events"
+            " WHERE household_id = :hid"
+            " AND entity_type IN ('guardian_check', 'guardian_evaluation_run')"
+            " ORDER BY occurred_at DESC LIMIT :limit"
+        ),
+        {"hid": UUID(hid), "limit": limit},
+    ).fetchall()
+    import json
+    return {
+        "audit_events": [
+            {
+                "id": str(r[0]), "actor": r[1], "action": r[2],
+                "entity_type": r[3], "entity_id": str(r[4]),
+                "metadata": r[5] if isinstance(r[5], dict) else json.loads(r[5]) if r[5] else {},
+                "occurred_at": r[6],
+            }
+            for r in rows
         ]
     }
