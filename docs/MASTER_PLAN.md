@@ -26,10 +26,10 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   - Slice A (Persistence): Done (PR #20, merge e9743a5)
   - Slice B (Backend API): Done (PR #21)
   - Slice C (Frontend): Done (PR #22, merge 0a841d4)
-- Sprint 004: Guardian Monitoring Foundation — Technical Design Gate In Review
-  - Slice A (Persistence): Not Authorized / Not Started
-  - Slice B (Backend API): Not Authorized / Not Started
-  - Slice C (Frontend): Not Authorized / Not Started
+- Sprint 004: Guardian Monitoring Foundation — Done ✓
+  - Slice A (Persistence): Done (PR #26, migration 0007)
+  - Slice B (Backend API): Done (PR #27, #28, #29, #30, #31)
+  - Slice C (Frontend): Done (PR #32, #33, #34, #35)
 - Sprint 005: Not Authorized / Not Started
 
 ## Backlog

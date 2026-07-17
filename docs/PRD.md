@@ -5,7 +5,8 @@
 Approved behavior includes the Slice 1 Household workflow, the Slice 2B local-only
 Investment Policy backend API, the Slice 2C local-only Policy frontend, the
 Slice 3B Decision Journal backend API, and the Slice C Portfolio frontend.
-Sprint 002 is Done; Sprint 003 (Slices A, B, C) is Done; Sprint 004 is Not Authorized.
+Sprint 002 is Done; Sprint 003 (Slices A, B, C) is Done; Sprint 004 (Slices A, B, C) is Done.
+Sprint 005 is Not Authorized.
 
 ## Summary
 
