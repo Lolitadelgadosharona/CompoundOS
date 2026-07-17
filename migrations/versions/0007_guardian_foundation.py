@@ -236,6 +236,10 @@ def upgrade() -> None:
             "check_id", "version_number",
             name="uq_guardian_check_confirmed_version",
         ),
+        sa.UniqueConstraint(
+            "id", "check_type",
+            name="uq_guardian_check_confirmed_id_type",
+        ),
     )
 
     op.execute(
@@ -348,12 +352,14 @@ def upgrade() -> None:
         sa.Column(
             "check_version_id",
             sa.Uuid(),
-            sa.ForeignKey(
-                "guardian_check_confirmed.id",
-                name="fk_guardian_events_check_version_id",
-                ondelete="RESTRICT",
-            ),
             nullable=False,
+        ),
+        sa.Column("check_type", sa.Text(), nullable=False),
+        sa.ForeignKeyConstraint(
+            ["check_version_id", "check_type"],
+            ["guardian_check_confirmed.id", "guardian_check_confirmed.check_type"],
+            name="fk_guardian_events_check_version_type",
+            ondelete="RESTRICT",
         ),
         sa.Column(
             "policy_version_id",
@@ -381,7 +387,6 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.func.now(),
         ),
-        sa.Column("check_type", sa.Text(), nullable=False),
         sa.Column("drift_pp", sa.Numeric(5, 2), nullable=True),
         sa.Column("exposure_pct", sa.Numeric(5, 2), nullable=True),
         sa.Column("staleness_days_actual", sa.Integer(), nullable=True),

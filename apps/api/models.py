@@ -1006,6 +1006,10 @@ class GuardianCheckConfirmed(Base):
             "check_id", "version_number",
             name="uq_guardian_check_confirmed_version",
         ),
+        UniqueConstraint(
+            "id", "check_type",
+            name="uq_guardian_check_confirmed_id_type",
+        ),
         Index("ix_guardian_check_confirmed_check", "check_id"),
     )
 
