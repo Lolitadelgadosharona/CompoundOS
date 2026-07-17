@@ -166,19 +166,31 @@ portfolio_snapshot_holdings
 | valuation_date | DATE | Per-holding override; defaults to draft snapshot date |
 | notes | TEXT | Free text; no financial interpretation |
 
-### Cash Position (OD-S3-012)
+### Cash Position (OD-S3-012 — Resolved: Option A)
 
-Cash is treated as a holding with asset_name = "Cash" or equivalent.
-No special cash table or separate treatment. If the user records no
-holdings, the confirmed snapshot reflects that state. Note: a zero-holding
-confirmed snapshot means "no recorded assets" — this is distinct from
-explicitly recording a Cash holding. The UI should make this distinction
-clear.
+Cash is treated as a holding with asset_category = "cash":
+- asset_name: user-defined (e.g., "Operating Cash", "Emergency Fund").
+  Must not contain account numbers or financial institution identifiers.
+- quantity: represents the cash amount in the portfolio currency.
+- unit_price: fixed at 1.00 — this makes cash holdings directly
+  comparable to other assets without special treatment.
+- total_value: equals quantity × 1.00.
+- currency: must equal the Portfolio/Household base currency.
+- No bank balance synchronization, interest accrual, cash flow
+  projection, or cash allocation recommendation is implemented.
 
-### Private Assets (OD-S3-013)
+### Private Assets (OD-S3-013 — Resolved: Option A)
 
-Any asset name is accepted. No regulatory classification, no validation
-against exchange listings. "Private" is just an asset_category label.
+Private assets are allowed with the following constraints:
+- Valuation is manual only — provenance/source is fixed to "manual".
+- valuation_date is required.
+- If a natural quantity is inapplicable (e.g., a single private company
+  holding), quantity = 1 and unit_price = user's total valuation.
+- The UI must display "User-entered private asset valuation" — never
+  imply liquidity, marketability, market price, or valuation accuracy.
+- No external valuation service, automatic classification, or
+  recommendation is implemented.
+- Category "private" is a user label only.
 
 ---
 
@@ -198,13 +210,24 @@ rate, no multi-currency support in MVP.
 | unit_price | NUMERIC(20,4) | Decimal | Decimal string |
 | total_value | NUMERIC(20,2) | Decimal (computed) | Decimal string |
 
-total_value is computed as quantity × unit_price then rounded to 2 decimal
-places (cents) using ROUND_HALF_EVEN or Decimal quantization. This is
-intentional currency rounding (to cents), not IEEE 754 floating-point
-error. The Policy "no silent rounding" principle was about avoiding binary
-floating-point artifacts; currency rounding to cents is explicit and
-deterministic. API values remain decimal strings matching the stored
-precision.
+All monetary amounts and quantities are transmitted as decimal strings
+through the API boundary. Backend uses Python Decimal exclusively.
+Database uses PostgreSQL NUMERIC with explicit precision. No IEEE 754
+floating-point (JavaScript Number, Python float) in any authoritative
+computation.
+
+total_value is computed server-side as quantity × unit_price then rounded
+to 2 decimal places using ROUND_HALF_EVEN or Decimal quantization. The
+client never submits an authoritative total_value — the server computes it.
+If a submitted decimal exceeds the declared precision, the API returns 422.
+
+Draft responses and Confirmed Snapshots store normalized decimal strings
+matching the declared precision (e.g., quantity "100.00000000", unit_price
+"150.5000", total_value "15050.00").
+
+No silent rounding. All rounding is explicit, deterministic, and
+documented. No performance, return, gain/loss, or portfolio aggregation
+calculations are performed.
 
 ---
 
@@ -244,15 +267,33 @@ precision.
 - Sets portfolio.status = active
 - Portfolio → Draft lock ordering
 - Response built from transaction-scoped data
+- Zero holdings allowed (OD-S3-011 Resolved: Option B):
+  UI must display explicit "0 holdings — no assets recorded" warning
+  before Confirm. Empty snapshot is a deliberate user action, not a
+  default. audit_events metadata records holding_count = 0.
+- Manual price constraint (OD-S3-007 Resolved: Option A):
+  unit_price field requires valuation_date and provenance = "manual".
+  UI displays "User-entered value" — never implies current or verified
+  market price. No market data call, no automatic refresh, no price
+  prediction.
 
-### No Supersession, Archive, or Correction
+### Confirmed Snapshot Immutability (OD-S3-010 — Resolved: Option A)
+
+Once Confirmed, snapshots are permanently immutable. Corrections create
+a new Snapshot — always append, never modify. The new Snapshot explicitly
+references the source Snapshot it corrects. When the new Snapshot is
+Confirmed, it becomes the current Snapshot; the previous current becomes
+Superseded. All historical Snapshots are permanently preserved in the
+local MVP database. Corrections cannot alter the audit history or
+silently overwrite prior records.
+
+### No Supersession, Archive, or Correction (beyond new Snapshot)
 
 Unlike Policy Versions (which supersede) and Decisions (which archive),
 Portfolio Snapshots are discrete independent records. Each Confirm creates
-a new Snapshot. The previous Snapshot is unchanged. This avoids:
-- "current snapshot" semantics ambiguity
-- Supersession race conditions
-- Archive lifecycle complexity
+a new Snapshot. The previous Snapshot is unchanged except for its status
+transition. This avoids "current snapshot" semantics ambiguity,
+supersession race conditions, and archive lifecycle complexity.
 
 ### Discard
 
@@ -277,16 +318,15 @@ common case: "I started Draft v3, changed my mind, keep what was Confirmed."
 - No "delete portfolio" endpoint — immutable history
 - No portfolio rename in MVP
 
-### Account Entity (OD-S3-004)
+### Account Entity (OD-S3-004 — Resolved: Option B)
 
-Recommendation B: Optional user-named Account labels as a local logical
-container. If accepted:
-- `accounts` table: id, portfolio_id, name, notes, sort_order
-- `portfolio_draft_holdings.account_id` (nullable FK)
-- Account is never a financial account — no institution, no number, no
-  credentials. Pure user labeling.
-
-If rejected (Option A), holdings are flat under Portfolio with no grouping.
+Account is an optional local label — a user-organizational container only.
+- Table: accounts (id, portfolio_id, name, notes, sort_order)
+- Account name is user-defined (e.g., "Retirement", "Taxable")
+- No account numbers, routing numbers, institution identifiers,
+  credentials, or API keys are stored
+- Account label must not imply connection to a financial institution
+- No account synchronization or institution verification
 
 ---
 
@@ -555,10 +595,10 @@ Sprint 002 Slice 3A/3B/3C.
 
 ## Owner Decision Status
 
-All 15 Owner Decisions (OD-S3-001 through OD-S3-015) are documented in
-`docs/sprints/SPRINT_003_OPEN_QUESTIONS.md`. This Technical Design reflects
-the RECOMMENDED options but does NOT resolve them. Every section above that
-depends on an Owner Decision is marked with the relevant OD reference.
+All 15 Owner Decisions (OD-S3-001 through OD-S3-015) are **Resolved**
+by Project Owner on 2026-07-17. See `docs/sprints/SPRINT_003_OPEN_QUESTIONS.md`
+for the full decision table with selected options, rejected alternatives,
+and additional constraints.
 
-**This design does not authorize implementation.** Each slice requires
-separate authorization after Owner Decisions are resolved.
+**This design is approved.** Sprint 003 implementation is NOT authorized.
+Each slice (A: DB, B: API, C: Frontend) requires separate authorization.
