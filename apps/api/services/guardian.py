@@ -726,7 +726,7 @@ def _load_check_detail(session: Session, check_id: UUID) -> dict:
     crow = session.execute(
         text(
             "SELECT id, household_id, name, canonical_name, check_type, status,"
-            " started_at, updated_at FROM guardian_checks WHERE id = :cid"
+            " created_at, updated_at FROM guardian_checks WHERE id = :cid"
         ),
         {"cid": check_id},
     ).fetchone()
@@ -757,7 +757,7 @@ def _load_check_detail(session: Session, check_id: UUID) -> dict:
         "identity": {
             "id": crow[0], "household_id": crow[1], "name": crow[2],
             "canonical_name": crow[3], "check_type": crow[4], "status": crow[5],
-            "started_at": crow[6], "updated_at": crow[7],
+            "created_at": crow[6], "updated_at": crow[7],
         },
         "draft": {
             "threshold_value": str(drow[0]), "target_category": drow[1],
