@@ -193,7 +193,7 @@ non-advisory Guardian Events.
 
 - Detect when Portfolio holdings drift from Policy target allocations by more
   than an Owner-defined threshold.
-- Detect when a holding category exceeds an Owner-defined concentration limit.
+- Detect when a holding category exceeds an Owner-defined exposure limit.
 - Detect when a Portfolio Snapshot is older than an Owner-defined staleness
   threshold (no recent valuation).
 - Record every detection as an immutable GuardianEvent with the specific Policy
@@ -288,8 +288,8 @@ guardian_checks
 guardian_check_drafts
   check_id UUID PK+FK → guardian_checks (ON DELETE CASCADE)
   threshold_value NUMERIC(5,2) NOT NULL CHECK(> 0 AND <= 100)
-  target_category VARCHAR(200) — for drift/concentration, which Policy category to compare
-  target_holding_category VARCHAR(200) — for drift/concentration, which Portfolio category to compare
+  target_category VARCHAR(200) — for drift, which Policy category to compare
+  target_holding_category VARCHAR(200) — for drift/category_exposure, which Portfolio category to compare
   staleness_days INTEGER — for staleness checks, max age in days
   severity VARCHAR(20) CHECK(info|warning|critical) DEFAULT 'info'
   notes TEXT
@@ -476,7 +476,7 @@ and must satisfy the trim + NFKC + casefold normalization used for matching.
 
 ## 9. Currency and Precision
 
-All drift and concentration percentages use NUMERIC(5,2) (matching Policy
+All drift, category exposure, and staleness values use NUMERIC(5,2) (matching Policy
 allocation precision). Total portfolio value uses NUMERIC(20,2). All
 computation uses Python Decimal with ROUND_HALF_EVEN. API boundary uses
 decimal strings.
@@ -549,7 +549,7 @@ Based on the Policy/Portfolio/Decision frontend patterns:
 9. Event Detail — rule evaluated, versions referenced, result
 10. Evaluate Button — manual trigger with loading state
 11. Evaluation In Progress — progress indicator
-12. Evaluation Complete — summary (N passed, M exceeded)
+12. Evaluation Complete — summary (N within bounds, M exceeded)
 13. Audit Timeline — Guardian-filtered audit events
 14. 409 Conflict — ConflictPanel with reload
 15. 404 / Network Error — neutral error with retry
@@ -648,7 +648,7 @@ No financial values (quantities, prices, total_values) in audit metadata.
 - Repository queries with FOR UPDATE
 - Service transaction boundaries (lock order: Household → Check)
 - All /api/guardian endpoints
-- Evaluation engine (drift, concentration, staleness computation)
+- Evaluation engine (drift, category_exposure, staleness computation)
 - Concurrency tests
 - Guardian-filtered AuditEvent reads
 - No frontend
