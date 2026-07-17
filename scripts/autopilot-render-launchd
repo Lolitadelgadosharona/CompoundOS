@@ -1,0 +1,172 @@
+#!/usr/bin/env python3
+"""
+CompoundOS Safe Autopilot — Launchd Plist Renderer
+Renders the launchd template with absolute paths and validates output.
+Does NOT install the service.
+"""
+import os, sys, subprocess, tempfile
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+AUTOPILOT_ROOT = os.path.join(REPO_ROOT, '.autopilot')
+TEMPLATE_PATH = os.path.join(AUTOPILOT_ROOT, 'launchd', 'com.compoundos.autopilot.plist')
+
+try:
+    import plistlib
+except ImportError:
+    print("ERROR: plistlib not available", file=sys.stderr)
+    sys.exit(1)
+
+
+def render_launchd(output_path=None, repo_root=None, home=None):
+    """Render the launchd plist template with absolute paths.
+    Returns (rendered_path, warnings) tuple."""
+    if repo_root is None:
+        repo_root = REPO_ROOT
+    if home is None:
+        home = os.path.expanduser('~')
+
+    if not os.path.isfile(TEMPLATE_PATH):
+        raise FileNotFoundError(f"Template not found: {TEMPLATE_PATH}")
+
+    with open(TEMPLATE_PATH, 'rb') as f:
+        p = plistlib.load(f)
+
+    autopilot_root = os.path.join(repo_root, '.autopilot')
+    supervisor_path = os.path.join(repo_root, 'scripts', 'autopilot-supervisor')
+    hermes_bin = os.path.join(home, '.local', 'bin', 'hermes')
+    qoder_bin = os.path.join(home, '.local', 'bin', 'qodercli')
+
+    warnings = []
+
+    # Resolve ProgramArguments
+    program = p.get('ProgramArguments', [])
+    resolved = []
+    for arg in program:
+        arg = arg.replace('${REPO_ROOT}', repo_root)
+        arg = arg.replace('${HOME}', home)
+        arg = arg.replace('${AUTOPILOT_ROOT}', autopilot_root)
+        resolved.append(arg)
+    p['ProgramArguments'] = resolved
+
+    # Verify supervisor exists
+    if not os.path.isfile(supervisor_path) or not os.access(supervisor_path, os.X_OK):
+        warnings.append(f"Supervisor not executable: {supervisor_path}")
+
+    # Resolve WorkingDirectory
+    if 'WorkingDirectory' in p:
+        p['WorkingDirectory'] = p['WorkingDirectory'].replace('${REPO_ROOT}', repo_root)
+
+    # Resolve log paths
+    for key in ('StandardOutPath', 'StandardErrorPath'):
+        if key in p:
+            p[key] = p[key].replace('${AUTOPILOT_ROOT}', autopilot_root)
+
+    # Ensure PATH includes Hermes and Qoder locations
+    if 'EnvironmentVariables' not in p:
+        p['EnvironmentVariables'] = {}
+    env = p['EnvironmentVariables']
+    path = env.get('PATH', '/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin')
+    # Resolve any remaining ${HOME} in PATH
+    path = path.replace('${HOME}', home)
+    for extra in [os.path.join(home, '.local', 'bin'),
+                  os.path.dirname(hermes_bin),
+                  os.path.dirname(qoder_bin)]:
+        if extra not in path and os.path.isdir(extra):
+            path = extra + ':' + path
+    env['PATH'] = path
+    # Resolve ${HOME} in all EnvironmentVariables values
+    for key in list(env.keys()):
+        if isinstance(env[key], str):
+            env[key] = env[key].replace('${HOME}', home)
+    env['HOME'] = home
+
+    # Write to output
+    if output_path is None:
+        fd, output_path = tempfile.mkstemp(suffix='.plist', prefix='compoundos-autopilot-')
+        os.close(fd)
+
+    with open(output_path, 'wb') as f:
+        plistlib.dump(p, f)
+
+    return output_path, warnings
+
+
+def validate_rendered(path):
+    """Validate a rendered plist with plutil. Returns (ok, output)."""
+    result = subprocess.run(['plutil', '-lint', path],
+                           capture_output=True, text=True)
+    return result.returncode == 0, result.stdout.strip()
+
+
+def has_unresolved_placeholders(path):
+    """Check if any ${...} placeholders remain."""
+    with open(path, 'r') as f:
+        content = f.read()
+    return '${' in content
+
+
+if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser(description='Render launchd plist')
+    parser.add_argument('--output', '-o', type=str,
+                       help='Output path (default: temp file)')
+    parser.add_argument('--repo-root', type=str, default=REPO_ROOT,
+                       help='Repository root path')
+    parser.add_argument('--validate-only', action='store_true',
+                       help='Only validate the template')
+    args = parser.parse_args()
+
+    if args.validate_only:
+        ok, msg = validate_rendered(TEMPLATE_PATH)
+        print(f"Template validation: {msg}")
+        sys.exit(0 if ok else 1)
+
+    # Render
+    rendered_path, warnings = render_launchd(
+        output_path=args.output,
+        repo_root=args.repo_root
+    )
+
+    print(f"Rendered: {rendered_path}")
+
+    # Check for unresolved placeholders
+    if has_unresolved_placeholders(rendered_path):
+        print("FAIL: Unresolved ${...} placeholders remain")
+        sys.exit(1)
+    print("OK: No unresolved placeholders")
+
+    # Validate with plutil
+    ok, msg = validate_rendered(rendered_path)
+    print(f"plutil: {msg}")
+    if not ok:
+        sys.exit(1)
+
+    # Check ProgramArguments
+    with open(rendered_path, 'rb') as f:
+        p = plistlib.load(f)
+    prog = p.get('ProgramArguments', [])
+    print(f"ProgramArguments: {prog}")
+    supervisor_path = prog[0] if prog else ''
+    if not os.path.isfile(supervisor_path):
+        print(f"WARNING: Supervisor not found at: {supervisor_path}")
+    elif not os.access(supervisor_path, os.X_OK):
+        print(f"WARNING: Supervisor not executable: {supervisor_path}")
+    else:
+        print(f"OK: Supervisor executable: {supervisor_path}")
+
+    print(f"WorkingDirectory: {p.get('WorkingDirectory', 'not set')}")
+    print(f"PATH: {p.get('EnvironmentVariables', {}).get('PATH', 'not set')}")
+
+    for w in warnings:
+        print(f"WARNING: {w}")
+
+    # If no explicit output was requested, clean up temp file
+    if not args.output:
+        print(f"\nTemp file (will be cleaned on next boot): {rendered_path}")
+        print("Use --output to persist the rendered plist.")
+    else:
+        print(f"\nRendered plist saved to: {rendered_path}")
+        print("Run: plutil -lint " + rendered_path)
+        print("Then: cp " + rendered_path + " ~/Library/LaunchAgents/")
+
+    sys.exit(0)

@@ -1,0 +1,42 @@
+#!/usr/bin/env python3
+"""Validate a task JSON file against the autopilot task schema."""
+import json, sys, os
+
+def validate_task(task_path):
+    with open(task_path, 'r', encoding='utf-8') as f:
+        task = json.load(f)
+    
+    required = ['task_id','sprint','slice','title','approval_status','risk_level',
+                'requirements','allowed_paths','forbidden_scope','acceptance_criteria',
+                'validation_commands','base_sha','max_attempts','max_minutes',
+                'token_budget','auto_merge_allowed','owner_decisions','dependencies']
+    
+    errors = []
+    for field in required:
+        if field not in task:
+            errors.append(f"Missing required field: {field}")
+    
+    if task.get('approval_status') not in ('draft','proposed','review','not-authorized','approved'):
+        errors.append(f"Invalid approval_status: {task.get('approval_status')}")
+    
+    if task.get('risk_level') not in ('R0','R1','R2','R3'):
+        errors.append(f"Invalid risk_level: {task.get('risk_level')}")
+    
+    task_id = task.get('task_id','')
+    if not task_id.startswith('TASK-'):
+        errors.append(f"Invalid task_id format: {task_id}")
+    
+    if errors:
+        for e in errors:
+            print(f"VALIDATION ERROR: {e}", file=sys.stderr)
+        return False
+    
+    print(f"VALID: {task['task_id']} (risk={task['risk_level']}, status={task['approval_status']})")
+    return True
+
+if __name__ == '__main__':
+    if len(sys.argv) < 2:
+        print("Usage: autopilot-validate <task-file>", file=sys.stderr)
+        sys.exit(1)
+    ok = validate_task(sys.argv[1])
+    sys.exit(0 if ok else 1)
