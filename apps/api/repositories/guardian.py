@@ -327,7 +327,7 @@ def list_evaluation_runs(
     return (
         session.query(GuardianEvaluationRun)
         .filter(GuardianEvaluationRun.household_id == household_id)
-        .order_by(GuardianEvaluationRun.created_at.desc())
+        .order_by(GuardianEvaluationRun.started_at.desc())
         .limit(limit)
         .all()
     )

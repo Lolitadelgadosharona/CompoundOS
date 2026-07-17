@@ -332,16 +332,16 @@ def api_list_events(
 
 @router.get("/events/{event_id}")
 def api_get_event(event_id: UUID, session: DatabaseSession):
-    """Single event detail."""
-    _hid(session)
+    """Single event detail. Scoped to household."""
+    hid = _hid(session)
     row = session.execute(
         text(
             "SELECT id, evaluation_run_id, check_id, check_version_id, check_type,"
             " policy_version_id, portfolio_snapshot_id, exceeded,"
             " drift_pp, exposure_pct, staleness_days_actual, as_of_date, detected_at"
-            " FROM guardian_events WHERE id = :eid"
+            " FROM guardian_events WHERE id = :eid AND household_id = :hid"
         ),
-        {"eid": event_id},
+        {"eid": event_id, "hid": UUID(hid)},
     ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="Guardian event not found")
