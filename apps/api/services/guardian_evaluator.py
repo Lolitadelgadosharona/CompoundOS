@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import unicodedata
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Optional, Sequence
-
 
 # ---------------------------------------------------------------------------
 # Input / output DTOs — no ORM, no Session

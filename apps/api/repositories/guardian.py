@@ -8,7 +8,6 @@ from typing import Optional, Sequence
 from uuid import UUID, uuid4
 
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from apps.api.models import (
@@ -22,7 +21,6 @@ from apps.api.models import (
     PortfolioSnapshot,
     PortfolioSnapshotHolding,
 )
-
 
 # ---------------------------------------------------------------------------
 # Household
@@ -360,7 +358,7 @@ def insert_event_on_conflict_do_nothing(
     # Build column list dynamically based on check_type
     if check_type in ("drift", "category_exposure"):
         conflict_cols = "check_version_id, policy_version_id, portfolio_snapshot_id"
-        conflict_where = f"check_type IN ('drift', 'category_exposure')"
+        conflict_where = "check_type IN ('drift', 'category_exposure')"
     else:
         conflict_cols = "check_version_id, portfolio_snapshot_id, as_of_date"
         conflict_where = "check_type = 'staleness'"
