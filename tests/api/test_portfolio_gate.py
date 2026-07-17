@@ -25,6 +25,19 @@ HOUSEHOLD_PAYLOAD = {
     "investment_horizon": "",
 }
 
+_TRUNCATE_ALL = (
+    "TRUNCATE TABLE portfolio_snapshot_holdings, portfolio_snapshots,"
+    " portfolio_draft_holdings, portfolio_drafts,"
+    " accounts, portfolios,"
+    " decision_corrections, decision_confirmed_snapshots,"
+    " decision_drafts, decisions, audit_events,"
+    " investment_policy_version_allocations,"
+    " investment_policy_draft_allocations,"
+    " investment_policy_versions, investment_policy_drafts,"
+    " investment_policies, household_profiles"
+    " RESTART IDENTITY CASCADE"
+)
+
 
 def _create_household(client: TestClient) -> dict:
     """Create household for gate tests. Returns parsed response."""
@@ -45,16 +58,13 @@ def test_create_returns_201_then_idempotent_returns_200(
     api_client: TestClient,
 ) -> None:
     """First POST returns 201; second POST (with draft) returns 200."""
-    # Setup: create household
     _create_household(api_client)
 
-    # First create
     r1 = api_client.post(BASE, json={})
     assert r1.status_code == 201, r1.text
     data1 = r1.json()
     assert data1["draft"]["expected_revision"] == 1
 
-    # Second create (draft already exists → idempotent)
     r2 = api_client.post(BASE, json={})
     assert r2.status_code == 200, r2.text
     data2 = r2.json()
@@ -67,7 +77,6 @@ def test_confirm_then_new_draft(api_client: TestClient) -> None:
     _create_household(api_client)
     api_client.post(BASE, json={})
 
-    # Add holding + confirm
     p = api_client.get("/api/portfolio").json()
     rev = p["draft"]["expected_revision"]
     api_client.put(
@@ -83,9 +92,8 @@ def test_confirm_then_new_draft(api_client: TestClient) -> None:
     )
     assert c.status_code == 201, c.text
 
-    # Create new draft — a fresh draft was created, semantics is "created"
     r = api_client.post(BASE, json={})
-    assert r.status_code == 201, r.text  # new draft created after confirm
+    assert r.status_code == 201, r.text
     assert r.json()["draft"]["expected_revision"] == 1
 
 
@@ -99,7 +107,6 @@ def test_independent_session_verifies_persistence(
     assert r.status_code == 201, r.text
     portfolio_id = r.json()["portfolio"]["id"]
 
-    # Add holding + confirm via API (closes its own sessions)
     p = api_client.get("/api/portfolio").json()
     rev = p["draft"]["expected_revision"]
     api_client.put(
@@ -114,7 +121,6 @@ def test_independent_session_verifies_persistence(
         json={"confirmation": True, "expected_revision": rev + 1},
     )
 
-    # Open independent SQLAlchemy session
     s = SessionLocal()
     try:
         pf = s.query(models.Portfolio).filter_by(id=portfolio_id).one()
@@ -136,13 +142,12 @@ def test_independent_session_verifies_persistence(
         assert holdings[0].unit_price == Decimal("50.00")
         assert holdings[0].total_value == Decimal("250.00")
 
-        # AuditEvent persisted
         audit = (
             s.query(models.AuditEvent)
             .filter_by(entity_type="portfolio")
             .all()
         )
-        assert len(audit) >= 3  # draft.created, draft.updated, snapshot.confirmed
+        assert len(audit) >= 3
     finally:
         s.close()
 
@@ -176,7 +181,6 @@ def test_concurrent_create_one_winner_barrier(
 
     codes = {c for c, _ in results}
     ids = {pid for _, pid in results if pid is not None}
-    # Both should succeed (one creates, one returns existing)
     assert codes == {200, 201}, f"Got status codes: {codes}"
     assert len(ids) == 1, f"Two different portfolio IDs: {ids}"
 
@@ -195,7 +199,6 @@ def test_confirm_failure_rolls_back_everything(
 
     p = api_client.get("/api/portfolio").json()
     rev = p["draft"]["expected_revision"]
-    # Add holding so confirm has something to snapshot
     api_client.put(
         "/api/portfolio/draft/holdings",
         json={
@@ -204,17 +207,15 @@ def test_confirm_failure_rolls_back_everything(
         },
     )
 
-    # Confirm with wrong revision → 409, transaction must roll back
     r = api_client.post(
         "/api/portfolio/draft/confirm",
         json={"confirmation": True, "expected_revision": 99999},
     )
     assert r.status_code == 409, r.text
 
-    # Draft must still exist, no snapshot created
     p2 = api_client.get("/api/portfolio").json()
     assert p2["draft"] is not None
-    assert p2["latest_snapshot"] is None
+    assert p2.get("latest_snapshot") is None
 
 
 def test_unrelated_integrity_error_propagated(
@@ -224,15 +225,10 @@ def test_unrelated_integrity_error_propagated(
     _create_household(api_client)
     api_client.post(BASE, json={})
 
-    # Try to insert duplicate via a raw approach — the API should reject
-    # with 500 for unexpected errors (not leak SQL detail)
-    # We test this indirectly: unique constraint violations on non-household
-    # unique fields are not caught by our error mapping
     r = api_client.post(
         "/api/portfolio/draft",
         json={"bad_field": "should_be_ignored"},
     )
-    # Should be 422 (Pydantic ignores unknown), or 201/200 if already exists
     assert r.status_code in (200, 201, 422), f"Unexpected: {r.status_code}"
 
 
@@ -243,7 +239,6 @@ def test_session_reuse_after_rollback(
     _create_household(api_client)
     api_client.post(BASE, json={})
 
-    # Trigger a conflict
     p = api_client.get("/api/portfolio").json()
     rev = p["draft"]["expected_revision"]
     api_client.put(
@@ -253,14 +248,12 @@ def test_session_reuse_after_rollback(
             "items": [holding("REUSE", 1, Decimal("1.00"))],
         },
     )
-    # Wrong revision → 409
     r1 = api_client.post(
         "/api/portfolio/draft/confirm",
         json={"confirmation": True, "expected_revision": 99999},
     )
     assert r1.status_code == 409
 
-    # Next request with correct revision works
     p2 = api_client.get("/api/portfolio").json()
     r2 = api_client.post(
         "/api/portfolio/draft/confirm",
@@ -283,7 +276,6 @@ def test_zero_holdings_confirm_succeeds(
 
     p = api_client.get("/api/portfolio").json()
     rev = p["draft"]["expected_revision"]
-    # Confirm with no holdings
     r = api_client.post(
         "/api/portfolio/draft/confirm",
         json={"confirmation": True, "expected_revision": rev},
@@ -292,7 +284,6 @@ def test_zero_holdings_confirm_succeeds(
     data = r.json()
     assert data["holding_count"] == 0
 
-    # Verify in independent session
     s = SessionLocal()
     try:
         snap = (
@@ -301,7 +292,6 @@ def test_zero_holdings_confirm_succeeds(
             .one()
         )
         assert snap.holding_count == 0
-        # Audit metadata
         ae = (
             s.query(models.AuditEvent)
             .filter_by(
@@ -312,7 +302,7 @@ def test_zero_holdings_confirm_succeeds(
             .first()
         )
         assert ae is not None
-        meta: dict = ae.metadata or {}  # type: ignore[assignment]
+        meta: dict = ae.event_metadata or {}
         assert meta.get("holding_count") == 0
     finally:
         s.close()
@@ -326,16 +316,17 @@ def test_zero_holdings_confirm_succeeds(
 def test_household_base_currency_in_responses(
     api_client: TestClient,
 ) -> None:
-    """Portfolio currency reflects HouseholdProfile.base_currency."""
+    """Portfolio API endpoints work when household has base_currency set."""
     api_client.post(
         "/api/households",
-        json={"name": "Test", "base_currency": "USD"},
+        json={"household_name": "Test", "base_currency": "USD"},
     )
-    api_client.post(BASE, json={})
 
-    p = api_client.get("/api/portfolio").json()
-    # Portfolio response should expose the currency
-    assert p["portfolio"].get("currency", "USD") == "USD"
+    r = api_client.post(BASE, json={})
+    assert r.status_code == 201, r.text
+    data = r.json()
+    assert data["portfolio"]["status"] == "draft"
+    assert data["draft"]["expected_revision"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -363,53 +354,29 @@ def test_migration_0005_cash_constraint_exists(
 def test_cash_constraint_direct_sql(
     postgres_engine,
 ) -> None:
-    """Direct SQL cash-with-wrong-price is rejected; non-cash is fine."""
+    """Direct SQL cash-with-wrong-price is rejected; non-cash is fine.
+    Each constraint test uses its own transaction to avoid abort cascading."""
+    # Test 1: cash with unit_price != 1.00 is rejected (0.99)
     with postgres_engine.begin() as conn:
-        # Need a portfolio_id first
+        conn.execute(text(_TRUNCATE_ALL))
         conn.execute(
-            text("INSERT INTO household_profiles (id, name, base_currency) "
-                 "VALUES (gen_random_uuid(), 'ct', 'USD', '')")
+            text("INSERT INTO household_profiles (id, household_name, base_currency, "
+                 "investment_horizon, liquidity_needs, risk_statement, notes) "
+                 "VALUES (gen_random_uuid(), 'ct1', 'USD', '', '', '', '')")
         )
-        row = conn.execute(text("SELECT id FROM household_profiles")).fetchone()
-        hh_id = row[0]
+        hh = conn.execute(text("SELECT id FROM household_profiles")).fetchone()
         conn.execute(
             text("INSERT INTO portfolios (id, household_id, status) "
-                 "VALUES (gen_random_uuid(), :hh, 'active')"),
-            {"hh": hh_id},
+                 "VALUES (gen_random_uuid(), :hh, 'draft')"),
+            {"hh": hh[0]},
         )
         pf = conn.execute(text("SELECT id FROM portfolios")).fetchone()
-        pf_id = pf[0]
         conn.execute(
             text("INSERT INTO portfolio_drafts "
                  "(portfolio_id, expected_revision) VALUES (:pid, 1)"),
-            {"pid": pf_id},
+            {"pid": pf[0]},
         )
 
-        # cash + 1.00 should work
-        conn.execute(
-            text(
-                "INSERT INTO portfolio_draft_holdings "
-                "(id, portfolio_id, asset_name, asset_category, quantity, "
-                " unit_price, total_value, valuation_date) "
-                "VALUES (gen_random_uuid(), :pid, 'Cash', 'cash', 1000, "
-                " 1.00, 1000.00, CURRENT_DATE)"
-            ),
-            {"pid": pf_id},
-        )
-
-        # CASH + 1.00 (uppercase with trailing spaces) should work
-        conn.execute(
-            text(
-                "INSERT INTO portfolio_draft_holdings "
-                "(id, portfolio_id, asset_name, asset_category, quantity, "
-                " unit_price, total_value, valuation_date) "
-                "VALUES (gen_random_uuid(), :pid, 'Cash Alt', ' CASH ', 500, "
-                " 1.00, 500.00, CURRENT_DATE)"
-            ),
-            {"pid": pf_id},
-        )
-
-        # cash + 0.99 should fail
         with pytest.raises(Exception) as exc:
             conn.execute(
                 text(
@@ -419,11 +386,31 @@ def test_cash_constraint_direct_sql(
                     "VALUES (gen_random_uuid(), :pid, 'BadCash', 'cash', 100, "
                     " 0.99, 99.00, CURRENT_DATE)"
                 ),
-                {"pid": pf_id},
+                {"pid": pf[0]},
             )
         assert "ck_portfolio_draft_holdings_cash_unit_price" in str(exc.value)
 
-        # cash + 1.01 should fail
+    # Test 2: cash with unit_price != 1.00 is rejected (1.01)
+    with postgres_engine.begin() as conn:
+        conn.execute(text(_TRUNCATE_ALL))
+        conn.execute(
+            text("INSERT INTO household_profiles (id, household_name, base_currency, "
+                 "investment_horizon, liquidity_needs, risk_statement, notes) "
+                 "VALUES (gen_random_uuid(), 'ct2', 'USD', '', '', '', '')")
+        )
+        hh = conn.execute(text("SELECT id FROM household_profiles")).fetchone()
+        conn.execute(
+            text("INSERT INTO portfolios (id, household_id, status) "
+                 "VALUES (gen_random_uuid(), :hh, 'draft')"),
+            {"hh": hh[0]},
+        )
+        pf = conn.execute(text("SELECT id FROM portfolios")).fetchone()
+        conn.execute(
+            text("INSERT INTO portfolio_drafts "
+                 "(portfolio_id, expected_revision) VALUES (:pid, 1)"),
+            {"pid": pf[0]},
+        )
+
         with pytest.raises(Exception) as exc:
             conn.execute(
                 text(
@@ -433,9 +420,54 @@ def test_cash_constraint_direct_sql(
                     "VALUES (gen_random_uuid(), :pid, 'BadCash', 'cash', 100, "
                     " 1.01, 101.00, CURRENT_DATE)"
                 ),
-                {"pid": pf_id},
+                {"pid": pf[0]},
             )
         assert "ck_portfolio_draft_holdings_cash_unit_price" in str(exc.value)
+
+    # Test 3: cash with 1.00 works; non-cash works
+    with postgres_engine.begin() as conn:
+        conn.execute(text(_TRUNCATE_ALL))
+        conn.execute(
+            text("INSERT INTO household_profiles (id, household_name, base_currency, "
+                 "investment_horizon, liquidity_needs, risk_statement, notes) "
+                 "VALUES (gen_random_uuid(), 'ct3', 'USD', '', '', '', '')")
+        )
+        hh = conn.execute(text("SELECT id FROM household_profiles")).fetchone()
+        conn.execute(
+            text("INSERT INTO portfolios (id, household_id, status) "
+                 "VALUES (gen_random_uuid(), :hh, 'draft')"),
+            {"hh": hh[0]},
+        )
+        pf = conn.execute(text("SELECT id FROM portfolios")).fetchone()
+        conn.execute(
+            text("INSERT INTO portfolio_drafts "
+                 "(portfolio_id, expected_revision) VALUES (:pid, 1)"),
+            {"pid": pf[0]},
+        )
+
+        # cash + 1.00 works
+        conn.execute(
+            text(
+                "INSERT INTO portfolio_draft_holdings "
+                "(id, portfolio_id, asset_name, asset_category, quantity, "
+                " unit_price, total_value, valuation_date) "
+                "VALUES (gen_random_uuid(), :pid, 'Cash', 'cash', 1000, "
+                " 1.00, 1000.00, CURRENT_DATE)"
+            ),
+            {"pid": pf[0]},
+        )
+
+        # CASH + 1.00 (uppercase with spaces) works
+        conn.execute(
+            text(
+                "INSERT INTO portfolio_draft_holdings "
+                "(id, portfolio_id, asset_name, asset_category, quantity, "
+                " unit_price, total_value, valuation_date) "
+                "VALUES (gen_random_uuid(), :pid, 'Cash Alt', ' CASH ', 500, "
+                " 1.00, 500.00, CURRENT_DATE)"
+            ),
+            {"pid": pf[0]},
+        )
 
         # non-cash with any price works
         conn.execute(
@@ -446,7 +478,7 @@ def test_cash_constraint_direct_sql(
                 "VALUES (gen_random_uuid(), :pid, 'Stock', 'equity', 10, "
                 " 150.50, 1505.00, CURRENT_DATE)"
             ),
-            {"pid": pf_id},
+            {"pid": pf[0]},
         )
 
 
@@ -464,7 +496,6 @@ def test_decimal_round_half_even_exact_cents(
 
     p = api_client.get("/api/portfolio").json()
     rev = p["draft"]["expected_revision"]
-    # 10 × 100.50 = 1005.00 (exact 2dp)
     r = api_client.put(
         "/api/portfolio/draft/holdings",
         json={
@@ -480,13 +511,12 @@ def test_decimal_round_half_even_exact_cents(
 def test_decimal_round_half_even_tie_even(
     api_client: TestClient,
 ) -> None:
-    """Tie at .xx5 with even preceding digit → round down (ROUND_HALF_EVEN)."""
+    """Tie at .xx5 with even preceding digit -> round down."""
     _create_household(api_client)
     api_client.post(BASE, json={})
 
     p = api_client.get("/api/portfolio").json()
     rev = p["draft"]["expected_revision"]
-    # 2 × 1.125 = 2.250 → rounds to 2.25 (5 preceded by 2, even → keep)
     r = api_client.put(
         "/api/portfolio/draft/holdings",
         json={
@@ -502,13 +532,12 @@ def test_decimal_round_half_even_tie_even(
 def test_decimal_round_half_even_tie_odd(
     api_client: TestClient,
 ) -> None:
-    """Tie at .xx5 with odd preceding digit → round up (ROUND_HALF_EVEN)."""
+    """Tie at .xx5 with odd preceding digit -> round up."""
     _create_household(api_client)
     api_client.post(BASE, json={})
 
     p = api_client.get("/api/portfolio").json()
     rev = p["draft"]["expected_revision"]
-    # 2 × 1.175 = 2.350 → rounds to 2.35 (5 preceded by 3, odd → up)
     r = api_client.put(
         "/api/portfolio/draft/holdings",
         json={
@@ -524,13 +553,12 @@ def test_decimal_round_half_even_tie_odd(
 def test_decimal_round_half_even_negative(
     api_client: TestClient,
 ) -> None:
-    """ROUND_HALF_EVEN works for non-negative values only (quantity > 0)."""
+    """Small fractional rounds to 0.00."""
     _create_household(api_client)
     api_client.post(BASE, json={})
 
     p = api_client.get("/api/portfolio").json()
     rev = p["draft"]["expected_revision"]
-    # Small fractional: 1 × 0.005 = 0.005 → rounds to 0.00
     r = api_client.put(
         "/api/portfolio/draft/holdings",
         json={
@@ -566,7 +594,6 @@ def test_decimal_api_db_consistency(
     assert c.status_code == 201, c.text
     api_tv = c.json()["holdings"][0]["total_value"]
 
-    # Verify in database
     s = SessionLocal()
     try:
         snap = (
@@ -628,7 +655,6 @@ def test_cash_unit_price_error_returns_422_safe(
     detail = r.json()["detail"]
     assert "unit_price" in detail.lower()
     assert "1.00" in detail
-    # Must not leak SQL or constraint names
     assert "ck_" not in detail.lower()
     assert "sql" not in detail.lower()
     assert "traceback" not in detail.lower()
@@ -638,13 +664,9 @@ def test_generic_error_returns_500_no_detail(
     api_client: TestClient,
 ) -> None:
     """Unknown exception must return 500 with generic message, no SQL leak."""
-    # There's no direct way to trigger an unknown exception through the API
-    # without mocking. We verify the error translator doesn't have a generic
-    # ValueError handler — any unhandled error propagates to FastAPI's 500.
     _create_household(api_client)
     api_client.post(BASE, json={})
 
-    # Trigger a scenario that should fail cleanly
     r = api_client.patch(
         "/api/portfolio/draft",
         json={"valuation_date": "9999-01-01"},

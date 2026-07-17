@@ -1267,7 +1267,7 @@ def test_snapshot_delete_fails(
 
         assert_db_error(
             conn,
-            'portfolio_snapshot_status_transition_forbidden',
+            'portfolio_snapshot_delete_forbidden',
             lambda: conn.execute(
                 text(
                     "DELETE FROM portfolio_snapshots WHERE id = :id"
@@ -1317,7 +1317,7 @@ def test_snapshot_holding_update_fails(
 
         assert_db_error(
             conn,
-            'portfolio_snapshot_status_transition_forbidden',
+            'portfolio_snapshot_holding_update_forbidden',
             lambda: conn.execute(
                 text(
                     "UPDATE portfolio_snapshot_holdings "
@@ -1523,7 +1523,7 @@ def test_snapshot_delete_cross_transaction_fails(
     with postgres_engine.connect() as conn:
         assert_db_error(
             conn,
-            'portfolio_snapshot_status_transition_forbidden',
+            'portfolio_snapshot_delete_forbidden',
             lambda: conn.execute(
                 text("DELETE FROM portfolio_snapshots WHERE id = :id"),
                 {"id": sid},

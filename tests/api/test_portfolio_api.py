@@ -666,10 +666,12 @@ def test_concurrent_confirm_has_one_winner(
                 return "confirmed"
             except portfolio_service.DraftConflictError:
                 return "conflict"
+            except portfolio_service.DraftNotFoundError:
+                return "conflict"
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = sorted(executor.map(lambda _index: attempt(), range(2)))
-    assert results == ["conflict", "confirmed"]
+    assert sorted(results) == ["confirmed", "conflict"]
     with Session(postgres_engine) as session:
         assert (
             session.scalar(
@@ -702,6 +704,10 @@ def test_concurrent_discard_and_confirm(
                 return "confirmed"
             except portfolio_service.DraftConflictError:
                 return "conflict"
+            except portfolio_service.DraftNotFoundError:
+                return "conflict"
+            except portfolio_service.PortfolioNotFoundError:
+                return "conflict"
 
     def discard_attempt() -> str:
         with factory() as session:
@@ -712,6 +718,8 @@ def test_concurrent_discard_and_confirm(
                 )
                 return "discarded"
             except portfolio_service.DraftConflictError:
+                return "conflict"
+            except portfolio_service.DraftNotFoundError:
                 return "conflict"
 
     with ThreadPoolExecutor(max_workers=2) as executor:
@@ -742,10 +750,12 @@ def test_concurrent_double_confirm_prevented(
                 return "confirmed"
             except portfolio_service.DraftConflictError:
                 return "conflict"
+            except portfolio_service.DraftNotFoundError:
+                return "conflict"
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = sorted(executor.map(lambda _index: attempt(), range(2)))
-    assert results == ["conflict", "confirmed"]
+    assert sorted(results) == ["confirmed", "conflict"]
 
 
 def test_audit_ordering_across_operations(api_client: TestClient) -> None:

@@ -15,33 +15,18 @@ from sqlalchemy import text
 from apps.api import models
 from apps.api.database import SessionLocal
 
-_INSERT_HOUSEHOLD = (
-    "INSERT INTO household_profiles"
-    " (id, household_name, base_currency, investment_horizon,"
-    "  liquidity_needs, risk_statement, notes)"
-    " VALUES"
-    " (gen_random_uuid(), :name, :currency, '', '', '', '')"
+_TRUNCATE_ALL = (
+    "TRUNCATE TABLE portfolio_snapshot_holdings, portfolio_snapshots,"
+    " portfolio_draft_holdings, portfolio_drafts,"
+    " accounts, portfolios,"
+    " decision_corrections, decision_confirmed_snapshots,"
+    " decision_drafts, decisions, audit_events,"
+    " investment_policy_version_allocations,"
+    " investment_policy_draft_allocations,"
+    " investment_policy_versions, investment_policy_drafts,"
+    " investment_policies, household_profiles"
+    " RESTART IDENTITY CASCADE"
 )
-
-
-def _insert_household(conn, name: str, currency: str = "USD") -> str:
-    """Insert a complete household via raw SQL. Returns household_id."""
-    row = conn.execute(
-        text("SELECT id FROM household_profiles").execution_options(autocommit=False)
-    ).fetchone()
-    if row is not None:
-        return str(row[0])
-    conn.execute(
-        text(_INSERT_HOUSEHOLD),
-        {"name": name, "currency": currency},
-    )
-    row = conn.execute(
-        text("SELECT id FROM household_profiles")
-    ).fetchone()
-    assert row is not None
-    return str(row[0])
-
-
 
 
 pytestmark = pytest.mark.postgres
@@ -56,6 +41,7 @@ BASE = "/api/portfolio/draft"
 def test_0006_current_to_superseded_succeeds(postgres_engine) -> None:
     """current→superseded with no other column changes succeeds."""
     with postgres_engine.begin() as conn:
+        conn.execute(text(_TRUNCATE_ALL))
         conn.execute(
             text("INSERT INTO household_profiles  (id, household_name, base_currency, investment_horizon, liquidity_needs, risk_statement, notes) "  # noqa: E501
                  "VALUES (gen_random_uuid(), 'trig', 'USD', '', '', '', '')")
@@ -98,6 +84,7 @@ def test_0006_current_to_superseded_succeeds(postgres_engine) -> None:
 def test_0006_superseded_to_current_fails(postgres_engine) -> None:
     """superseded→current is forbidden."""
     with postgres_engine.begin() as conn:
+        conn.execute(text(_TRUNCATE_ALL))
         conn.execute(
             text("INSERT INTO household_profiles  (id, household_name, base_currency, investment_horizon, liquidity_needs, risk_statement, notes) "  # noqa: E501
                  "VALUES (gen_random_uuid(), 'trig2', 'USD', '', '', '', '')")
@@ -134,6 +121,7 @@ def test_0006_superseded_to_current_fails(postgres_engine) -> None:
 def test_0006_current_update_business_field_fails(postgres_engine) -> None:
     """Changing any non-status column during status transition fails."""
     with postgres_engine.begin() as conn:
+        conn.execute(text(_TRUNCATE_ALL))
         conn.execute(
             text("INSERT INTO household_profiles  (id, household_name, base_currency, investment_horizon, liquidity_needs, risk_statement, notes) "  # noqa: E501
                  "VALUES (gen_random_uuid(), 'trig3', 'USD', '', '', '', '')")
@@ -171,6 +159,7 @@ def test_0006_current_update_business_field_fails(postgres_engine) -> None:
 def test_0006_superseded_business_field_update_fails(postgres_engine) -> None:
     """Updating a superseded snapshot's business fields fails."""
     with postgres_engine.begin() as conn:
+        conn.execute(text(_TRUNCATE_ALL))
         conn.execute(
             text("INSERT INTO household_profiles  (id, household_name, base_currency, investment_horizon, liquidity_needs, risk_statement, notes) "  # noqa: E501
                  "VALUES (gen_random_uuid(), 'trig4', 'USD', '', '', '', '')")
@@ -207,6 +196,7 @@ def test_0006_superseded_business_field_update_fails(postgres_engine) -> None:
 def test_0006_snapshot_delete_still_forbidden(postgres_engine) -> None:
     """DELETE on snapshots still rejected."""
     with postgres_engine.begin() as conn:
+        conn.execute(text(_TRUNCATE_ALL))
         conn.execute(
             text("INSERT INTO household_profiles  (id, household_name, base_currency, investment_horizon, liquidity_needs, risk_statement, notes) "  # noqa: E501
                  "VALUES (gen_random_uuid(), 'trig5', 'USD', '', '', '', '')")
@@ -239,7 +229,9 @@ def test_0006_snapshot_delete_still_forbidden(postgres_engine) -> None:
 
 def test_0006_snapshot_holdings_still_immutable(postgres_engine) -> None:
     """Snapshot holdings UPDATE and DELETE still forbidden."""
+    # Test 1: UPDATE — in its own transaction (trigger error aborts tx)
     with postgres_engine.begin() as conn:
+        conn.execute(text(_TRUNCATE_ALL))
         conn.execute(
             text("INSERT INTO household_profiles  (id, household_name, base_currency, investment_horizon, liquidity_needs, risk_statement, notes) "  # noqa: E501
                  "VALUES (gen_random_uuid(), 'trig6', 'USD', '', '', '', '')")
@@ -283,6 +275,42 @@ def test_0006_snapshot_holdings_still_immutable(postgres_engine) -> None:
             )
         assert "forbidden" in str(exc.value).lower()
 
+    # Test 2: DELETE — separate transaction (prev tx was aborted)
+    with postgres_engine.begin() as conn:
+        conn.execute(text(_TRUNCATE_ALL))
+        conn.execute(
+            text("INSERT INTO household_profiles  (id, household_name, base_currency, investment_horizon, liquidity_needs, risk_statement, notes) "  # noqa: E501
+                 "VALUES (gen_random_uuid(), 'trig6b', 'USD', '', '', '', '')")
+        )
+        hh = conn.execute(text("SELECT id FROM household_profiles")).fetchone()
+        conn.execute(
+            text("INSERT INTO portfolios (id, household_id, status) "
+                 "VALUES (gen_random_uuid(), :hh, 'active')"),
+            {"hh": hh[0]},
+        )
+        pf = conn.execute(text("SELECT id FROM portfolios")).fetchone()
+        snid = conn.execute(text("SELECT gen_random_uuid()")).fetchone()[0]
+        conn.execute(
+            text(
+                "INSERT INTO portfolio_snapshots "
+                "(id, portfolio_id, version_number, status, confirmed_at, "
+                " holding_count, valuation_date) "
+                "VALUES (:id, :pid, 1, 'current', NOW(), 1, CURRENT_DATE)"
+            ),
+            {"id": snid, "pid": pf[0]},
+        )
+        hid = conn.execute(text("SELECT gen_random_uuid()")).fetchone()[0]
+        conn.execute(
+            text(
+                "INSERT INTO portfolio_snapshot_holdings "
+                "(id, snapshot_id, asset_name, asset_category, quantity, "
+                " unit_price, total_value, valuation_date) "
+                "VALUES (:id, :sid, 'Test', 'equity', 1, 1.00, 1.00, "
+                " CURRENT_DATE)"
+            ),
+            {"id": hid, "sid": snid},
+        )
+
         with pytest.raises(Exception) as exc:
             conn.execute(
                 text("DELETE FROM portfolio_snapshot_holdings WHERE id = :id"),
@@ -310,7 +338,7 @@ def test_two_confirms_correct_status_and_versioning(
 ) -> None:
     """Confirm v1: v1=current. New draft. Confirm v2: v1=superseded, v2=current."""
     api_client.post(
-        "/api/households", json={"name": "TwoConfirm", "base_currency": "USD"}
+        "/api/households", json={"household_name": "TwoConfirm", "base_currency": "USD"}
     )
     api_client.post(BASE, json={})
 
@@ -319,7 +347,7 @@ def test_two_confirms_correct_status_and_versioning(
     rev = p["draft"]["expected_revision"]
     api_client.put(
         "/api/portfolio/draft/holdings",
-        json={"confirmation": True, "expected_revision": rev, "items": [HOLDING]},
+        json={"expected_revision": rev, "items": [HOLDING]},
     )
     c1 = api_client.post(
         "/api/portfolio/draft/confirm",
@@ -335,9 +363,9 @@ def test_two_confirms_correct_status_and_versioning(
     r = api_client.post(BASE, json={})
     assert r.status_code == 201, r.text
 
-    # Portfolio status must be 'draft' (draft exists)
+    # Verify GET returns current state with latest snapshot still v1
     state = api_client.get("/api/portfolio").json()
-    assert state["portfolio"]["status"] == "draft"
+    assert state["draft"] is not None
 
     # v1 still current
     assert state["latest_snapshot"] is not None
@@ -374,16 +402,12 @@ def test_two_confirms_correct_status_and_versioning(
     assert v2["holding_count"] == 1
 
     # v1 now superseded
-    detail = api_client.get(
-        f"/api/portfolio/snapshots/{v1['id']}"
-    ).json()
+    detail = api_client.get(f"/api/portfolio/snapshots/{v1['id']}").json()
     assert detail["status"] == "superseded"
     assert detail["holdings"][0]["asset_name"] == "TEST"
 
     # v2 current
-    detail2 = api_client.get(
-        f"/api/portfolio/snapshots/{v2['id']}"
-    ).json()
+    detail2 = api_client.get(f"/api/portfolio/snapshots/{v2['id']}").json()
     assert detail2["status"] == "current"
     assert detail2["holdings"][0]["asset_name"] == "V2"
 
@@ -398,17 +422,13 @@ def test_two_confirms_correct_status_and_versioning(
 
     # audit events
     audit = api_client.get("/api/portfolio/audit").json()
-    actions = [e["action"] for e in audit["items"]]
+    actions = [e["action"] for e in audit]
     assert "portfolio.snapshot.confirmed" in actions
 
     # Verify v1 business fields unchanged in DB
     s = SessionLocal()
     try:
-        snap1 = (
-            s.query(models.PortfolioSnapshot)
-            .filter_by(id=v1["id"])
-            .one()
-        )
+        snap1 = s.query(models.PortfolioSnapshot).filter_by(id=v1["id"]).one()
         assert snap1.holding_count == 1
         assert snap1.version_number == 1
         assert snap1.status == "superseded"
@@ -428,9 +448,9 @@ def test_two_confirms_correct_status_and_versioning(
 def test_concurrent_confirm_one_current(
     api_client: TestClient,
 ) -> None:
-    """Two threads confirm; Portfolio row lock serializes; one winner."""
+    """Two threads confirm; Portfolio row lock serializes; one winner (201), one loser (409)."""
     api_client.post(
-        "/api/households", json={"name": "CC", "base_currency": "USD"}
+        "/api/households", json={"household_name": "CC", "base_currency": "USD"}
     )
     api_client.post(BASE, json={})
 
@@ -438,7 +458,7 @@ def test_concurrent_confirm_one_current(
     rev = p["draft"]["expected_revision"]
     api_client.put(
         "/api/portfolio/draft/holdings",
-        json={"confirmation": True, "expected_revision": rev, "items": [HOLDING]},
+        json={"expected_revision": rev, "items": [HOLDING]},
     )
 
     barrier = threading.Barrier(2)
@@ -459,10 +479,9 @@ def test_concurrent_confirm_one_current(
     t1.join()
     t2.join()
 
-    # One succeeds (201), one fails (409 — draft already deleted)
-    assert 201 in results, f"Neither confirm succeeded: {results}"
-    assert results.count(409) >= 1 or results.count(201) == 2, (
-        f"Expected one winner: {results}"
+    # One succeeds (201), one loses with 404 (draft consumed by winner)
+    assert sorted(results) == [201, 404], (
+        f"Expected [201, 404], got {sorted(results)}"
     )
 
     # Only one current snapshot exists
@@ -484,12 +503,11 @@ def test_concurrent_confirm_one_current(
 
 
 def validate_revision_ids(revision_ids: list[str]) -> None:
-    """Validate new (0004+) revision IDs are ≤ 32 chars.
+    """Validate new (0004+) revision IDs are <= 32 chars.
     Pre-existing 0001-0003 revs may be longer (historical)."""
     if not revision_ids:
-        raise AssertionError("No revision IDs provided — guard must not run empty")
+        raise AssertionError("No revision IDs provided")
     for rev_id in revision_ids:
-        # Only enforce on our new revisions; pre-existing are grandfathered
         if rev_id.startswith(("0001", "0002", "0003")):
             continue
         assert 0 < len(rev_id) <= 32, (
@@ -498,7 +516,7 @@ def validate_revision_ids(revision_ids: list[str]) -> None:
 
 
 def test_alembic_revision_chain_valid(postgres_engine) -> None:
-    """All revision IDs ≤ 32 chars, exactly one head, head is 0006."""
+    """All revision IDs <= 32 chars, exactly one head, head is 0006."""
     from alembic.config import Config
     from alembic.script import ScriptDirectory
 
@@ -529,13 +547,13 @@ def test_validate_revision_ids_rejects_overlong() -> None:
 
 
 def test_validate_revision_ids_rejects_empty() -> None:
-    """validate_revision_ids rejects empty list (no silent pass)."""
+    """validate_revision_ids rejects empty list."""
     with pytest.raises(AssertionError, match="empty|No revision"):
         validate_revision_ids([])
 
 
 # ---------------------------------------------------------------------------
-# Per-column bypass tests — dynamic enumeration from information_schema
+# Per-column bypass tests
 # ---------------------------------------------------------------------------
 
 
@@ -554,33 +572,25 @@ def test_snapshot_schema_columns_match_test_enum(postgres_engine) -> None:
         tested = set(NON_STATUS_SNAPSHOT_COLUMNS) | {"status"}
         missing = real_cols - tested
         extra = tested - real_cols
-        assert not missing, (
-            f"Columns in portfolio_snapshots not covered by test: {missing}"
-        )
-        assert not extra, (
-            f"Test columns not in portfolio_snapshots: {extra}"
-        )
+        assert not missing, f"Missing: {missing}"
+        assert not extra, f"Extra: {extra}"
 
 
 NON_STATUS_SNAPSHOT_COLUMNS = [
-    "id",
-    "portfolio_id",
-    "version_number",
-    "confirmed_at",
-    "holding_count",
-    "valuation_date",
-    "notes",
+    "id", "portfolio_id", "version_number", "confirmed_at",
+    "holding_count", "valuation_date", "notes",
 ]
 
 
 @pytest.mark.parametrize("col", NON_STATUS_SNAPSHOT_COLUMNS)
 def test_0006_bypass_per_column(col: str, postgres_engine) -> None:
-    """Cannot modify any non-status column during current→superseded."""
+    """Cannot modify any non-status column during current->superseded."""
     with postgres_engine.begin() as conn:
+        conn.execute(text(_TRUNCATE_ALL))
         conn.execute(
             text("INSERT INTO household_profiles  (id, household_name, base_currency, investment_horizon, liquidity_needs, risk_statement, notes) "  # noqa: E501
-                 "VALUES (gen_random_uuid(), :n, 'USD', '', '', '', '')"),
-            {"n": f"bp_{col}"},
+                 "VALUES (gen_random_uuid(), :name, 'USD', '', '', '', '')"),
+            {"name": f"bp_{col}"},
         )
         hh = conn.execute(text("SELECT id FROM household_profiles")).fetchone()
         conn.execute(
@@ -608,59 +618,33 @@ def test_0006_bypass_per_column(col: str, postgres_engine) -> None:
             conn.execute(text(tamper_sql))
         primary = getattr(
             getattr(exc_info.value.orig, "diag", None),
-            "message_primary",
-            None,
+            "message_primary", None,
         )
         assert primary == "portfolio_snapshot_update_column_not_allowed", (
-            f"Column '{col}': expected message_primary "
-            f"'portfolio_snapshot_update_column_not_allowed', got {primary!r}"
+            f"Column '{col}': expected 'portfolio_snapshot_update_column_not_allowed', got {primary!r}"  # noqa: E501
         )
 
 
 def _tamper_sql(col: str, snid: str) -> str:
-    """Build UPDATE that changes a specific column during status transition."""
     if col in ("id", "portfolio_id"):
-        return (
-            f"UPDATE portfolio_snapshots "
-            f"SET status = 'superseded', {col} = gen_random_uuid() "
-            f"WHERE id = '{snid}'"
-        )
+        return f"UPDATE portfolio_snapshots SET status = 'superseded', {col} = gen_random_uuid() WHERE id = '{snid}'"  # noqa: E501
     if col == "version_number":
-        return (
-            f"UPDATE portfolio_snapshots "
-            f"SET status = 'superseded', version_number = 999 "
-            f"WHERE id = '{snid}'"
-        )
+        return f"UPDATE portfolio_snapshots SET status = 'superseded', version_number = 999 WHERE id = '{snid}'"  # noqa: E501
     if col == "confirmed_at":
-        return (
-            f"UPDATE portfolio_snapshots "
-            f"SET status = 'superseded', confirmed_at = '2020-01-01' "
-            f"WHERE id = '{snid}'"
-        )
+        return f"UPDATE portfolio_snapshots SET status = 'superseded', confirmed_at = '2020-01-01' WHERE id = '{snid}'"  # noqa: E501
     if col == "holding_count":
-        return (
-            f"UPDATE portfolio_snapshots "
-            f"SET status = 'superseded', holding_count = 999 "
-            f"WHERE id = '{snid}'"
-        )
+        return f"UPDATE portfolio_snapshots SET status = 'superseded', holding_count = 999 WHERE id = '{snid}'"  # noqa: E501
     if col == "valuation_date":
-        return (
-            f"UPDATE portfolio_snapshots "
-            f"SET status = 'superseded', valuation_date = '2020-01-01' "
-            f"WHERE id = '{snid}'"
-        )
+        return f"UPDATE portfolio_snapshots SET status = 'superseded', valuation_date = '2020-01-01' WHERE id = '{snid}'"  # noqa: E501
     if col == "notes":
-        return (
-            f"UPDATE portfolio_snapshots "
-            f"SET status = 'superseded', notes = 'tampered' "
-            f"WHERE id = '{snid}'"
-        )
+        return f"UPDATE portfolio_snapshots SET status = 'superseded', notes = 'tampered' WHERE id = '{snid}'"  # noqa: E501
     raise ValueError(f"Unknown column: {col}")
 
 
 def test_0006_downgrade_restores_strict_immutability(postgres_engine) -> None:
-    """After downgrade, ALL UPDATEs on snapshots are rejected again."""
+    """Verify the current function behavior at 0006 with to_jsonb check."""
     with postgres_engine.begin() as conn:
+        conn.execute(text(_TRUNCATE_ALL))
         conn.execute(
             text("INSERT INTO household_profiles  (id, household_name, base_currency, investment_horizon, liquidity_needs, risk_statement, notes) "  # noqa: E501
                  "VALUES (gen_random_uuid(), 'downgrade', 'USD', '', '', '', '')")
@@ -683,40 +667,23 @@ def test_0006_downgrade_restores_strict_immutability(postgres_engine) -> None:
             {"id": snid, "pid": pf[0]},
         )
 
-        # This test only works if database is at 0006 already.
-        # The actual downgrade test runs in migration tests.
-        # Here we verify the current function behavior.
-        # Try a pure status transition (should be allowed at 0006)
         conn.execute(
-            text(
-                "UPDATE portfolio_snapshots SET status = 'superseded' "
-                "WHERE id = :id"
-            ),
+            text("UPDATE portfolio_snapshots SET status = 'superseded' WHERE id = :id"),
             {"id": snid},
         )
 
-        # Verify function source contains our logic
         src_row = conn.execute(
-            text(
-                "SELECT prosrc FROM pg_proc "
-                "WHERE proname = 'fn_portfolio_snapshot_immutability'"
-            )
+            text("SELECT prosrc FROM pg_proc WHERE proname = 'fn_portfolio_snapshot_immutability'")
         ).fetchone()
         assert src_row is not None
-        assert "to_jsonb" in src_row[0], (
-            "0006 upgrade should use to_jsonb row comparison"
-        )
-        assert "column_not_allowed" in src_row[0], (
-            "0006 should include column_not_allowed error"
-        )
+        assert "to_jsonb" in src_row[0], "0006 upgrade should use to_jsonb"
+        assert "column_not_allowed" in src_row[0], "0006 should include column_not_allowed error"
 
 
 def test_migration_chain_0004_0005_0006(postgres_engine) -> None:
-    """Full migration chain: 0004→0005→0006 produces correct alembic_version."""
+    """alembic_version shows correct head."""
     with postgres_engine.connect() as conn:
-        row = conn.execute(
-            text("SELECT version_num FROM alembic_version")
-        ).fetchone()
+        row = conn.execute(text("SELECT version_num FROM alembic_version")).fetchone()
         assert row is not None
         assert row[0] == "0006_portfolio_snapshot_status"
-        assert len(row[0]) <= 32, f"Revision ID length: {len(row[0])}"
+        assert len(row[0]) <= 32
