@@ -95,7 +95,37 @@
     "validation_commands": {
       "type": "array",
       "items": {
-        "type": "string"
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["argv"],
+            "properties": {
+              "argv": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 1,
+                "description": "Non-empty array of executable + args. No shell metacharacters allowed."
+              },
+              "cwd": {
+                "type": "string",
+                "pattern": "^[.a-zA-Z0-9_/-]+$",
+                "default": ".",
+                "description": "Relative path within repository. No .. or absolute paths allowed."
+              },
+              "timeout_seconds": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3600,
+                "default": 300
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "string",
+            "description": "Legacy string form — deprecated. Will be split on whitespace."
+          }
+        ]
       },
       "minItems": 1
     },

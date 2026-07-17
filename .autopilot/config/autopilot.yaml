@@ -30,11 +30,20 @@ workers:
     timeout_seconds: 3600
 
   qoder:
-    enabled: true
-    cli_available: true
+    installed: true
     cli_version: "1.0.47"
     cli_path: "/Users/richardwang/.local/bin/qodercli"
-    mode: "headless"
+    verified_healthy: false
+    health_state: "temporarily-unavailable"
+    health_reason: "TLS/authentication failure in headless mode"
+    health_last_checked: "2026-07-16T08:16:00Z"
+    preferred_when_healthy: true
+    circuit_breaker:
+      max_consecutive_failures: 3
+      cooldown_seconds: 21600
+      consecutive_failures: 1
+      open: false
+      half_open: false
     headless_flags:
       non_interactive: "-p"
       output_format: "--output-format"
@@ -68,6 +77,10 @@ reviewer:
     chat_args: ["chat", "-q"]
 
 task_gates:
+  # GLOBAL SAFETY: auto-merge defaults to OFF. Must be explicitly enabled
+  # after independent security review of the full merge pipeline.
+  auto_merge_enabled: false
+  auto_merge_note: "Safe Autopilot v1 auto-executes dev and Draft PR flow. Auto-Ready/merge remains DISABLED pending independent security approval."
   # Only approval_status: approved may enter running
   allowed_approval_status: ["approved"]
   

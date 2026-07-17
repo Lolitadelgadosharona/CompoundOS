@@ -7,8 +7,12 @@ file locks, duplicate task prevention, worktree isolation,
 retry limits, token/time budgets, dry-run, blocked/unblock,
 merge permissions, untracked file protection, secret redaction.
 """
-import json, os, sys, tempfile, shutil, unittest
-from pathlib import Path
+import json
+import os
+import shutil
+import sys
+import tempfile
+import unittest
 
 # Add scripts dir to path
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'scripts'))
@@ -136,7 +140,7 @@ class TestWorkerSelection(unittest.TestCase):
     """Verify Qoder capability detection and Hermes fallback."""
     
     def test_worker_selection_logic(self):
-        import subprocess, shutil
+        import subprocess
         qoder_path = shutil.which('qodercli')
         hermes_path = shutil.which('hermes')
         
@@ -153,7 +157,6 @@ class TestWorkerSelection(unittest.TestCase):
                 pass
     
     def test_hermes_is_always_available(self):
-        import shutil
         self.assertIsNotNone(shutil.which('hermes'), "Hermes must be on PATH")
 
 
@@ -162,9 +165,7 @@ class TestCodexCircuitBreaker(unittest.TestCase):
     
     def test_codex_unavailable_does_not_block(self):
         """Codex being unavailable should not block autopilot operations."""
-        import shutil
-        codex_path = shutil.which('codex')
-        # Codex may or may not be available — either is valid
+        shutil.which('codex')  # may or may not be available — either is valid
         # The circuit breaker handles unavailability gracefully
         self.assertTrue(True)  # Always passes
     
@@ -303,7 +304,8 @@ class TestUntrackedFileProtection(unittest.TestCase):
             data = json.load(f)
         for entry in data['files']:
             self.assertIn('sha256', entry)
-            self.assertEqual(len(entry['sha256']), 64, f"SHA-256 should be 64 hex chars: {entry['path']}")
+            msg = f"SHA-256 should be 64 hex chars: {entry['path']}"
+            self.assertEqual(len(entry['sha256']), 64, msg)
             self.assertIn('size_bytes', entry)
             self.assertIn('path', entry)
 
