@@ -19,12 +19,21 @@ from apps.api.database import SessionLocal
 pytestmark = pytest.mark.postgres
 
 BASE = "/api/portfolio/draft"
-HOUSEHOLD_PAYLOAD = {"name": "CompoundOS Test Household", "base_currency": "USD"}
+HOUSEHOLD_PAYLOAD = {
+    "household_name": "Portfolio Gate Household",
+    "base_currency": "USD",
+    "investment_horizon": "",
+}
 
 
-def _create_household(client: TestClient) -> None:
+def _create_household(client: TestClient) -> dict:
+    """Create household for gate tests. Returns parsed response."""
     r = client.post("/api/households", json=HOUSEHOLD_PAYLOAD)
-    assert r.status_code in (200, 201), r.text
+    assert r.status_code == 201, r.text
+    data = r.json()
+    assert "id" in data
+    assert data["base_currency"] == "USD"
+    return data
 
 
 # ---------------------------------------------------------------------------
@@ -54,7 +63,7 @@ def test_create_returns_201_then_idempotent_returns_200(
 
 
 def test_confirm_then_new_draft(api_client: TestClient) -> None:
-    """After Confirm, a new POST /draft creates a fresh draft (200)."""
+    """After Confirm, a new POST /draft creates a fresh draft (201)."""
     _create_household(api_client)
     api_client.post(BASE, json={})
 

@@ -282,6 +282,16 @@ def test_replace_holdings_empty_collection(api_client: TestClient) -> None:
         json={"expected_revision": 1, "items": []},
     )
     assert r.status_code == 400, r.text
+    detail = r.json()["detail"]
+    assert "No portfolio changes" in detail, detail
+    # Revision must not change
+    state = api_client.get("/api/portfolio").json()
+    assert state["draft"]["expected_revision"] == 1
+    assert state["draft"]["holdings"] == []
+    # No audit event for no-op
+    audit = api_client.get("/api/portfolio/audit").json()
+    actions = [e["action"] for e in audit["items"]]
+    assert "portfolio.draft.updated" not in actions
 
 
 def test_replace_holdings_rejects_invalid_decimal(api_client: TestClient) -> None:
