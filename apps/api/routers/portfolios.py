@@ -62,6 +62,8 @@ def _translate(exc: Exception) -> HTTPException:
         )
     if isinstance(exc, NoChangesError):
         return HTTPException(status_code=400, detail="No portfolio changes provided")
+    if isinstance(exc, ValueError):
+        return HTTPException(status_code=422, detail=str(exc))
     raise exc
 
 
@@ -75,13 +77,18 @@ def _holding_responses(holdings) -> list[HoldingResponse]:
 # ---------------------------------------------------------------------------
 
 
-@router.post("", response_model=PortfolioCreateResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/draft", response_model=PortfolioCreateResponse)
 def create(
+    response: Response,
     session: DatabaseSession,
     _payload: EmptyPortfolioCreateRequest = Body(default_factory=EmptyPortfolioCreateRequest),
 ) -> PortfolioCreateResponse:
     try:
-        portfolio, draft, holdings, _created = read_or_create_portfolio(session)
+        portfolio, draft, holdings, created = read_or_create_portfolio(session)
+        if created:
+            response.status_code = status.HTTP_201_CREATED
+        else:
+            response.status_code = status.HTTP_200_OK
         return PortfolioCreateResponse(
             portfolio=PortfolioResponse.model_validate(portfolio),
             draft=PortfolioDraftResponse(

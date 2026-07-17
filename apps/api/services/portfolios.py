@@ -311,6 +311,11 @@ def replace_holdings(
             for sort_order, item in enumerate(payload.items)
         ]
 
+        # Cash holdings must have unit_price = 1.00 (OD-S3-012)
+        for v in values:
+            if v["asset_category"].strip().lower() == "cash" and v["unit_price"] != Decimal("1.00"):
+                raise ValueError("Cash holdings must have unit_price = 1.00")
+
         # Idempotency check
         existing_sig = [
             (
