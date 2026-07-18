@@ -61,6 +61,16 @@ def postgres_engine() -> Engine:
 
 @pytest.fixture()
 def db_session(postgres_engine: Engine) -> Generator[Session, None, None]:
+    # Ensure schema is at latest revision before truncating
+    from alembic.config import Config as _AlembicConfig
+    from alembic import command as _alembic_command
+    _cfg = _AlembicConfig()
+    _cfg.set_main_option("script_location", "migrations")
+    _cfg.attributes["connection"] = postgres_engine
+    try:
+        _alembic_command.upgrade(_cfg, "head")
+    except Exception:
+        pass
     with postgres_engine.begin() as connection:
         try:
             connection.execute(
