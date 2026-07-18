@@ -75,7 +75,8 @@ def db_session(postgres_engine: Engine) -> Generator[Session, None, None]:
                 " investment_policies,"
                 " guardian_events, guardian_evaluation_runs,"
                 " guardian_check_confirmed, guardian_check_drafts,"
-                " guardian_checks,"
+                " guardian_checks,"\
+                " leases, attempts, runs, schedules, job_definitions,"
                 " household_profiles"
                 " RESTART IDENTITY CASCADE"
             )
@@ -101,7 +102,8 @@ def api_client(postgres_engine: Engine) -> Generator[TestClient, None, None]:
                 " investment_policies,"
                 " guardian_events, guardian_evaluation_runs,"
                 " guardian_check_confirmed, guardian_check_drafts,"
-                " guardian_checks,"
+                " guardian_checks,"\
+                " leases, attempts, runs, schedules, job_definitions,"
                 " household_profiles"
                 " RESTART IDENTITY CASCADE"
             )

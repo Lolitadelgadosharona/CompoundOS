@@ -19,6 +19,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    Time,
     UniqueConstraint,
     func,
     text,
@@ -1083,12 +1084,96 @@ class GuardianEvaluationRun(Base):
     events_created: Mapped[int] = mapped_column(Integer, nullable=False)
     skip_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     as_of_date: Mapped[Any] = mapped_column(Date, nullable=False)
-    started_at: Mapped[datetime] = mapped_column(
+    detected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
-    completed_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
+
+
+# ---------------------------------------------------------------------------
+# Sprint 005: Data Orchestration Persistence
+# ---------------------------------------------------------------------------
+
+
+class JobDefinition(Base):
+    __tablename__ = "job_definitions"
+    __table_args__ = (
+        Index("ix_job_definitions_household", "household_id"),
     )
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    household_id: Mapped[UUID] = mapped_column(ForeignKey("household_profiles.id", ondelete="RESTRICT"))
+    job_type: Mapped[str] = mapped_column(Text, nullable=False)
+    job_params: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class Schedule(Base):
+    __tablename__ = "schedules"
+    __table_args__ = (
+        UniqueConstraint("job_definition_id", name="uq_schedules_one_per_job"),
+    )
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    job_definition_id: Mapped[UUID] = mapped_column(ForeignKey("job_definitions.id", ondelete="CASCADE"))
+    execution_time: Mapped[Any] = mapped_column(Time, nullable=False)
+    timezone: Mapped[str] = mapped_column(Text, nullable=False)
+    next_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class Run(Base):
+    __tablename__ = "runs"
+    __table_args__ = (
+        Index("ix_runs_job_definition", "job_definition_id"),
+        Index("ix_runs_schedule", "schedule_id"),
+        Index("ix_runs_status", "status"),
+    )
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    job_definition_id: Mapped[UUID] = mapped_column(ForeignKey("job_definitions.id", ondelete="RESTRICT"))
+    schedule_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("schedules.id", ondelete="SET NULL"))
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'pending'"))
+    triggered_by: Mapped[str] = mapped_column(Text, nullable=False)
+    scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    household_id: Mapped[UUID] = mapped_column(ForeignKey("household_profiles.id", ondelete="RESTRICT"))
+    # Relationships
+    attempts: Mapped[list["Attempt"]] = relationship("Attempt", back_populates="run", cascade="all, delete-orphan")
+    lease: Mapped[Optional["Lease"]] = relationship("Lease", back_populates="run", uselist=False, cascade="all, delete-orphan")
+
+
+class Attempt(Base):
+    __tablename__ = "attempts"
+    __table_args__ = (
+        UniqueConstraint("run_id", "attempt_number", name="uq_attempts_run_attempt"),
+        Index("ix_attempts_run", "run_id"),
+    )
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id", ondelete="RESTRICT"))
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'pending'"))
+    error_message: Mapped[Optional[str]] = mapped_column(Text)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    run: Mapped["Run"] = relationship("Run", back_populates="attempts")
+
+
+class Lease(Base):
+    __tablename__ = "leases"
+    __table_args__ = (
+        UniqueConstraint("run_id", name="uq_leases_run"),
+        Index("ix_leases_worker", "worker_id"),
+    )
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id", ondelete="RESTRICT"))
+    worker_id: Mapped[str] = mapped_column(Text, nullable=False)
+    fencing_token: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    acquired_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    heartbeat_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    released_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    run: Mapped["Run"] = relationship("Run", back_populates="lease")
 
 
 class GuardianEvent(Base):
