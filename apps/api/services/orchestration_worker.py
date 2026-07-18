@@ -178,8 +178,15 @@ class OrchestrationWorker:
                 logger.exception("Recovery failed")
 
     def _abort_stale_run(self, session: Session, stale: dict) -> None:
-        """Abort a stale run with expired lease."""
+        """Abort a stale run and release its expired lease."""
         complete_run(session, stale["run_id"], "aborted", clock=self._clock)
+        release_lease(
+            session,
+            lease_id=stale["lease_id"],
+            worker_id=stale["worker_id"],
+            fencing_token=stale["fencing_token"],
+            clock=self._clock,
+        )
         logger.info("Aborted stale run %s", stale["run_id"])
 
     # ── Claim + execute ──
@@ -228,6 +235,7 @@ class OrchestrationWorker:
         ikey = compute_idempotency_key(job_type, job_params, now.date())
 
         # Create run
+        from sqlalchemy.exc import IntegrityError
         try:
             run_id = create_run(
                 session,
@@ -240,7 +248,7 @@ class OrchestrationWorker:
                 household_id=household_id,
                 clock=self._clock,
             )
-        except Exception:
+        except IntegrityError:
             # Idempotency or overlap conflict — already claimed
             logger.debug("Run already claimed for schedule %s", schedule_id)
             return
@@ -280,6 +288,9 @@ class OrchestrationWorker:
             )
             if finalize_result == 0:
                 logger.warning("Finalize failed — stale token for run %s", run_id)
+                complete_attempt(session, aid, "failed",
+                                 error_message="Lease expired during execution",
+                                 clock=self._clock)
                 return
 
             attempt_status = "succeeded" if result["status"] == "completed" else "failed"
