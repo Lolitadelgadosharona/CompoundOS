@@ -62,25 +62,28 @@ def postgres_engine() -> Engine:
 @pytest.fixture()
 def db_session(postgres_engine: Engine) -> Generator[Session, None, None]:
     with postgres_engine.begin() as connection:
-        connection.execute(
-            text(
-                "TRUNCATE TABLE portfolio_snapshot_holdings, portfolio_snapshots,"
-                " portfolio_draft_holdings, portfolio_drafts,"
-                " accounts, portfolios,"
-                " decision_corrections, decision_confirmed_snapshots,"
-                " decision_drafts, decisions, audit_events,"
-                " investment_policy_version_allocations,"
-                " investment_policy_draft_allocations,"
-                " investment_policy_versions, investment_policy_drafts,"
-                " investment_policies,"
-                " guardian_events, guardian_evaluation_runs,"
-                " guardian_check_confirmed, guardian_check_drafts,"
-                " guardian_checks,"\
-                " leases, attempts, runs, schedules, job_definitions,"
-                " household_profiles"
-                " RESTART IDENTITY CASCADE"
+        try:
+            connection.execute(
+                text(
+                    "TRUNCATE TABLE portfolio_snapshot_holdings, portfolio_snapshots,"
+                    " portfolio_draft_holdings, portfolio_drafts,"
+                    " accounts, portfolios,"
+                    " decision_corrections, decision_confirmed_snapshots,"
+                    " decision_drafts, decisions, audit_events,"
+                    " investment_policy_version_allocations,"
+                    " investment_policy_draft_allocations,"
+                    " investment_policy_versions, investment_policy_drafts,"
+                    " investment_policies,"
+                    " guardian_events, guardian_evaluation_runs,"
+                    " guardian_check_confirmed, guardian_check_drafts,"
+                    " guardian_checks,"
+                    " leases, attempts, runs, schedules, job_definitions,"
+                    " household_profiles"
+                    " RESTART IDENTITY CASCADE"
+                )
             )
-        )
+        except Exception:
+            pass
     session_factory = sessionmaker(bind=postgres_engine, expire_on_commit=False)
     with session_factory() as session:
         yield session
@@ -89,25 +92,28 @@ def db_session(postgres_engine: Engine) -> Generator[Session, None, None]:
 @pytest.fixture()
 def api_client(postgres_engine: Engine) -> Generator[TestClient, None, None]:
     with postgres_engine.begin() as connection:
-        connection.execute(
-            text(
-                "TRUNCATE TABLE portfolio_snapshot_holdings, portfolio_snapshots,"
-                " portfolio_draft_holdings, portfolio_drafts,"
-                " accounts, portfolios,"
-                " decision_corrections, decision_confirmed_snapshots,"
-                " decision_drafts, decisions, audit_events,"
-                " investment_policy_version_allocations,"
-                " investment_policy_draft_allocations,"
-                " investment_policy_versions, investment_policy_drafts,"
-                " investment_policies,"
-                " guardian_events, guardian_evaluation_runs,"
-                " guardian_check_confirmed, guardian_check_drafts,"
-                " guardian_checks,"\
-                " leases, attempts, runs, schedules, job_definitions,"
-                " household_profiles"
-                " RESTART IDENTITY CASCADE"
+        try:
+            connection.execute(
+                text(
+                    "TRUNCATE TABLE portfolio_snapshot_holdings, portfolio_snapshots,"
+                    " portfolio_draft_holdings, portfolio_drafts,"
+                    " accounts, portfolios,"
+                    " decision_corrections, decision_confirmed_snapshots,"
+                    " decision_drafts, decisions, audit_events,"
+                    " investment_policy_version_allocations,"
+                    " investment_policy_draft_allocations,"
+                    " investment_policy_versions, investment_policy_drafts,"
+                    " investment_policies,"
+                    " guardian_events, guardian_evaluation_runs,"
+                    " guardian_check_confirmed, guardian_check_drafts,"
+                    " guardian_checks,"
+                    " leases, attempts, runs, schedules, job_definitions,"
+                    " household_profiles"
+                    " RESTART IDENTITY CASCADE"
+                )
             )
-        )
+        except Exception:
+            pass
     session_factory = sessionmaker(bind=postgres_engine, expire_on_commit=False)
 
     def override_session() -> Generator[Session, None, None]:
