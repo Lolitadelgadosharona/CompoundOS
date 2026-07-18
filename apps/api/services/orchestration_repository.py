@@ -87,13 +87,11 @@ def create_run(
     triggered_by: str,
     scheduled_at: datetime,
     household_id: str,
-    clock: Any = None,
 ) -> str:
     """Create a new Run. Returns the run_id as string.
 
     Raises IntegrityError on duplicate idempotency_key (already claimed).
     """
-    (clock or _utc_now)() if callable(clock) else clock or _utc_now()
     run_id = uuid4()
     session.execute(
         text(
@@ -142,10 +140,8 @@ def create_attempt(
     run_id: str,
     attempt_number: int,
     status: str = "pending",
-    clock: Any = None,
 ) -> str:
     """Create a new Attempt. Returns the attempt_id as string."""
-    (clock or _utc_now)() if callable(clock) else clock or _utc_now()
     aid = uuid4()
     session.execute(
         text(
