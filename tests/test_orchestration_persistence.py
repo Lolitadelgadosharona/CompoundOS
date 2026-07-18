@@ -1,4 +1,4 @@
-"""Sprint 005 Slice A — Lease fencing + hardening tests (migration 0010)."""
+"""Sprint 005 Slice A — Final fencing semantics tests (migration 0011)."""
 
 import hashlib
 import threading
@@ -79,7 +79,7 @@ def _setup_run(session: Session, hid: str, jid: str, *,
 # ── Migration ──
 
 
-def test_migration_head_is_0010(postgres_engine: Engine) -> None:
+def test_migration_head_is_0011(postgres_engine: Engine) -> None:
     from alembic.config import Config
     from alembic.script import ScriptDirectory
     cfg = Config()
@@ -87,7 +87,7 @@ def test_migration_head_is_0010(postgres_engine: Engine) -> None:
     script = ScriptDirectory.from_config(cfg)
     heads = script.get_heads()
     assert len(heads) == 1
-    assert heads[0] == "0010_lease_fencing"
+    assert heads[0] == "0011_fencing_closure"
 
 
 # ── CHECK constraints ──
@@ -99,8 +99,7 @@ def test_check_runs_status_rejects_invalid(db_session: Session) -> None:
     rid = _setup_run(db_session, hid, jid)
     with pytest.raises(Exception):
         db_session.execute(text(
-            "UPDATE runs SET status = 'unknown' WHERE id = :id"
-        ), {"id": rid})
+            "UPDATE runs SET status = 'unknown' WHERE id = :id"), {"id": rid})
         db_session.commit()
 
 
@@ -120,7 +119,6 @@ def test_check_runs_triggered_by_rejects_invalid(db_session: Session) -> None:
 
 
 def test_check_attempts_status_rejects_invalid(db_session: Session) -> None:
-    """F-1: ck_attempts_status rejects values outside approved set."""
     hid = _setup_household(db_session)
     jid = _setup_job(db_session, hid)
     rid = _setup_run(db_session, hid, jid, status="pending")
@@ -139,25 +137,22 @@ def test_check_attempts_attempt_number_positive(db_session: Session) -> None:
     with pytest.raises(Exception):
         db_session.execute(text(
             "INSERT INTO attempts (id, run_id, attempt_number)"
-            " VALUES (:id, :rid, 0)"
-        ), {"id": uuid4(), "rid": rid})
+            " VALUES (:id, :rid, 0)"), {"id": uuid4(), "rid": rid})
         db_session.commit()
 
 
 def test_check_attempts_attempt_number_negative(db_session: Session) -> None:
-    """F-4: ck_attempts_attempt_number_positive rejects -1."""
     hid = _setup_household(db_session)
     jid = _setup_job(db_session, hid)
     rid = _setup_run(db_session, hid, jid)
     with pytest.raises(Exception):
         db_session.execute(text(
             "INSERT INTO attempts (id, run_id, attempt_number)"
-            " VALUES (:id, :rid, -1)"
-        ), {"id": uuid4(), "rid": rid})
+            " VALUES (:id, :rid, -1)"), {"id": uuid4(), "rid": rid})
         db_session.commit()
 
 
-# ── Full terminal immutability (0009 v2) ──
+# ── Full terminal immutability ──
 
 
 def test_run_terminal_fully_immutable(db_session: Session) -> None:
@@ -172,20 +167,16 @@ def test_run_terminal_fully_immutable(db_session: Session) -> None:
 
 
 def test_run_terminal_immutable_status_and_household(db_session: Session) -> None:
-    """F-3: terminal immutability blocks status + identity field changes."""
     hid = _setup_household(db_session)
     jid = _setup_job(db_session, hid)
     rid = _setup_run(db_session, hid, jid, status="completed")
-    # Status change rejected
     with pytest.raises(Exception, match="terminal"):
         db_session.execute(text(
-            "UPDATE runs SET status = 'pending' WHERE id = :id"
-        ), {"id": rid})
+            "UPDATE runs SET status = 'pending' WHERE id = :id"), {"id": rid})
         db_session.commit()
 
 
 def test_run_terminal_immutable_timestamp(db_session: Session) -> None:
-    """F-3: terminal immutability blocks timestamp field changes."""
     hid = _setup_household(db_session)
     jid = _setup_job(db_session, hid)
     rid = _setup_run(db_session, hid, jid, status="failed")
@@ -208,13 +199,11 @@ def test_attempt_terminal_fully_immutable(db_session: Session) -> None:
     db_session.commit()
     with pytest.raises(Exception, match="terminal"):
         db_session.execute(text(
-            "UPDATE attempts SET error_message = 'x' WHERE id = :id"
-        ), {"id": aid})
+            "UPDATE attempts SET error_message = 'x' WHERE id = :id"), {"id": aid})
         db_session.commit()
 
 
 def test_attempt_terminal_immutable_status(db_session: Session) -> None:
-    """F-3: terminal attempt blocks status change."""
     hid = _setup_household(db_session)
     jid = _setup_job(db_session, hid)
     rid = _setup_run(db_session, hid, jid, status="running")
@@ -226,8 +215,7 @@ def test_attempt_terminal_immutable_status(db_session: Session) -> None:
     db_session.commit()
     with pytest.raises(Exception, match="terminal"):
         db_session.execute(text(
-            "UPDATE attempts SET status = 'pending' WHERE id = :id"
-        ), {"id": aid})
+            "UPDATE attempts SET status = 'pending' WHERE id = :id"), {"id": aid})
         db_session.commit()
 
 
@@ -255,7 +243,7 @@ def test_attempt_deletion_forbidden(db_session: Session) -> None:
         db_session.commit()
 
 
-# ── Overlap + Idempotency (isolated) ──
+# ── Overlap + Idempotency ──
 
 
 def test_overlap_active_run_partial_index_only(db_session: Session) -> None:
@@ -319,299 +307,407 @@ def test_idempotency_key_unique_independent(db_session: Session) -> None:
         db_session.commit()
 
 
-# ── Lease Fencing (migration 0010): worker_id protection ──
+# ── Lease Fencing v4: Application Atomic Takeover Contract ──
+
+_TAKEOVER_SQL = (
+    "UPDATE leases SET"
+    " fencing_token = fencing_token + 1,"
+    " worker_id = :wid,"
+    " acquired_at = :as_of,"
+    " heartbeat_at = :as_of,"
+    " expires_at = :new_exp,"
+    " released_at = NULL"
+    " WHERE id = :lid"
+    " AND fencing_token = :base"
+    " AND expires_at <= :as_of"
+    " RETURNING fencing_token"
+)
+
+_HEARTBEAT_SQL = (
+    "UPDATE leases SET heartbeat_at = :as_of"
+    " WHERE id = :lid AND worker_id = :wid AND fencing_token = :token"
+    " AND released_at IS NULL AND expires_at > :as_of"
+)
+
+_FINALIZE_SQL = (
+    "UPDATE runs SET status = :st, completed_at = :as_of"
+    " WHERE id = :rid AND EXISTS ("
+    "  SELECT 1 FROM leases"
+    "  WHERE id = :lid AND worker_id = :wid AND fencing_token = :token"
+    "  AND released_at IS NULL AND expires_at > :as_of"
+    " )"
+)
 
 
-def test_worker_id_immutable_without_token_increment(db_session: Session) -> None:
-    """F-2 UPGRADED TO HIGH: worker_id cannot change without token increment."""
+def _run_takeover(session, lid, wid, base, as_of, new_exp):
+    return session.execute(text(_TAKEOVER_SQL), {
+        "lid": lid, "wid": wid, "base": base,
+        "as_of": as_of, "new_exp": new_exp,
+    })
+
+
+def _run_heartbeat(session, lid, wid, token, as_of):
+    return session.execute(text(_HEARTBEAT_SQL), {
+        "lid": lid, "wid": wid, "token": token, "as_of": as_of,
+    })
+
+
+def _run_finalize(session, rid, lid, wid, token, st, as_of):
+    return session.execute(text(_FINALIZE_SQL), {
+        "rid": rid, "lid": lid, "wid": wid, "token": token,
+        "st": st, "as_of": as_of,
+    })
+
+
+# ── Takeover complete window refresh ──
+
+
+def test_takeover_unexpired_rejected_rowcount_zero(db_session: Session) -> None:
+    """M-1: application WHERE with expiry — unexpired returns rowcount=0."""
     hid = _setup_household(db_session)
     jid = _setup_job(db_session, hid)
     rid = _setup_run(db_session, hid, jid)
+    as_of = _now()
+    future_exp = as_of + timedelta(hours=1)
     lid = uuid4()
     db_session.execute(text(
-        "INSERT INTO leases (id, run_id, worker_id, expires_at)"
-        " VALUES (:id, :rid, 'worker-1', :exp)"
-    ), {"id": lid, "rid": rid, "exp": _now() + timedelta(seconds=60)})
+        "INSERT INTO leases"
+        " (id, run_id, worker_id, expires_at, acquired_at, heartbeat_at)"
+        " VALUES (:id, :rid, 'w1', :exp, :now, :now)"
+    ), {"id": lid, "rid": rid, "exp": future_exp, "now": as_of})
+    db_session.commit()
+    token = db_session.execute(text(
+        "SELECT fencing_token FROM leases WHERE id = :id"), {"id": lid}).fetchone()[0]
+
+    new_exp = as_of + timedelta(seconds=60)
+    result = _run_takeover(db_session, lid, "w2", token, as_of, new_exp)
+    db_session.commit()
+    # Unexpired lease: WHERE expires_at <= as_of fails → rowcount=0
+    assert result.rowcount == 0
+
+
+def test_takeover_expired_refreshes_window(db_session: Session) -> None:
+    """Expired takeover refreshes complete lease window."""
+    hid = _setup_household(db_session)
+    jid = _setup_job(db_session, hid)
+    rid = _setup_run(db_session, hid, jid)
+    as_of = _now()
+    past_exp = as_of - timedelta(seconds=1)
+    lid = uuid4()
+    db_session.execute(text(
+        "INSERT INTO leases"
+        " (id, run_id, worker_id, expires_at, acquired_at, heartbeat_at)"
+        " VALUES (:id, :rid, 'w1', :exp, :now, :now)"
+    ), {"id": lid, "rid": rid, "exp": past_exp, "now": past_exp})
+    db_session.commit()
+    token = db_session.execute(text(
+        "SELECT fencing_token FROM leases WHERE id = :id"), {"id": lid}).fetchone()[0]
+
+    new_exp = as_of + timedelta(seconds=60)
+    result = _run_takeover(db_session, lid, "w2", token, as_of, new_exp)
+    db_session.commit()
+    assert result.rowcount == 1
+    new_token = result.fetchone()[0]
+    assert new_token == token + 1
+
+    # Verify complete window refresh
+    row = db_session.execute(text(
+        "SELECT worker_id, fencing_token, acquired_at, heartbeat_at,"
+        " expires_at, released_at FROM leases WHERE id = :id"
+    ), {"id": lid}).fetchone()
+    assert row[0] == "w2"
+    assert row[1] == new_token
+    assert row[2] is not None  # acquired_at refreshed
+    assert row[3] is not None  # heartbeat_at refreshed
+    assert row[4] > as_of  # expires_at is future
+    assert row[5] is None  # released_at is NULL
+
+
+def test_takeover_noop_token_only_bump_rejected(db_session: Session) -> None:
+    """M-2: token increment without window refresh is rejected."""
+    hid = _setup_household(db_session)
+    jid = _setup_job(db_session, hid)
+    rid = _setup_run(db_session, hid, jid)
+    past_exp = _now() - timedelta(seconds=1)
+    lid = uuid4()
+    db_session.execute(text(
+        "INSERT INTO leases"
+        " (id, run_id, worker_id, expires_at, acquired_at, heartbeat_at)"
+        " VALUES (:id, :rid, 'w1', :exp, :now, :now)"
+    ), {"id": lid, "rid": rid, "exp": past_exp, "now": past_exp})
+    db_session.commit()
+    # Token-only bump: no window refresh
+    with pytest.raises(Exception, match="incomplete"):
+        db_session.execute(text(
+            "UPDATE leases SET fencing_token = fencing_token + 1 WHERE id = :id"
+        ), {"id": lid})
+        db_session.commit()
+
+
+def test_takeover_same_worker_reacquire(db_session: Session) -> None:
+    """Same worker reacquire with full window refresh."""
+    hid = _setup_household(db_session)
+    jid = _setup_job(db_session, hid)
+    rid = _setup_run(db_session, hid, jid)
+    as_of = _now()
+    past_exp = as_of - timedelta(seconds=1)
+    lid = uuid4()
+    db_session.execute(text(
+        "INSERT INTO leases"
+        " (id, run_id, worker_id, expires_at, acquired_at, heartbeat_at)"
+        " VALUES (:id, :rid, 'w1', :exp, :now, :now)"
+    ), {"id": lid, "rid": rid, "exp": past_exp, "now": past_exp})
+    db_session.commit()
+    token = db_session.execute(text(
+        "SELECT fencing_token FROM leases WHERE id = :id"), {"id": lid}).fetchone()[0]
+
+    new_exp = as_of + timedelta(seconds=60)
+    result = _run_takeover(db_session, lid, "w1", token, as_of, new_exp)
+    db_session.commit()
+    assert result.rowcount == 1
+    assert result.fetchone()[0] == token + 1
+
+
+def test_worker_id_without_token_rejected(db_session: Session) -> None:
+    """F-2: worker_id change without token increment rejected."""
+    hid = _setup_household(db_session)
+    jid = _setup_job(db_session, hid)
+    rid = _setup_run(db_session, hid, jid)
+    as_of = _now()
+    lid = uuid4()
+    db_session.execute(text(
+        "INSERT INTO leases"
+        " (id, run_id, worker_id, expires_at, acquired_at, heartbeat_at)"
+        " VALUES (:id, :rid, 'w1', :exp, :now, :now)"
+    ), {"id": lid, "rid": rid, "exp": as_of + timedelta(seconds=60), "now": as_of})
     db_session.commit()
     with pytest.raises(Exception, match="worker_id"):
         db_session.execute(text(
-            "UPDATE leases SET worker_id = 'rogue' WHERE id = :id"
-        ), {"id": lid})
+            "UPDATE leases SET worker_id = 'rogue' WHERE id = :id"), {"id": lid})
         db_session.commit()
 
 
-def test_token_increment_not_exactly_one_rejected(db_session: Session) -> None:
-    """Arbitrary token changes are rejected."""
+# ── Expired-holder protection ──
+
+
+def test_expired_holder_heartbeat_zero(db_session: Session) -> None:
+    """Heartbeat on expired lease → 0 rows."""
     hid = _setup_household(db_session)
     jid = _setup_job(db_session, hid)
     rid = _setup_run(db_session, hid, jid)
+    as_of = _now()
+    past_exp = as_of - timedelta(seconds=1)
     lid = uuid4()
     db_session.execute(text(
-        "INSERT INTO leases (id, run_id, worker_id, expires_at)"
-        " VALUES (:id, :rid, 'worker-1', :exp)"
-    ), {"id": lid, "rid": rid, "exp": _now() + timedelta(seconds=60)})
+        "INSERT INTO leases"
+        " (id, run_id, worker_id, expires_at, acquired_at, heartbeat_at)"
+        " VALUES (:id, :rid, 'w1', :exp, :now, :now)"
+    ), {"id": lid, "rid": rid, "exp": past_exp, "now": past_exp})
     db_session.commit()
-    with pytest.raises(Exception, match="fencing_token"):
-        db_session.execute(text(
-            "UPDATE leases SET fencing_token = 999, worker_id = 'rogue' WHERE id = :id"
-        ), {"id": lid})
-        db_session.commit()
-
-
-def test_direct_fencing_token_mutation_rejected(db_session: Session) -> None:
-    """Direct SET fencing_token = N without takeover pattern is rejected."""
-    hid = _setup_household(db_session)
-    jid = _setup_job(db_session, hid)
-    rid = _setup_run(db_session, hid, jid)
-    lid = uuid4()
-    db_session.execute(text(
-        "INSERT INTO leases (id, run_id, worker_id, expires_at)"
-        " VALUES (:id, :rid, 'worker-1', :exp)"
-    ), {"id": lid, "rid": rid, "exp": _now() + timedelta(seconds=60)})
-    db_session.commit()
-    with pytest.raises(Exception, match="fencing_token"):
-        db_session.execute(text(
-            "UPDATE leases SET fencing_token = 5 WHERE id = :id"
-        ), {"id": lid})
-        db_session.commit()
-
-
-# ── Lease expiry enforcement ──
-
-
-def test_unexpired_lease_takeover_rejected(db_session: Session) -> None:
-    """Takeover of a non-expired lease must be rejected."""
-    hid = _setup_household(db_session)
-    jid = _setup_job(db_session, hid)
-    rid = _setup_run(db_session, hid, jid)
-    # Future expiry (far in the future — definitely not expired)
-    future_exp = _now() + timedelta(hours=1)
-    lid = uuid4()
-    db_session.execute(text(
-        "INSERT INTO leases (id, run_id, worker_id, expires_at)"
-        " VALUES (:id, :rid, 'worker-1', :exp)"
-    ), {"id": lid, "rid": rid, "exp": future_exp})
-    db_session.commit()
-    with pytest.raises(Exception, match="unexpired"):
-        db_session.execute(text(
-            "UPDATE leases"
-            " SET fencing_token = fencing_token + 1, worker_id = 'worker-2'"
-            " WHERE id = :id"
-        ), {"id": lid})
-        db_session.commit()
-
-
-def test_expired_lease_takeover_succeeds(db_session: Session) -> None:
-    """Expired lease takeover increments token and changes worker."""
-    hid = _setup_household(db_session)
-    jid = _setup_job(db_session, hid)
-    rid = _setup_run(db_session, hid, jid)
-    # Past expiry (definitely expired)
-    past_exp = _now() - timedelta(seconds=1)
-    lid = uuid4()
-    db_session.execute(text(
-        "INSERT INTO leases (id, run_id, worker_id, expires_at)"
-        " VALUES (:id, :rid, 'worker-1', :exp)"
-    ), {"id": lid, "rid": rid, "exp": past_exp})
-    db_session.commit()
-    db_session.execute(text(
-        "UPDATE leases"
-        " SET fencing_token = fencing_token + 1, worker_id = 'worker-2'"
-        " WHERE id = :id"
-    ), {"id": lid})
-    db_session.commit()
-    row = db_session.execute(text(
-        "SELECT fencing_token, worker_id FROM leases WHERE id = :id"
-    ), {"id": lid}).fetchone()
-    assert row[0] == 2
-    assert row[1] == "worker-2"
-
-
-def test_expired_lease_same_worker_reacquire_token_increments(db_session: Session) -> None:
-    """Same worker reacquiring expired lease still gets new token."""
-    hid = _setup_household(db_session)
-    jid = _setup_job(db_session, hid)
-    rid = _setup_run(db_session, hid, jid)
-    past_exp = _now() - timedelta(seconds=1)
-    lid = uuid4()
-    db_session.execute(text(
-        "INSERT INTO leases (id, run_id, worker_id, expires_at)"
-        " VALUES (:id, :rid, 'worker-1', :exp)"
-    ), {"id": lid, "rid": rid, "exp": past_exp})
-    db_session.commit()
-    # Same worker takes over
-    db_session.execute(text(
-        "UPDATE leases"
-        " SET fencing_token = fencing_token + 1, worker_id = 'worker-1'"
-        " WHERE id = :id"
-    ), {"id": lid})
-    db_session.commit()
-    row = db_session.execute(text(
-        "SELECT fencing_token FROM leases WHERE id = :id"
-    ), {"id": lid}).fetchone()
-    assert row[0] == 2, "Reacquire must increment token"
-
-
-def test_stale_worker_heartbeat_zero_rows(db_session: Session) -> None:
-    """Heartbeat with stale token affects 0 rows."""
-    hid = _setup_household(db_session)
-    jid = _setup_job(db_session, hid)
-    rid = _setup_run(db_session, hid, jid)
-    past_exp = _now() - timedelta(seconds=1)
-    lid = uuid4()
-    db_session.execute(text(
-        "INSERT INTO leases (id, run_id, worker_id, expires_at)"
-        " VALUES (:id, :rid, 'worker-1', :exp)"
-    ), {"id": lid, "rid": rid, "exp": past_exp})
-    db_session.commit()
-    # Worker 2 takes over (token 2)
-    db_session.execute(text(
-        "UPDATE leases"
-        " SET fencing_token = fencing_token + 1, worker_id = 'worker-2'"
-        " WHERE id = :id"
-    ), {"id": lid})
-    db_session.commit()
-    # Stale heartbeat (token 1) — must affect 0 rows
-    result = db_session.execute(text(
-        "UPDATE leases SET heartbeat_at = NOW()"
-        " WHERE id = :id AND worker_id = :wid AND fencing_token = :token"
-    ), {"id": lid, "wid": "worker-1", "token": 1})
+    token = db_session.execute(text(
+        "SELECT fencing_token FROM leases WHERE id = :id"), {"id": lid}).fetchone()[0]
+    result = _run_heartbeat(db_session, lid, "w1", token, as_of)
     assert result.rowcount == 0
 
 
-def test_current_worker_heartbeat_succeeds(db_session: Session) -> None:
-    """Current worker heartbeat with correct token succeeds."""
+def test_unexpired_holder_heartbeat_one(db_session: Session) -> None:
+    """Heartbeat on unexpired lease → 1 row."""
     hid = _setup_household(db_session)
     jid = _setup_job(db_session, hid)
     rid = _setup_run(db_session, hid, jid)
-    past_exp = _now() - timedelta(seconds=1)
+    as_of = _now()
+    future_exp = as_of + timedelta(seconds=60)
     lid = uuid4()
     db_session.execute(text(
-        "INSERT INTO leases (id, run_id, worker_id, expires_at)"
-        " VALUES (:id, :rid, 'worker-1', :exp)"
-    ), {"id": lid, "rid": rid, "exp": past_exp})
+        "INSERT INTO leases"
+        " (id, run_id, worker_id, expires_at, acquired_at, heartbeat_at)"
+        " VALUES (:id, :rid, 'w1', :exp, :now, :now)"
+    ), {"id": lid, "rid": rid, "exp": future_exp, "now": as_of})
     db_session.commit()
-    # Worker 2 takes over (token 2)
-    db_session.execute(text(
-        "UPDATE leases"
-        " SET fencing_token = fencing_token + 1, worker_id = 'worker-2'"
-        " WHERE id = :id"
-    ), {"id": lid})
-    db_session.commit()
-    # Current heartbeat (token 2) — must succeed
-    result = db_session.execute(text(
-        "UPDATE leases SET heartbeat_at = NOW()"
-        " WHERE id = :id AND worker_id = :wid AND fencing_token = :token"
-    ), {"id": lid, "wid": "worker-2", "token": 2})
+    token = db_session.execute(text(
+        "SELECT fencing_token FROM leases WHERE id = :id"), {"id": lid}).fetchone()[0]
+    result = _run_heartbeat(db_session, lid, "w1", token, as_of)
     assert result.rowcount == 1
 
 
-def test_stale_worker_finalize_zero_rows(db_session: Session) -> None:
-    """Finalize with stale token must not change run state."""
+def test_expired_holder_finalize_zero(db_session: Session) -> None:
+    """Finalize on expired lease → 0 rows."""
     hid = _setup_household(db_session)
     jid = _setup_job(db_session, hid)
     rid = _setup_run(db_session, hid, jid, status="running")
-    past_exp = _now() - timedelta(seconds=1)
+    as_of = _now()
+    past_exp = as_of - timedelta(seconds=1)
     lid = uuid4()
     db_session.execute(text(
-        "INSERT INTO leases (id, run_id, worker_id, expires_at)"
-        " VALUES (:id, :rid, 'worker-1', :exp)"
-    ), {"id": lid, "rid": rid, "exp": past_exp})
+        "INSERT INTO leases"
+        " (id, run_id, worker_id, expires_at, acquired_at, heartbeat_at)"
+        " VALUES (:id, :rid, 'w1', :exp, :now, :now)"
+    ), {"id": lid, "rid": rid, "exp": past_exp, "now": past_exp})
     db_session.commit()
-    # Worker 2 takes over (token 2)
-    db_session.execute(text(
-        "UPDATE leases"
-        " SET fencing_token = fencing_token + 1, worker_id = 'worker-2'"
-        " WHERE id = :id"
-    ), {"id": lid})
-    db_session.commit()
-    # Stale finalize (token 1) — 0 rows
-    result = db_session.execute(text(
-        "UPDATE runs SET status = 'completed', completed_at = NOW()"
-        " WHERE id = :rid AND EXISTS ("
-        "  SELECT 1 FROM leases"
-        "  WHERE id = :lid AND worker_id = 'worker-1' AND fencing_token = :token"
-        " )"
-    ), {"rid": rid, "lid": lid, "token": 1})
+    token = db_session.execute(text(
+        "SELECT fencing_token FROM leases WHERE id = :id"), {"id": lid}).fetchone()[0]
+    result = _run_finalize(db_session, rid, lid, "w1", token, "completed", as_of)
     assert result.rowcount == 0
 
 
-def test_current_worker_finalize_succeeds(db_session: Session) -> None:
-    """Current worker finalize with correct token succeeds."""
+def test_unexpired_holder_finalize_one(db_session: Session) -> None:
+    """Finalize on unexpired lease → 1 row, run transitions."""
     hid = _setup_household(db_session)
     jid = _setup_job(db_session, hid)
     rid = _setup_run(db_session, hid, jid, status="running")
-    past_exp = _now() - timedelta(seconds=1)
+    as_of = _now()
+    future_exp = as_of + timedelta(seconds=60)
     lid = uuid4()
     db_session.execute(text(
-        "INSERT INTO leases (id, run_id, worker_id, expires_at)"
-        " VALUES (:id, :rid, 'worker-1', :exp)"
-    ), {"id": lid, "rid": rid, "exp": past_exp})
+        "INSERT INTO leases"
+        " (id, run_id, worker_id, expires_at, acquired_at, heartbeat_at)"
+        " VALUES (:id, :rid, 'w1', :exp, :now, :now)"
+    ), {"id": lid, "rid": rid, "exp": future_exp, "now": as_of})
     db_session.commit()
-    # Worker 2 takes over (token 2)
-    db_session.execute(text(
-        "UPDATE leases"
-        " SET fencing_token = fencing_token + 1, worker_id = 'worker-2'"
-        " WHERE id = :id"
-    ), {"id": lid})
-    db_session.commit()
-    # Current finalize (token 2) — succeeds
-    result = db_session.execute(text(
-        "UPDATE runs SET status = 'completed', completed_at = NOW()"
-        " WHERE id = :rid AND EXISTS ("
-        "  SELECT 1 FROM leases"
-        "  WHERE id = :lid AND worker_id = 'worker-2' AND fencing_token = :token"
-        " )"
-    ), {"rid": rid, "lid": lid, "token": 2})
+    token = db_session.execute(text(
+        "SELECT fencing_token FROM leases WHERE id = :id"), {"id": lid}).fetchone()[0]
+    result = _run_finalize(db_session, rid, lid, "w1", token, "completed", as_of)
     assert result.rowcount == 1
     row = db_session.execute(text(
-        "SELECT status, completed_at FROM runs WHERE id = :rid"
-    ), {"rid": rid}).fetchone()
+        "SELECT status, completed_at FROM runs WHERE id = :rid"), {"rid": rid}).fetchone()
     assert row[0] == "completed"
     assert row[1] is not None
 
 
-# ── Concurrent takeover ──
-
-
-def test_concurrent_takeover_exactly_one_winner(db_session: Session) -> None:
-    """Two workers racing to takeover — exactly one wins."""
+def test_stale_token_heartbeat_zero(db_session: Session) -> None:
+    """Stale token heartbeat → 0 rows."""
     hid = _setup_household(db_session)
     jid = _setup_job(db_session, hid)
     rid = _setup_run(db_session, hid, jid)
-    past_exp = _now() - timedelta(seconds=1)
+    as_of = _now()
+    past_exp = as_of - timedelta(seconds=1)
     lid = uuid4()
     db_session.execute(text(
-        "INSERT INTO leases (id, run_id, worker_id, expires_at)"
-        " VALUES (:id, :rid, 'original', :exp)"
-    ), {"id": lid, "rid": rid, "exp": past_exp})
+        "INSERT INTO leases"
+        " (id, run_id, worker_id, expires_at, acquired_at, heartbeat_at)"
+        " VALUES (:id, :rid, 'w1', :exp, :now, :now)"
+    ), {"id": lid, "rid": rid, "exp": past_exp, "now": past_exp})
     db_session.commit()
-    # Get the current token
+    base = db_session.execute(text(
+        "SELECT fencing_token FROM leases WHERE id = :id"), {"id": lid}).fetchone()[0]
+    # Takeover: w2 gets token 2
+    new_exp = as_of + timedelta(seconds=60)
+    _run_takeover(db_session, lid, "w2", base, as_of, new_exp)
+    db_session.commit()
+    # Stale w1 heartbeat with token 1 → 0 rows
+    result = _run_heartbeat(db_session, lid, "w1", base, as_of)
+    assert result.rowcount == 0
+
+
+def test_stale_token_finalize_zero(db_session: Session) -> None:
+    """Stale token finalize → 0 rows."""
+    hid = _setup_household(db_session)
+    jid = _setup_job(db_session, hid)
+    rid = _setup_run(db_session, hid, jid, status="running")
+    as_of = _now()
+    past_exp = as_of - timedelta(seconds=1)
+    lid = uuid4()
+    db_session.execute(text(
+        "INSERT INTO leases"
+        " (id, run_id, worker_id, expires_at, acquired_at, heartbeat_at)"
+        " VALUES (:id, :rid, 'w1', :exp, :now, :now)"
+    ), {"id": lid, "rid": rid, "exp": past_exp, "now": past_exp})
+    db_session.commit()
+    base = db_session.execute(text(
+        "SELECT fencing_token FROM leases WHERE id = :id"), {"id": lid}).fetchone()[0]
+    new_exp = as_of + timedelta(seconds=60)
+    _run_takeover(db_session, lid, "w2", base, as_of, new_exp)
+    db_session.commit()
+    result = _run_finalize(db_session, rid, lid, "w1", base, "completed", as_of)
+    assert result.rowcount == 0
+
+
+def test_released_lease_heartbeat_zero(db_session: Session) -> None:
+    """Heartbeat on released lease → 0 rows."""
+    hid = _setup_household(db_session)
+    jid = _setup_job(db_session, hid)
+    rid = _setup_run(db_session, hid, jid)
+    as_of = _now()
+    future_exp = as_of + timedelta(seconds=60)
+    lid = uuid4()
+    db_session.execute(text(
+        "INSERT INTO leases"
+        " (id, run_id, worker_id, expires_at, acquired_at, heartbeat_at,"
+        " released_at)"
+        " VALUES (:id, :rid, 'w1', :exp, :now, :now, :now)"
+    ), {"id": lid, "rid": rid, "exp": future_exp, "now": as_of})
+    db_session.commit()
     token = db_session.execute(text(
-        "SELECT fencing_token FROM leases WHERE id = :id"
-    ), {"id": lid}).fetchone()[0]
+        "SELECT fencing_token FROM leases WHERE id = :id"), {"id": lid}).fetchone()[0]
+    result = _run_heartbeat(db_session, lid, "w1", token, as_of)
+    assert result.rowcount == 0
+
+
+# ── Boundary: expires_at = now() ──
+
+
+def test_takeover_expires_at_equals_now_allowed(db_session: Session) -> None:
+    """L-1: expires_at exactly equals now() → takeover allowed."""
+    hid = _setup_household(db_session)
+    jid = _setup_job(db_session, hid)
+    rid = _setup_run(db_session, hid, jid)
+    as_of = _now()
+    exact_exp = as_of  # exactly at boundary
+    lid = uuid4()
+    db_session.execute(text(
+        "INSERT INTO leases"
+        " (id, run_id, worker_id, expires_at, acquired_at, heartbeat_at)"
+        " VALUES (:id, :rid, 'w1', :exp, :now, :now)"
+    ), {"id": lid, "rid": rid, "exp": exact_exp, "now": exact_exp})
+    db_session.commit()
+    token = db_session.execute(text(
+        "SELECT fencing_token FROM leases WHERE id = :id"), {"id": lid}).fetchone()[0]
+    new_exp = as_of + timedelta(seconds=60)
+    result = _run_takeover(db_session, lid, "w2", token, as_of, new_exp)
+    db_session.commit()
+    assert result.rowcount == 1
+
+
+# ── Concurrent takeover with expiry predicate ──
+
+
+def test_concurrent_takeover_one_winner(db_session: Session) -> None:
+    """Two workers race with expiry predicate → exactly one winner."""
+    hid = _setup_household(db_session)
+    jid = _setup_job(db_session, hid)
+    rid = _setup_run(db_session, hid, jid)
+    as_of = _now()
+    past_exp = as_of - timedelta(seconds=1)
+    lid = uuid4()
+    db_session.execute(text(
+        "INSERT INTO leases"
+        " (id, run_id, worker_id, expires_at, acquired_at, heartbeat_at)"
+        " VALUES (:id, :rid, 'original', :exp, :now, :now)"
+    ), {"id": lid, "rid": rid, "exp": past_exp, "now": past_exp})
+    db_session.commit()
+    base = db_session.execute(text(
+        "SELECT fencing_token FROM leases WHERE id = :id"), {"id": lid}).fetchone()[0]
 
     engine = db_session.get_bind()
     barrier = threading.Barrier(2, timeout=5)
     results: list[str] = []
 
-    def _takeover(worker: str) -> None:
+    def _takeover(wid: str) -> None:
         with engine.connect() as c:
             barrier.wait()
             try:
-                # Condition on fencing_token = base_token so only one wins
-                result = c.execute(text(
-                    "UPDATE leases"
-                    " SET fencing_token = fencing_token + 1, worker_id = :wid"
-                    " WHERE id = :id AND fencing_token = :base"
-                ), {"id": lid, "wid": worker, "base": token})
+                new_exp_val = as_of + timedelta(seconds=60)
+                result = c.execute(text(_TAKEOVER_SQL), {
+                    "lid": lid, "wid": wid, "base": base,
+                    "as_of": as_of, "new_exp": new_exp_val,
+                })
                 c.commit()
                 if result.rowcount > 0:
-                    results.append(f"won:{worker}")
+                    results.append(f"won:{wid}")
                 else:
-                    results.append(f"lost:{worker}")
+                    results.append(f"lost:{wid}")
             except Exception:
-                results.append(f"error:{worker}")
+                results.append(f"error:{wid}")
 
     t1 = threading.Thread(target=_takeover, args=("worker-a",))
     t2 = threading.Thread(target=_takeover, args=("worker-b",))
@@ -625,11 +721,10 @@ def test_concurrent_takeover_exactly_one_winner(db_session: Session) -> None:
     assert len(winners) == 1, f"Expected 1 winner, got: {results}"
     assert len(losers) == 1, f"Expected 1 loser, got: {results}"
 
-    # Verify winner's token is token+1
     row = db_session.execute(text(
         "SELECT fencing_token, worker_id FROM leases WHERE id = :id"
     ), {"id": lid}).fetchone()
-    assert row[0] == token + 1
+    assert row[0] == base + 1
     assert row[1] in ("worker-a", "worker-b")
 
 
@@ -647,8 +742,7 @@ def test_schedule_enabled_default_false(db_session: Session) -> None:
     ), {"id": sid, "jid": jid, "nr": _now()})
     db_session.commit()
     row = db_session.execute(text(
-        "SELECT enabled FROM schedules WHERE id = :sid"
-    ), {"sid": sid}).fetchone()
+        "SELECT enabled FROM schedules WHERE id = :sid"), {"sid": sid}).fetchone()
     assert row[0] is False
 
 
@@ -657,12 +751,11 @@ def test_schedule_one_per_job(db_session: Session) -> None:
     jid = _setup_job(db_session, hid)
     _setup_schedule(db_session, jid)
     with pytest.raises(Exception):
-        sid2 = uuid4()
         db_session.execute(text(
             "INSERT INTO schedules"
             " (id, job_definition_id, execution_time, timezone, next_run_at)"
             " VALUES (:id, :jid, '10:00', 'UTC', :nr)"
-        ), {"id": sid2, "jid": jid, "nr": _now()})
+        ), {"id": uuid4(), "jid": jid, "nr": _now()})
         db_session.commit()
 
 
@@ -677,8 +770,7 @@ def test_schedule_valid_iana_timezone_accepted(db_session: Session) -> None:
     ), {"id": sid, "jid": jid, "nr": _now()})
     db_session.commit()
     row = db_session.execute(text(
-        "SELECT timezone FROM schedules WHERE id = :sid"
-    ), {"sid": sid}).fetchone()
+        "SELECT timezone FROM schedules WHERE id = :sid"), {"sid": sid}).fetchone()
     assert row[0] == "America/New_York"
 
 
@@ -694,8 +786,7 @@ def test_schedule_next_run_at_is_timestamptz(db_session: Session) -> None:
     ), {"id": sid, "jid": jid, "nr": now})
     db_session.commit()
     row = db_session.execute(text(
-        "SELECT next_run_at FROM schedules WHERE id = :sid"
-    ), {"sid": sid}).fetchone()
+        "SELECT next_run_at FROM schedules WHERE id = :sid"), {"sid": sid}).fetchone()
     assert row[0] is not None
     assert row[0].tzinfo is not None
 
@@ -705,12 +796,11 @@ def test_disabled_schedule_identifiable(db_session: Session) -> None:
     jid = _setup_job(db_session, hid)
     sid = _setup_schedule(db_session, jid)
     row = db_session.execute(text(
-        "SELECT enabled FROM schedules WHERE id = :sid"
-    ), {"sid": sid}).fetchone()
+        "SELECT enabled FROM schedules WHERE id = :sid"), {"sid": sid}).fetchone()
     assert row[0] is False
 
 
-def test_job_allowlist_accepts_approved_types(db_session: Session) -> None:
+def test_job_allowlist_accepts(db_session: Session) -> None:
     hid = _setup_household(db_session)
     for jt in ("guardian.evaluate_all", "guardian.evaluate_one"):
         db_session.execute(text(
@@ -720,7 +810,7 @@ def test_job_allowlist_accepts_approved_types(db_session: Session) -> None:
     db_session.commit()
 
 
-def test_job_allowlist_rejects_unknown(db_session: Session) -> None:
+def test_job_allowlist_rejects(db_session: Session) -> None:
     hid = _setup_household(db_session)
     with pytest.raises(Exception):
         db_session.execute(text(
