@@ -221,8 +221,9 @@ CREATE TABLE job_definitions (
 CREATE TABLE schedules (
     id UUID PRIMARY KEY,
     job_definition_id UUID NOT NULL REFERENCES job_definitions(id),
-    cron_expression TEXT NOT NULL,  -- '0 9 * * *' (daily at 9am)
-    timezone TEXT NOT NULL DEFAULT 'UTC',
+    execution_time TIME NOT NULL,  -- Local wall-clock time, e.g. '09:00'
+    timezone TEXT NOT NULL,  -- IANA timezone, e.g. 'America/New_York'
+    next_run_at TIMESTAMPTZ NOT NULL,  -- UTC, computed from execution_time + timezone
     enabled BOOLEAN NOT NULL DEFAULT FALSE,  -- MUST be explicitly enabled
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -254,15 +255,7 @@ CREATE TABLE attempts (
     UNIQUE(run_id, attempt_number)
 );
 
--- Worker lease for concurrency control
-CREATE TABLE leases (
-    id UUID PRIMARY KEY,
-    run_id UUID NOT NULL UNIQUE REFERENCES runs(id),
-    worker_id TEXT NOT NULL,
-    acquired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    expires_at TIMESTAMPTZ NOT NULL,
-    released_at TIMESTAMPTZ
-);
+-- Worker lease with fencing token for concurrency control\nCREATE TABLE leases (\n    id UUID PRIMARY KEY,\n    run_id UUID NOT NULL UNIQUE REFERENCES runs(id),\n    worker_id TEXT NOT NULL,\n    fencing_token UUID NOT NULL,  -- prevents stale worker from completing reclaimed run\n    acquired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    expires_at TIMESTAMPTZ NOT NULL,  -- TTL: 60s\n    heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),  -- refreshed every 15s\n    released_at TIMESTAMPTZ\n);
 ```
 
 **Immutable triggers**: `runs` and `attempts` are append-only after status reaches terminal state (completed, failed, aborted). `schedules` can be updated. `job_definitions` can be soft-disabled.
@@ -302,14 +295,11 @@ When a Run with `job_type = 'guardian_evaluate_all'` executes:
 
 ## 8. Idempotency / Deduplication
 
-**Idempotency key formula**:
-```
-idempotency_key = SHA256(job_type || canonical_job_params || time_bucket)
-```
+**Idempotency key formula**: SHA256(job_type || canonical_job_params || scheduled_date).
 
-Where `time_bucket` = floor(scheduled_at, 60s) — prevents duplicate runs within the same minute window. This means if a scheduled run at 09:00:00 fails and the worker retries, the same idempotency key is generated → `ON CONFLICT (idempotency_key) DO NOTHING` prevents duplicate run creation.
+Daily-only scheduling means the time bucket is the calendar date (not a minute window). Mis fire coalescence: if a daily schedule is missed (worker was down), only the most recent missed occurrence fires — not all missed days.
 
-**Guarantees**: At-most-once execution per time bucket. If a run crashes mid-execution, the next schedule interval creates a new run with a different time bucket.
+**Overlap prevention**: Each schedule has at most one queued/running run. Before creating a new scheduled run, check: `SELECT 1 FROM runs WHERE schedule_id = :sid AND status IN ('pending', 'running')`. If any exist, skip. Manual evaluation is preserved as an independent operation. GuardianEvent uses existing fingerprint dedup (Sprint 004).
 
 ## 9. Transaction Boundaries and Lock Order
 
@@ -329,59 +319,46 @@ Lock order: `runs` → `attempts` → `leases` (consistent across all operations
 ## 10. Failure / Retry / Recovery
 
 ### Retry Policy
-
-- Max 3 attempts per run
-- Exponential backoff: 1s, 4s, 16s
+- Retry only transient failures (connection errors, timeouts)
 - Terminal failures (validation errors, not found) → mark failed, no retry
-- Transient failures (connection errors, timeouts) → retry
+- Max 3 attempts per run: immediate / 30s / 120s
+- Failed run manual retry creates NEW run (not new attempt on old run)
 - Attempt number tracked in `attempts`
 
+### Lease
+- Lease TTL: 60s
+- Heartbeat: every 15s the worker refreshes `heartbeat_at`
+- Max execution: 5 minutes (hard timeout)
+- DB clock for all timing — no client-side clock dependency
+- Fencing token: each lease acquisition generates a new UUID token. Worker must present the token to complete or heartbeat. If lease expires and another worker acquires it (new token), the stale worker's completion is rejected (token mismatch).
+
 ### Crash Recovery
-
-On startup, worker:
-1. Releases any leases held by previous instance (stale lease detection)
-2. Re-queues runs that were `running` when previous instance crashed
-3. These runs get new attempts with incremented attempt_number
-
-### Graceful Shutdown
-
-On SIGTERM:
-1. Stop accepting new runs
-2. Wait for current attempt to complete (max 30s)
-3. Mark in-flight run as `aborted`
-4. Release lease
-5. Exit
+On startup, worker releases any leases from previous instance whose `heartbeat_at` is older than TTL margin. Runs in `running` status with expired leases are marked `aborted` and re-queued as new runs.
 
 ## 11. API Contracts
 
 ### Schedule Management
 
 ```
-POST   /api/orchestration/schedules          Create schedule + job definition
-GET    /api/orchestration/schedules          List schedules
-GET    /api/orchestration/schedules/{id}     Get schedule detail
-PATCH  /api/orchestration/schedules/{id}     Update/disable schedule
-DELETE /api/orchestration/schedules/{id}     Delete schedule (cascades to job definition)
-```
+POST   /api/automation/schedules          Create schedule + job definition
+GET    /api/automation/schedules          List schedules
+GET    /api/automation/schedules/{id}     Get schedule detail
+PATCH  /api/automation/schedules/{id}     Update/disable schedule
+DELETE /api/automation/schedules/{id}     Delete schedule (cascades to job definition)
 
-### Runs / Attempts
-
-```
-GET    /api/orchestration/runs               List runs (paginated, filterable by job_type)
-GET    /api/orchestration/runs/{id}          Run detail with attempts
-POST   /api/orchestration/runs               Manually trigger a run
-```
+GET    /api/automation/runs               List runs (paginated, filterable by job_type)
+GET    /api/automation/runs/{id}          Run detail with attempts
+POST   /api/automation/runs               Manually trigger a run
 
 ### Worker-internal (not exposed as API)
 
-```
-POST   /api/orchestration/internal/lease     Acquire lease (auth: worker token)
-POST   /api/orchestration/internal/complete  Complete run (auth: worker token)
-```
+Worker writes heartbeat to `leases.heartbeat_at` every 15s.
+FastAPI exposes read-only: `GET /api/automation/worker/status`.
+Worker does NOT start its own HTTP server.
 
 ## 12. UI Routes and States
 
-### Page: /orchestration
+### Page: /automation
 
 **18 UI States** (matching Sprint 004 pattern):
 

@@ -1,19 +1,28 @@
 # Sprint 005 — Open Questions
 
-| ID | Question | Options | Recommendation | Rationale | Blocks |
-|----|----------|---------|----------------|-----------|--------|
-| OD-S5-001 | Sprint 005 candidate selection | A: Notification Escalation, B: Data Orchestration, C: AI Investment Committee | **B** | Orchestration unlocks Guardian scheduled evaluation and is the most general-purpose infrastructure investment. A adds tracking without automation. C requires external LLM and violates local-only. | Entire sprint |
-| OD-S5-002 | Local-only worker or external scheduler? | A: Local worker process managed by CompoundOS, B: External system cron calling internal API, C: Both (local worker for development, external for production) | **A** | Pure local worker preserves the local-only principle, simplifies development, and avoids external dependency on cron daemon availability. | Worker architecture |
-| OD-S5-003 | Scheduled evaluation: opt-in or opt-out? | A: Explicit opt-in per Check (default: no schedule), B: Global opt-in (default: evaluate all checks on schedule) | **A** | Per-check opt-in gives the Owner fine-grained control. Global opt-in could trigger evaluations they haven't configured. | Schedule UI, default behavior |
-| OD-S5-004 | Maximum schedule frequency? | A: Minimum 5-minute interval, B: Minimum 1-hour interval, C: No minimum (Owner-defined) | **A** | 5-minute minimum prevents accidental rapid-fire evaluations while still allowing near-real-time monitoring. No minimum could lead to resource exhaustion. | Schedule validation |
-| OD-S5-005 | Run history retention? | A: Keep all runs indefinitely, B: Keep last N runs per job (N=100), C: Keep runs for X days (X=90) | **A** | Local-only database has no storage cost pressure. Indefinite retention is simplest and most useful for long-term analysis. | Run table design |
-| OD-S5-006 | Worker process lifecycle? | A: Start/stop with application (FastAPI lifespan), B: Standalone process (start/stop independently), C: Cron-like fire-and-forget | **B** | Standalone process allows the worker to run independently of the web server, enabling background execution even when no HTTP requests are being served. | Process architecture |
-| OD-S5-007 | Failed run notification? | A: In-app only (inbox in future Sprint), B: No notification (check run history), C: OS-level notification | **B** | Notification infrastructure doesn't exist yet (future Sprint). Owner can check run history. Failed runs are recorded with attempt detail. | Run history UI |
-| OD-S5-008 | Manual run during scheduled window? | A: Allow — manual runs are independent, B: Block — prevent overlap, C: Queue — manual run waits for scheduled to complete | **A** | Manual runs are independent from scheduled runs. Each has its own idempotency key (different time_bucket for manual=now vs scheduled=09:00). No conflict. | Run trigger API |
-| OD-S5-009 | Multiple schedules per job? | A: One schedule per job definition, B: Multiple schedules per job, C: Schedules are independent of jobs | **A** | Simpler model. One schedule per job definition. If the Owner wants different frequencies, they create separate job definitions. | Schedule schema |
-| OD-S5-010 | Guardian evaluate-all vs evaluate-one scheduling? | A: Both supported, B: Only evaluate-all, C: Only evaluate-one | **A** | Both are useful. evaluate-all for comprehensive monitoring, evaluate-one for targeted high-frequency checks. | Job definition params |
-| OD-S5-011 | Graceful shutdown timeout? | A: 30 seconds, B: 60 seconds, C: Configurable | **A** | 30 seconds is sufficient for Guardian evaluation (typically <1s). Longer jobs in future sprints can increase this. | Shutdown behavior |
-| OD-S5-012 | Lease expiry time? | A: 2× expected job duration (guard: 30s), B: Fixed 60 seconds, C: Per-job configurable | **A** | 30s covers Guardian evaluation with generous margin. Per-job configuration adds complexity without current need. | Lease acquisition |
-| OD-S5-013 | UI placement? | A: New `/orchestration` page, B: Inline within `/guardian` page, C: Settings panel | **A** | Orchestration is a general-purpose infrastructure service, not a Guardian sub-feature. Separate page maintains domain boundaries. Future jobs (non-Guardian) will use the same page. | Frontend routing |
-| OD-S5-014 | Should schedules survive application restart? | A: Yes — persisted in PostgreSQL, B: No — in-memory only | **A** | Persistence is the whole point. Schedules must survive restarts. | Persistence design |
-| OD-S5-015 | Should the worker expose health status? | A: Internal endpoint (`/api/orchestration/internal/health`), B: Run table query, C: No health reporting | **A** | Internal health endpoint enables monitoring without exposing worker state publicly. Simple GET returns worker status + current lease count. | Worker monitoring |
+**All Owner Decisions resolved as of 2026-07-17.**
+
+| ID | Question | Options | Owner Decision | Resolution | Blocks |
+|----|----------|---------|---------------|------------|--------|
+| OD-S5-001 | Sprint 005 candidate selection | A: Notification Escalation, B: Data Orchestration, C: AI Investment Committee | **B** | Orchestration unlocks Guardian scheduled evaluation. General-purpose infrastructure. All slices Not Authorized for implementation. | Entire sprint |
+| OD-S5-002 | Local-only worker or external scheduler? | A: Local worker process, B: External cron, C: Both | **A** | Local worker process preserves local-only principle. No external cron dependency. | Worker architecture |
+| OD-S5-003 | Scheduled evaluation: opt-in or opt-out? | A: Per-check opt-in, B: Global opt-in | **A** | Per-check opt-in. Default off. Owner must explicitly enable each schedule. | Schedule UI |
+| OD-S5-004 | Schedule frequency? | A: Daily-only, B: Minimum 5min, C: No minimum | **A** | Daily-only. Explicit local execution time + IANA timezone. UTC next_run_at. No cron expressions. No sub-daily scheduling. DST missing/repeated-time handled. | Schedule design |
+| OD-S5-005 | Run history retention? | A: Indefinite, B: Keep last N, C: Keep X days | **A** | Indefinite paginated history. Local-only storage has no cost pressure. | Run persistence |
+| OD-S5-006 | Worker process lifecycle? | A: App lifespan, B: Standalone process, C: Fire-and-forget | **B** | Standalone process. Runs independently of FastAPI web server. Terminates on graceful shutdown signal. | Process architecture |
+| OD-S5-007 | Failed run notification? | A: In-app inbox, B: No notification, C: OS notification | **B** | No notification infrastructure. Owner checks run history. No notification/AI/external services in Sprint 005. | Run history UI |
+| OD-S5-008 | Manual + scheduled overlap? | A: Overlap prevention via PostgreSQL, B: Unrestricted independent | **A** | Manual evaluation preserved. Each schedule has at most one queued/running run. GuardianEvent uses existing fingerprint dedup. Overlap prevented by PostgreSQL state check. | Run concurrency |
+| OD-S5-009 | Multiple schedules per job? | A: One schedule per job, B: Multiple, C: Independent | **A** | One schedule per job definition. Different frequencies require separate job definitions. | Schedule schema |
+| OD-S5-010 | Evaluate scope? | A: Both (all + one), B: All only, C: One only | **A** | Both supported. Guardian is the only Sprint 005 consumer. Code allowlisted job types only. No arbitrary shell/dynamic import/pickle. | Job definition params |
+| OD-S5-011 | Shutdown timeout? | A: 30 seconds, B: 60 seconds, C: Configurable | **A** | 30 seconds. Graceful shutdown: finish current attempt, release lease with fencing token, mark in-flight runs aborted. | Shutdown behavior |
+| OD-S5-012 | Lease parameters? | A: Fixed: TTL 60s, heartbeat 15s, max execution 5min, B: 2× expected duration | **A** | Lease TTL: 60s. Heartbeat: 15s. Max execution: 5min. DB clock for all timing. Fencing token prevents stale worker from completing reclaimed run. | Lease acquisition |
+| OD-S5-013 | UI placement? | A: /automation page, B: /orchestration page, C: Settings panel | **A** | `/automation` — plain language, not infrastructure jargon. | Frontend routing |
+| OD-S5-014 | Survive restart? | A: PostgreSQL-persisted, B: In-memory | **A** | All schedules, runs, attempts persisted in PostgreSQL. | Persistence design |
+| OD-S5-015 | Worker health reporting? | A: DB-backed heartbeat via FastAPI read-only endpoint, B: Worker HTTP server | **A** | Worker writes heartbeat to DB. FastAPI exposes read-only `GET /api/automation/worker/status`. Worker does NOT start its own HTTP server. | Worker monitoring |
+
+## Additional Approved Semantics
+
+- Retry only transient failures. Max 3 attempts: immediate / 30s / 120s.
+- Failed run manual retry creates new run (not attempt).
+- Misfire coalesce latest occurrence only — if a daily schedule is missed, only the most recent missed occurrence fires.
+- No notification, AI, or external services in Sprint 005.

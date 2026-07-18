@@ -30,7 +30,7 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   - Slice A (Persistence): Done (PR #26, migration 0007)
   - Slice B (Backend API): Done (PR #27, #28, #29, #30, #31)
   - Slice C (Frontend): Done (PR #32, #33, #34, #35)
-- Sprint 005: Technical Design Gate In Review — Data Orchestration Foundation
+- Sprint 005: Technical Design Gate — Data Automation Foundation (Owner Decided)
   - Slice A (Orchestration Persistence): Not Authorized / Not Started
   - Slice B (Orchestration API + Guardian Integration): Not Authorized / Not Started
   - Slice C (Orchestration Frontend): Not Authorized / Not Started
