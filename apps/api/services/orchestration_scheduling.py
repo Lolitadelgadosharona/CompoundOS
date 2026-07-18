@@ -120,9 +120,12 @@ def resolve_local_time(
     # Handle DST transitions
     try:
         candidate = candidate.replace(tzinfo=zone)
-    except Exception:
+    except (ValueError, Exception) as _dst_exc:
         # Nonexistent time (spring-forward gap) — advance 1 hour
-        candidate = (candidate + timedelta(hours=1)).replace(tzinfo=zone)
+        if "nonexistent" in str(_dst_exc).lower() or "ambiguous" not in str(_dst_exc).lower():
+            candidate = (candidate + timedelta(hours=1)).replace(tzinfo=zone)
+        else:
+            raise
 
     # If candidate is ambiguous (fall-back), fold=0 selects the first occurrence
     # (standard time). fold=0 is the default, so no special handling needed.
@@ -135,7 +138,7 @@ def resolve_local_time(
         )
         try:
             candidate = candidate.replace(tzinfo=zone)
-        except Exception:
+        except (ValueError, Exception):
             candidate = (candidate + timedelta(hours=1)).replace(tzinfo=zone)
         candidate_utc = candidate.astimezone(timezone.utc)
 
@@ -174,7 +177,7 @@ def compute_next_daily_run(
         )
         try:
             candidate = candidate.replace(tzinfo=zone)
-        except Exception:
+        except (ValueError, Exception):
             candidate = (candidate + timedelta(hours=1)).replace(tzinfo=zone)
         candidate_utc = candidate.astimezone(timezone.utc)
 
