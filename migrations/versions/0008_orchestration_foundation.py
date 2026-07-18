@@ -140,6 +140,7 @@ def upgrade() -> None:
         sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("job_definition_id", sa.Uuid(), nullable=False),
         sa.Column("schedule_id", sa.Uuid(), nullable=True),
+        sa.Column("idempotency_key", sa.Text(), nullable=False),
         sa.Column("status", sa.Text(), nullable=False, server_default=sa.text("'pending'")),
         sa.Column("triggered_by", sa.Text(), nullable=False),
         sa.Column("scheduled_at", sa.DateTime(timezone=True), nullable=False),
@@ -147,6 +148,7 @@ def upgrade() -> None:
         sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("household_id", sa.Uuid(), nullable=False),
         sa.PrimaryKeyConstraint("id", name="pk_runs"),
+        sa.UniqueConstraint("idempotency_key", name="uq_runs_idempotency_key"),
         sa.ForeignKeyConstraint(
             ["job_definition_id"], ["job_definitions.id"],
             name="fk_runs_job_definition", ondelete="RESTRICT",

@@ -271,4 +271,9 @@ def test_migration_contains_only_approved_product_tables(postgres_engine) -> Non
         "guardian_check_confirmed",
         "guardian_evaluation_runs",
         "guardian_events",
+        "job_definitions",
+        "schedules",
+        "runs",
+        "attempts",
+        "leases",
     }

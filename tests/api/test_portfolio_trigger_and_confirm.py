@@ -535,7 +535,7 @@ def test_alembic_revision_chain_valid(postgres_engine) -> None:
     heads = list(script.get_revisions("heads"))
     assert len(heads) == 1, f"Expected 1 head, got {len(heads)}: {heads}"
     assert heads[0].revision == "0008_orchestration_foundation", (
-        f"Expected head 0007_guardian_foundation, "
+        f"Expected head 0008_orchestration_foundation, "
         f"got {heads[0].revision}"
     )
 
