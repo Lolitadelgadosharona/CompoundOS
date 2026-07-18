@@ -210,7 +210,6 @@ class OrchestrationWorker:
                 triggered_by="schedule",
                 scheduled_at=now,
                 household_id=household_id,
-                clock=self._clock,
             )
         except IntegrityError:
             logger.debug("Run already claimed for schedule %s", schedule_id)
@@ -224,7 +223,7 @@ class OrchestrationWorker:
         )
         advance_next_run_at(session, schedule_id, new_next, clock=self._clock)
 
-        aid = create_attempt(session, run_id=run_id, attempt_number=1, clock=self._clock)
+        aid = create_attempt(session, run_id=run_id, attempt_number=1)
         start_run(session, run_id, clock=self._clock)
         start_attempt(session, aid, clock=self._clock)
 
