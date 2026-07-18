@@ -255,7 +255,14 @@ CREATE TABLE attempts (
     UNIQUE(run_id, attempt_number)
 );
 
--- Worker lease with fencing token for concurrency control\nCREATE TABLE leases (\n    id UUID PRIMARY KEY,\n    run_id UUID NOT NULL UNIQUE REFERENCES runs(id),\n    worker_id TEXT NOT NULL,\n    fencing_token UUID NOT NULL,  -- prevents stale worker from completing reclaimed run\n    acquired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    expires_at TIMESTAMPTZ NOT NULL,  -- TTL: 60s\n    heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),  -- refreshed every 15s\n    released_at TIMESTAMPTZ\n);
+-- Worker lease with fencing token for concurrency control
+
+CREATE TABLE leases (
+    id UUID PRIMARY KEY,
+    run_id UUID NOT NULL UNIQUE REFERENCES runs(id),
+    worker_id TEXT NOT NULL,
+    fencing_token UUID NOT NULL,  -- prevents stale worker from completing reclaimed run\n    acquired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    expires_at TIMESTAMPTZ NOT NULL,  -- TTL: 60s\n    heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),  -- refreshed every 15s\n    released_at TIMESTAMPTZ
+);
 ```
 
 **Immutable triggers**: `runs` and `attempts` are append-only after status reaches terminal state (completed, failed, aborted). `schedules` can be updated. `job_definitions` can be soft-disabled.
@@ -432,7 +439,7 @@ Metadata includes: `job_type`, `schedule_id`, `run_id`, `attempt_number`, `trigg
 
 - **Slice A: Orchestration Persistence (R2)** — Migration 0008, ORM models, PostgreSQL tests, lease/idempotency constraints
 - **Slice B: Orchestration API + Guardian Integration (R2)** — Worker process, schedule/run API, Guardian scheduled evaluation consumer, audit
-- **Slice C: Orchestration Frontend (R1)** — /orchestration page, schedule management, run history, 18 UI states
+- **Slice C: Orchestration Frontend (R1)** — /automation page, schedule management, run history, 18 UI states
 
 ## 19. Rollout / Rollback
 
@@ -453,5 +460,5 @@ Sprint 005 authorization is for **Technical Design Gate only**. No implementatio
 
 1. Single-worker assumption: What happens when the user runs two instances? Lease-based locking handles this, but the user experience may be confusing (one worker claims the lease, the other idles).
 2. Clock skew: The worker's clock may differ from the database clock. Mitigated by using `NOW()` for lease expiry (server time) and injectable clock for scheduling.
-3. Cron precision: A cron schedule of `*/5 * * * *` would trigger at 09:00, 09:05, etc. The 60s idempotency bucket prevents duplicates within the same minute.
+3. DST transitions: When clocks fall back (e.g., 01:30 repeated), the schedule fires once at the first occurrence only. When clocks spring forward (e.g., 02:30 skipped), the schedule fires at the next valid time after the gap. These are standard IANA timezone behaviors.
 4. Guardian evaluation performance: A scheduled run could trigger evaluation of all checks. This is the same as manual evaluate-all — no new performance risk.
