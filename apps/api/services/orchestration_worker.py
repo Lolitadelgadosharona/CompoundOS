@@ -185,30 +185,32 @@ class OrchestrationWorker:
     # ── Claim + execute ──
 
     def _claim_and_execute(self) -> int:
-        """Claim due schedules and execute them. Returns count claimed."""
+        """Claim due schedules and execute each in its own transaction."""
+        # Step 1: claim in a dedicated transaction (quick, lock-only)
+        due = []
         with self._session_factory() as session:
             try:
                 due = claim_due_schedules(session, clock=self._clock)
-                if not due:
-                    session.rollback()
-                    return 0
-
-                claimed_count = 0
-                for item in due:
-                    try:
-                        self._execute_scheduled(session, item)
-                        claimed_count += 1
-                    except Exception:
-                        logger.exception("Failed to claim schedule %s", item["schedule_id"])
-                        session.rollback()
-                        continue
-
                 session.commit()
-                return claimed_count
-
             except Exception:
                 session.rollback()
-                raise
+                return 0
+
+        if not due:
+            return 0
+
+        # Step 2: execute each schedule in its own transaction
+        claimed_count = 0
+        for item in due:
+            try:
+                with self._session_factory() as session:
+                    self._execute_scheduled(session, item)
+                    session.commit()
+                claimed_count += 1
+            except Exception:
+                logger.exception("Failed schedule %s", item["schedule_id"])
+
+        return claimed_count
 
     def _execute_scheduled(self, session: Session, schedule_info: dict) -> None:
         """Execute one due schedule: claim → run → attempt → execute → finalize."""

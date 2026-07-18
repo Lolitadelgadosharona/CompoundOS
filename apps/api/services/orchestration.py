@@ -32,19 +32,15 @@ def create_job_definition(
     payload: JobDefinitionCreate,
 ) -> dict:
     """Create a job definition and return its data."""
+    import json
     jid = uuid4()
-    datetime.now()
+    params_json = json.dumps(payload.job_params, sort_keys=True)
     session.execute(
         text(
             "INSERT INTO job_definitions (id, household_id, job_type, job_params)"
-            " VALUES (:id, :hid, :jt, :jp::jsonb)"
+            " VALUES (:id, :hid, :jt, CAST(:jp AS jsonb))"
         ),
-        {
-            "id": jid,
-            "hid": household_id,
-            "jt": payload.job_type,
-            "jp": str(payload.job_params).replace("'", '"'),
-        },
+        {"id": jid, "hid": household_id, "jt": payload.job_type, "jp": params_json},
     )
     row = session.execute(
         text("SELECT * FROM job_definitions WHERE id = :id"), {"id": jid}
@@ -80,17 +76,21 @@ def create_schedule(
 ) -> dict:
     """Create job definition + schedule atomically."""
     # Create job definition
+    import json
+
     jid = uuid4()
-    datetime.now()
+    params_json = json.dumps(
+        payload.job_params, sort_keys=True,
+    )
     session.execute(
         text(
             "INSERT INTO job_definitions (id, household_id, job_type, job_params)"
-            " VALUES (:id, :hid, :jt, '{}'::jsonb)"
+            " VALUES (:id, :hid, :jt, CAST(:jp AS jsonb))"
         ),
-        {"id": jid, "hid": household_id, "jt": payload.job_type},
+        {"id": jid, "hid": household_id, "jt": payload.job_type, "jp": params_json},
     )
 
-    # Compute initial next_run_at
+    # Compute
     next_run = resolve_local_time(payload.execution_time, payload.timezone)
 
     # Create schedule (disabled by default)
