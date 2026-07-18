@@ -337,11 +337,20 @@ Lock order: `runs` → `attempts` → `leases` (consistent across all operations
 - Heartbeat: every 15s the worker refreshes `heartbeat_at`
 - Max execution: 5 minutes (hard timeout)
 - DB clock for all timing — no client-side clock dependency
-- Fencing token: each lease acquisition generates a new UUID token. Worker must present the token to complete or heartbeat. If lease expires and another worker acquires it (new token), the stale worker's completion is rejected (token mismatch).
+### Fencing Semantics
 
-### Crash Recovery
-On startup, worker releases any leases from previous instance whose `heartbeat_at` is older than TTL margin. Runs in `running` status with expired leases are marked `aborted` and re-queued as new runs.
+Each lease claim atomically increments `fencing_token`. The worker must present `(run_id, worker_id, fencing_token)` for all subsequent operations:
 
+1. **Lease acquisition**: `INSERT INTO leases ... RETURNING fencing_token` — atomically generates a new token.
+2. **Heartbeat**: `UPDATE leases SET heartbeat_at = NOW() WHERE run_id = :rid AND worker_id = :wid AND fencing_token = :token` — rejected if token doesn't match (stale worker lost the lease).
+3. **Finalize (complete/fail/abort)**: Same token-gated UPDATE on runs and attempts.
+4. **Lease expiry**: If `heartbeat_at < NOW() - INTERVAL '60s'`, the lease is expired. A new worker can acquire it with a new fencing token. The old worker's subsequent heartbeat/completion is rejected (token mismatch).
+
+**Overlap prevention** is enforced by PostgreSQL constraints:
+- `SELECT 1 FROM runs WHERE schedule_id = :sid AND status IN ('pending', 'running')` before creating a new scheduled run
+- No process-internal mutex — all concurrency control is database-level
+
+**Stale worker guarantee**: A stale worker whose lease expired CANNOT complete or overwrite a run claimed by a new worker. The fencing token mismatch produces zero affected rows → the stale worker detects this and aborts.
 ## 11. API Contracts
 
 ### Schedule Management
@@ -359,8 +368,9 @@ POST   /api/automation/runs               Manually trigger a run
 
 ### Worker-internal (not exposed as API)
 
-Worker writes heartbeat to `leases.heartbeat_at` every 15s.
-FastAPI exposes read-only: `GET /api/automation/worker/status`.
+Worker writes heartbeat to `leases.heartbeat_at` every 15s via direct PostgreSQL connection.
+Worker does NOT call FastAPI HTTP to claim, heartbeat, or execute jobs.
+FastAPI exposes read-only: `GET /api/automation/worker/status` for UI/health observation only.
 Worker does NOT start its own HTTP server.
 
 ## 12. UI Routes and States
@@ -458,7 +468,7 @@ Sprint 005 authorization is for **Technical Design Gate only**. No implementatio
 
 ## 22. Risks and Unresolved Questions
 
-1. Single-worker assumption: What happens when the user runs two instances? Lease-based locking handles this, but the user experience may be confusing (one worker claims the lease, the other idles).
-2. Clock skew: The worker's clock may differ from the database clock. Mitigated by using `NOW()` for lease expiry (server time) and injectable clock for scheduling.
-3. DST transitions: When clocks fall back (e.g., 01:30 repeated), the schedule fires once at the first occurrence only. When clocks spring forward (e.g., 02:30 skipped), the schedule fires at the next valid time after the gap. These are standard IANA timezone behaviors.
+1. Single-worker assumption: Leased-based locking handles two instances but the idle worker has no visible feedback — future Sprint should add status display.
+2. Clock skew: Worker clock may differ from DB clock. All timing uses DB `NOW()` for lease expiry and scheduling.
+3. DST transitions: When clocks fall back (e.g., 01:30 repeated), the schedule fires once at the first occurrence only. When clocks spring forward (e.g., 02:30 skipped), the schedule fires at the next valid time after the gap. These are standard IANA timezone behaviors. `next_run_at` is persisted as UTC. Owner expresses schedule in local wall-clock time. Timezone rule changes trigger recalculation of `next_run_at`. Tests use an injectable fixed clock — never read uncontrolled system time.
 4. Guardian evaluation performance: A scheduled run could trigger evaluation of all checks. This is the same as manual evaluate-all — no new performance risk.
