@@ -3,6 +3,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from apps.api.routers.automation import router as automation_router
 from apps.api.routers.decisions import router as decisions_router
 from apps.api.routers.guardian import router as guardian_router
 from apps.api.routers.households import router as households_router
@@ -42,6 +43,7 @@ def api_health() -> dict[str, str]:
     return {"status": "ok", "service": "api"}
 
 
+app.include_router(automation_router)
 app.include_router(households_router)
 app.include_router(policies_router)
 app.include_router(decisions_router)
