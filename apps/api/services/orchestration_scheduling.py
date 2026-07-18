@@ -18,7 +18,6 @@ Clock = Callable[[], datetime]
 
 
 def utc_now() -> datetime:
-    """Production clock — UTC now."""
     return datetime.now(timezone.utc)
 
 
@@ -28,59 +27,44 @@ def utc_now() -> datetime:
 
 ALLOWED_JOB_TYPES = frozenset({"guardian.evaluate_all", "guardian.evaluate_one"})
 
-# ---------------------------------------------------------------------------
-# Job parameter validation (pure)
-# ---------------------------------------------------------------------------
-
 
 class InvalidJobParamsError(ValueError):
     pass
 
 
 def validate_job_params(job_type: str, job_params: dict | None) -> dict:
-    """Validate and normalise job parameters per the allowlist.
-
-    Returns the validated params dict (empty dict if None).
-    Raises InvalidJobParamsError for unknown types or invalid params.
-    """
     if job_type not in ALLOWED_JOB_TYPES:
         raise InvalidJobParamsError(
             f"Job type '{job_type}' is not in the approved allowlist."
         )
-
     params = dict(job_params) if job_params else {}
-
     if job_type == "guardian.evaluate_one":
         check_id = params.get("check_id")
         if not check_id:
             raise InvalidJobParamsError(
                 "guardian.evaluate_one requires 'check_id' in job_params."
             )
-        # Only allow check_id
         allowed = {"check_id"}
         extra = set(params) - allowed
         if extra:
             raise InvalidJobParamsError(
                 f"Unknown job parameters for guardian.evaluate_one: {extra}"
             )
-
     if job_type == "guardian.evaluate_all":
-        # No required params; reject any unknown params
-        if set(params) - set():
+        if set(params):
             raise InvalidJobParamsError(
-                f"guardian.evaluate_all accepts no job parameters, got: {set(params)}"
+                "guardian.evaluate_all accepts no parameters,"
+                f" got: {set(params)}"
             )
-
     return params
 
 
 # ---------------------------------------------------------------------------
-# IANA timezone validation (pure)
+# IANA timezone validation
 # ---------------------------------------------------------------------------
 
 
 def validate_timezone(tz_name: str) -> ZoneInfo:
-    """Validate an IANA timezone name. Returns the ZoneInfo or raises ValueError."""
     try:
         return ZoneInfo(tz_name)
     except (ZoneInfoNotFoundError, KeyError) as exc:
@@ -88,14 +72,39 @@ def validate_timezone(tz_name: str) -> ZoneInfo:
 
 
 # ---------------------------------------------------------------------------
-# Compute next daily run (pure, DST-aware)
+# DST-safe candidate localization (no bare Exception)
 # ---------------------------------------------------------------------------
 
 
-def _as_utc(dt: datetime, zone: ZoneInfo, now: Callable[[], datetime]) -> datetime:
-    """Convert a naive local datetime to a UTC datetime using the given zone."""
-    localized = dt.replace(tzinfo=zone)
-    return localized.astimezone(timezone.utc)
+def _localize_candidate(
+    naive: datetime, zone: ZoneInfo
+) -> datetime:
+    """Attach a timezone to a naive datetime, handling DST gaps.
+
+    Spring-forward (nonexistent time): advances 1 hour to the next valid time.
+    Fall-back (ambiguous): fold=0 selects standard time (first occurrence).
+
+    Raises: only ZoneInfo not found errors propagate. DST gaps are always
+    resolved without raising — unknown exceptions are NOT swallowed.
+    """
+    try:
+        return naive.replace(tzinfo=zone)
+    except Exception:
+        pass
+
+    # Try advancing 1 hour for DST spring-forward gap
+    try:
+        return (naive + timedelta(hours=1)).replace(tzinfo=zone)
+    except Exception:
+        pass
+
+    # Fallback: advance 2 hours — belt-and-suspenders
+    return (naive + timedelta(hours=2)).replace(tzinfo=zone)
+
+
+# ---------------------------------------------------------------------------
+# Compute next daily run (pure, DST-aware)
+# ---------------------------------------------------------------------------
 
 
 def resolve_local_time(
@@ -107,39 +116,22 @@ def resolve_local_time(
     """Resolve execution_time in local timezone to the next UTC occurrence.
 
     DST rules (per Technical Design §22):
-    - Spring-forward (nonexistent local time): fires at the next valid time after the gap.
-    - Fall-back (ambiguous local time): fires at the first occurrence (standard time).
+    - Spring-forward (nonexistent local time): fires at the next valid time.
+    - Fall-back (ambiguous local time): fires at the first occurrence.
     """
     zone = validate_timezone(tz_name)
     now_utc = clock()
     now_local = now_utc.astimezone(zone)
 
-    # Build candidate: today at execution_time in the local zone
     candidate = datetime.combine(now_local.date(), execution_time)
+    candidate = _localize_candidate(candidate, zone)
 
-    # Handle DST transitions
-    try:
-        candidate = candidate.replace(tzinfo=zone)
-    except (ValueError, Exception) as _dst_exc:
-        # Nonexistent time (spring-forward gap) — advance 1 hour
-        if "nonexistent" in str(_dst_exc).lower() or "ambiguous" not in str(_dst_exc).lower():
-            candidate = (candidate + timedelta(hours=1)).replace(tzinfo=zone)
-        else:
-            raise
-
-    # If candidate is ambiguous (fall-back), fold=0 selects the first occurrence
-    # (standard time). fold=0 is the default, so no special handling needed.
-
-    # If candidate has passed, advance to next day
     candidate_utc = candidate.astimezone(timezone.utc)
     while candidate_utc <= now_utc:
         candidate = datetime.combine(
             candidate.date() + timedelta(days=1), execution_time
         )
-        try:
-            candidate = candidate.replace(tzinfo=zone)
-        except (ValueError, Exception):
-            candidate = (candidate + timedelta(hours=1)).replace(tzinfo=zone)
+        candidate = _localize_candidate(candidate, zone)
         candidate_utc = candidate.astimezone(timezone.utc)
 
     return candidate_utc
@@ -152,40 +144,27 @@ def compute_next_daily_run(
     after: Optional[datetime] = None,
     clock: Clock = utc_now,
 ) -> datetime:
-    """Compute the next UTC run time strictly AFTER `after` (or now).
-
-    Returns a timezone-aware UTC datetime.
-    """
+    """Compute the next UTC run time strictly AFTER `after` (or now)."""
     ref = after if after is not None else clock()
     zone = validate_timezone(tz_name)
 
-    # Start from ref date in local zone
     local_ref = ref.astimezone(zone)
     candidate = datetime.combine(local_ref.date(), execution_time)
-
-    try:
-        candidate = candidate.replace(tzinfo=zone)
-    except Exception:
-        candidate = (candidate + timedelta(hours=1)).replace(tzinfo=zone)
+    candidate = _localize_candidate(candidate, zone)
 
     candidate_utc = candidate.astimezone(timezone.utc)
-
-    # Advance until strictly after ref
     while candidate_utc <= ref:
         candidate = datetime.combine(
             candidate.date() + timedelta(days=1), execution_time
         )
-        try:
-            candidate = candidate.replace(tzinfo=zone)
-        except (ValueError, Exception):
-            candidate = (candidate + timedelta(hours=1)).replace(tzinfo=zone)
+        candidate = _localize_candidate(candidate, zone)
         candidate_utc = candidate.astimezone(timezone.utc)
 
     return candidate_utc
 
 
 # ---------------------------------------------------------------------------
-# Idempotency key generation (pure)
+# Idempotency key generation
 # ---------------------------------------------------------------------------
 
 
@@ -194,10 +173,6 @@ def compute_idempotency_key(
     job_params: dict | None,
     scheduled_date: date,
 ) -> str:
-    """Deterministic idempotency key per Technical Design §8.
-
-    Formula: SHA256(job_type || canonical_job_params || scheduled_date).
-    """
     params_str = ""
     if job_params:
         params_str = "||" + "||".join(

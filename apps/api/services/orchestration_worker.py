@@ -67,24 +67,20 @@ class StaleRunReaper:
         stale = recover_stale_runs(session, clock=self._clock)
         count = 0
         for r in stale:
-            try:
-                self._abort_one(session, r)
+            if self._abort_one(session, r):
                 count += 1
-            except Exception:
-                logger.exception("Failed to recover stale run %s", r["run_id"])
         if count:
             logger.info("Reaper: recovered %d stale runs", count)
         return count
 
-    def _abort_one(self, session: Session, stale: dict) -> None:
-        """Atomically abort one stale run."""
-        # Only abort if the run is still running (not already handled)
+    def _abort_one(self, session: Session, stale: dict) -> bool:
+        """Atomically abort one stale run. Returns True if aborted."""
         row = session.execute(
             text("SELECT status FROM runs WHERE id = :id FOR UPDATE"),
             {"id": stale["run_id"]},
         ).fetchone()
         if not row or row[0] != "running":
-            return
+            return False
 
         complete_run(session, stale["run_id"], "aborted", clock=self._clock)
         release_lease(
@@ -94,6 +90,8 @@ class StaleRunReaper:
             fencing_token=stale["fencing_token"],
             clock=self._clock,
         )
+        logger.info("Aborted stale run %s", stale["run_id"])
+        return True
 
 
 # ---------------------------------------------------------------------------

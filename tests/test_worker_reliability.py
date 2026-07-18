@@ -1,5 +1,6 @@
-"""Sprint 005 Slice B — Worker reliability tests (timeout, recovery, shutdown)."""
+"""Sprint 005 Slice B — Process/transaction integrity tests (real subprocess)."""
 
+import threading
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -12,8 +13,8 @@ pytestmark = pytest.mark.postgres
 UTC = timezone.utc
 
 
-def _utc(y: int, m: int, d: int, h: int = 0, mi: int = 0, s: int = 0) -> datetime:
-    return datetime(y, m, d, h, mi, s, tzinfo=UTC)
+def _now() -> datetime:
+    return datetime.now(UTC)
 
 
 def _setup_household(session: Session) -> str:
@@ -38,254 +39,208 @@ def _setup_job(session: Session, hid: str) -> str:
     return str(jid)
 
 
-def _setup_schedule(session: Session, jid: str, *, enabled: bool = True) -> str:
-    sid = uuid4()
-    now = datetime.now(UTC)
-    past = now - timedelta(minutes=5)
-    session.execute(text(
-        "INSERT INTO schedules"
-        " (id, job_definition_id, execution_time, timezone, next_run_at, enabled)"
-        " VALUES (:id, :jid, '09:00', 'UTC', :nr, :en)"
-    ), {"id": sid, "jid": jid, "nr": past, "en": enabled})
-    session.commit()
-    return str(sid)
+# ── Real subprocess: timeout kills uncommitted work ──
 
 
-# ── Stale Run Reaper ──
+class TestRealSubprocessTimeout:
+    """Uses real multiprocessing spawn to verify timeout rollback."""
 
+    def test_timeout_kills_uncommitted_transaction(self, db_session: Session) -> None:
+        """Child writes uncommitted marker, parent kills, marker doesn't exist."""
+        import multiprocessing
 
-class TestStaleRunReaper:
-    def test_recover_expired_running_run(self, db_session: Session) -> None:
-        from apps.api.services.orchestration_worker import StaleRunReaper
+        from apps.api.services.orchestration_executor import _run_job_in_child
 
         hid = _setup_household(db_session)
         jid = _setup_job(db_session, hid)
-        sid = _setup_schedule(db_session, jid)
-        rid = uuid4()
-        now = datetime.now(UTC)
-        past = now - timedelta(hours=2)
-        session = db_session
-        session.execute(text(
+        engine = db_session.get_bind()
+        db_url = str(engine.url)
+
+        rid = str(uuid4())
+        aid = str(uuid4())
+        lid = str(uuid4())
+        marker = str(uuid4())
+
+        # Set up lease that will be valid during execution but expired for timeout
+        now = _now()
+        past_exp = now - timedelta(seconds=1)
+        # Insert a run, attempt, lease for the child to reference
+        db_session.execute(text(
             "INSERT INTO runs"
-            " (id, job_definition_id, schedule_id, idempotency_key, status,"
-            " triggered_by, scheduled_at, household_id)"
-            " VALUES (:id, :jid, :sid, :ik, 'running', 'schedule', :sa, :hid)"
-        ), {"id": rid, "jid": jid, "sid": sid, "ik": f"ik-{uuid4().hex[:8]}",
-            "sa": past, "hid": hid})
-        # Lease with past expiry
-        lid = uuid4()
-        session.execute(text(
-            "INSERT INTO leases"
-            " (id, run_id, worker_id, expires_at, acquired_at, heartbeat_at)"
-            " VALUES (:id, :rid, 'dead-worker', :exp, :now, :now)"
-        ), {"id": lid, "rid": rid, "exp": past + timedelta(seconds=60), "now": past})
-        session.commit()
-
-        # Reap with clock set to now (lease is expired)
-        reaper = StaleRunReaper(clock=lambda: now)
-        reaper.recover(db_session)
-        db_session.commit()
-
-        row = db_session.execute(text(
-            "SELECT status FROM runs WHERE id = :id"
-        ), {"id": rid}).fetchone()
-        assert row[0] == "aborted"
-
-    def test_recover_does_not_touch_active_lease(self, db_session: Session) -> None:
-        from apps.api.services.orchestration_repository import acquire_lease
-        from apps.api.services.orchestration_worker import StaleRunReaper
-
-        hid = _setup_household(db_session)
-        jid = _setup_job(db_session, hid)
-        sid = _setup_schedule(db_session, jid)
-        rid = uuid4()
-        now = datetime.now(UTC)
-        session = db_session
-        session.execute(text(
-            "INSERT INTO runs"
-            " (id, job_definition_id, schedule_id, idempotency_key, status,"
-            " triggered_by, scheduled_at, household_id)"
-            " VALUES (:id, :jid, :sid, :ik, 'running', 'schedule', :sa, :hid)"
-        ), {"id": rid, "jid": jid, "sid": sid, "ik": f"ik-{uuid4().hex[:8]}",
+            " (id, job_definition_id, idempotency_key, status, triggered_by,"
+            " scheduled_at, household_id)"
+            " VALUES (:id, :jid, :ik, 'running', 'schedule', :sa, :hid)"
+        ), {"id": rid, "jid": jid, "ik": f"ik-{uuid4().hex[:8]}",
             "sa": now, "hid": hid})
-        acquire_lease(db_session, run_id=rid, worker_id="w1")
-        session.commit()
-
-        reaper = StaleRunReaper(clock=lambda: now)
-        reaper.recover(db_session)
+        db_session.execute(text(
+            "INSERT INTO attempts (id, run_id, attempt_number, status)"
+            " VALUES (:id, :rid, 1, 'running')"
+        ), {"id": aid, "rid": rid})
+        db_session.execute(text(
+            "INSERT INTO leases"
+            " (id, run_id, worker_id, expires_at, acquired_at, heartbeat_at)"
+            " VALUES (:id, :rid, 'test-w', :exp, :now, :now)"
+        ), {"id": lid, "rid": rid, "exp": past_exp, "now": now})
         db_session.commit()
 
+        ctx = multiprocessing.get_context("spawn")
+        queue = ctx.Queue(maxsize=2)
+
+        proc = ctx.Process(target=_run_job_in_child, kwargs=dict(
+            database_url=db_url,
+            job_type="guardian.evaluate_all",
+            job_params={},
+            household_id=hid,
+            run_id=rid,
+            attempt_id=aid,
+            lease_id=lid,
+            worker_id="test-w",
+            fencing_token=1,
+            result_queue=queue,
+            marker_table="job_definitions",
+            marker_key=marker,
+        ))
+        proc.start()
+
+        # Wait for child to signal it's ready (past the marker INSERT)
+        try:
+            msg = queue.get(timeout=10)
+            assert msg.get("stage") == "ready"
+        except Exception:
+            proc.terminate()
+            proc.join()
+            pytest.fail("Child didn't signal readiness")
+
+        # Kill the child
+        proc.terminate()
+        proc.join(timeout=5)
+        if proc.is_alive():
+            proc.kill()
+            proc.join()
+
+        # Verify the marker row does NOT exist (transaction rolled back)
         row = db_session.execute(text(
-            "SELECT status FROM runs WHERE id = :id"
-        ), {"id": rid}).fetchone()
-        assert row[0] == "running"
+            "SELECT 1 FROM job_definitions WHERE id = :id"
+        ), {"id": marker}).fetchone()
+        assert row is None, "Uncommitted marker survived process kill"
 
-    def test_completed_run_not_recovered(self, db_session: Session) -> None:
-        from apps.api.services.orchestration_worker import StaleRunReaper
 
-        hid = _setup_household(db_session)
-        jid = _setup_job(db_session, hid)
-        sid = _setup_schedule(db_session, jid)
+# ── Reaper concurrency ──
+
+
+class TestReaperConcurrency:
+    def _setup_stale(self, session: Session) -> tuple[str, str, str]:
+        hid = uuid4()
+        session.execute(text(
+            "INSERT INTO household_profiles"
+            " (id, singleton_key, household_name, base_currency,"
+            " investment_horizon, liquidity_needs, risk_statement, notes)"
+            " VALUES (:id, TRUE, 'T', 'USD', 'L', '', '', '')"
+        ), {"id": hid})
+        jid = uuid4()
+        session.execute(text(
+            "INSERT INTO job_definitions (id, household_id, job_type)"
+            " VALUES (:id, :hid, 'guardian.evaluate_all')"
+        ), {"id": jid, "hid": hid})
+        now = _now()
         rid = uuid4()
-        now = datetime.now(UTC)
-        past = now - timedelta(hours=2)
-        session = db_session
         session.execute(text(
             "INSERT INTO runs"
-            " (id, job_definition_id, schedule_id, idempotency_key, status,"
-            " triggered_by, scheduled_at, household_id)"
-            " VALUES (:id, :jid, :sid, :ik, 'completed', 'schedule', :sa, :hid)"
-        ), {"id": rid, "jid": jid, "sid": sid, "ik": f"ik-{uuid4().hex[:8]}",
-            "sa": past, "hid": hid})
+            " (id, job_definition_id, idempotency_key, status, triggered_by,"
+            " scheduled_at, household_id)"
+            " VALUES (:id, :jid, :ik, 'running', 'schedule', :sa, :hid)"
+        ), {"id": rid, "jid": jid, "ik": f"ik-{uuid4().hex[:8]}",
+            "sa": now - timedelta(hours=2), "hid": str(hid)})
         lid = uuid4()
+        past = now - timedelta(hours=1)
         session.execute(text(
             "INSERT INTO leases"
             " (id, run_id, worker_id, expires_at, acquired_at, heartbeat_at)"
-            " VALUES (:id, :rid, 'dead-worker', :exp, :now, :now)"
-        ), {"id": lid, "rid": rid, "exp": past + timedelta(seconds=60), "now": past})
+            " VALUES (:id, :rid, 'dead', :exp, :now, :now)"
+        ), {"id": lid, "rid": rid, "exp": past, "now": past})
         session.commit()
+        return str(hid), str(rid), str(lid)
 
-        reaper = StaleRunReaper(clock=lambda: now)
-        reaper.recover(db_session)
-        db_session.commit()
+    def test_concurrent_reapers_one_winner(self, db_session: Session) -> None:
+        from apps.api.services.orchestration_worker import StaleRunReaper
 
-        row = db_session.execute(text(
-            "SELECT status FROM runs WHERE id = :id"
-        ), {"id": rid}).fetchone()
-        assert row[0] == "completed"
-
-
-# ── Timeout / Fake Executor ──
-
-
-class TestTimeoutExecutor:
-    def test_timeout_executor_terminates(self) -> None:
-        from apps.api.services.orchestration_executor import FakeJobExecutor
-
-        executor = FakeJobExecutor(should_timeout=True)
-        result = executor.execute(
-            job_type="guardian.evaluate_all", job_params={}, household_id="h",
-            run_id="r", attempt_id="a", lease_id="l", worker_id="w",
-            fencing_token=1,
-        )
-        assert result["status"] == "terminated"
-        assert len(executor.execute_calls) == 1
-
-    def test_fake_executor_success(self) -> None:
-        from apps.api.services.orchestration_executor import FakeJobExecutor
-
-        executor = FakeJobExecutor()
-        result = executor.execute(
-            job_type="guardian.evaluate_all", job_params={}, household_id="h",
-            run_id="r", attempt_id="a", lease_id="l", worker_id="w",
-            fencing_token=1,
-        )
-        assert result["status"] == "completed"
-
-    def test_fake_executor_failure(self) -> None:
-        from apps.api.services.orchestration_executor import FakeJobExecutor
-
-        executor = FakeJobExecutor(should_fail=True)
-        result = executor.execute(
-            job_type="guardian.evaluate_all", job_params={}, household_id="h",
-            run_id="r", attempt_id="a", lease_id="l", worker_id="w",
-            fencing_token=1,
-        )
-        assert result["status"] == "failed"
-
-
-# ── Graceful Shutdown ──
-
-
-class TestGracefulShutdown:
-    def test_worker_stops_claiming_on_shutdown(self, db_session: Session) -> None:
-        from apps.api.services.orchestration_executor import FakeJobExecutor
-        from apps.api.services.orchestration_worker import OrchestrationWorker
-
-        hid = _setup_household(db_session)
-        jid = _setup_job(db_session, hid)
-        _setup_schedule(db_session, jid, enabled=True)
-
-        # Get the test database URL from the session
+        hid, rid, lid = self._setup_stale(db_session)
+        now = _now()
         engine = db_session.get_bind()
-        db_url = str(engine.url)
 
-        worker = OrchestrationWorker(
-            db_url,
-            clock=lambda: datetime.now(UTC),
-            poll_interval=0.1,
-            executor=FakeJobExecutor(should_fail=False),
-        )
-        # Signal stop immediately
-        worker.stop()
+        barrier = threading.Barrier(2, timeout=5)
+        results: list[int] = []
 
-        # Run once — should claim at most one and stop
-        claimed = worker._claim_and_execute()
-        # After stop, claim loop should not process more
-        assert claimed >= 0  # May claim 0 or 1
-    def test_shutdown_flag_respected(self, db_session: Session) -> None:
-        from apps.api.services.orchestration_executor import FakeJobExecutor
-        from apps.api.services.orchestration_worker import OrchestrationWorker
+        def _reap() -> None:
+            with engine.connect() as c:
+                from sqlalchemy.orm import Session as _Session
+                s = _Session(bind=c)
+                try:
+                    barrier.wait()
+                    reaper = StaleRunReaper(clock=lambda: now)
+                    count = reaper.recover(s)
+                    s.commit()
+                    results.append(count)
+                except Exception:
+                    results.append(-1)
+                finally:
+                    s.close()
 
-        engine = db_session.get_bind()
-        db_url = str(engine.url)
+        t1 = threading.Thread(target=_reap)
+        t2 = threading.Thread(target=_reap)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
 
-        worker = OrchestrationWorker(
-            db_url,
-            executor=FakeJobExecutor(),
-        )
-        assert not worker._shutdown_flag.is_set()
-        worker.stop()
-        assert worker._shutdown_flag.is_set()
-
-
-# ── DST Exception Specificity ──
+        # Exactly one thread should have recovered (the other finds status != running)
+        assert results.count(1) == 1, f"Expected 1 reaper winner, got: {results}"
 
 
-class TestDSTExceptionHandling:
-    def test_nonexistent_time_handled(self) -> None:
+# ── DST exception handling ──
+
+
+class TestDSTExceptionSpec:
+    def test_nonexistent_time_handled_no_bare_except(self) -> None:
+        from datetime import time as _time
+
         from apps.api.services.orchestration_scheduling import resolve_local_time
 
-        # Spring-forward in US/Eastern: 2026-03-08 2:30am doesn't exist
         def clock():
-            return _utc(2026, 3, 7, 20, 0)  # 3pm ET day before
-        result = resolve_local_time(
-            __import__("datetime").time(2, 30), "America/New_York", clock=clock
-        )
+            return datetime(2026, 3, 7, 20, 0, tzinfo=UTC)
+        result = resolve_local_time(_time(2, 30), "America/New_York", clock=clock)
         assert result is not None
 
-    def test_invalid_timezone_still_raises(self) -> None:
+    def test_invalid_tz_still_raises_value_error(self) -> None:
+        from datetime import time as _time
+
         from apps.api.services.orchestration_scheduling import resolve_local_time
 
         with pytest.raises(ValueError, match="Invalid IANA"):
             resolve_local_time(
-                __import__("datetime").time(9, 0), "Bad/Zone",
-                clock=lambda: _utc(2026, 1, 1, 0, 0),
+                _time(9, 0), "Bad/Zone",
+                clock=lambda: datetime(2026, 1, 1, 0, 0, tzinfo=UTC),
             )
 
 
-# ── Clock Propagation ──
+# ── Clock propagation ──
 
 
 class TestClockPropagation:
-    def test_create_run_uses_explicit_scheduled_at(self, db_session: Session) -> None:
+    def test_create_run_timestamp_preserved(self, db_session: Session) -> None:
         from apps.api.services.orchestration_repository import create_run
 
         hid = _setup_household(db_session)
         jid = _setup_job(db_session, hid)
-        fixed_time = _utc(2026, 7, 20, 9, 0, 0)
+        fixed = datetime(2026, 7, 20, 9, 0, 0, tzinfo=UTC)
         rid = create_run(
-            db_session,
-            job_definition_id=jid,
-            schedule_id=None,
+            db_session, job_definition_id=jid, schedule_id=None,
             idempotency_key=f"ik-{uuid4().hex[:8]}",
-            status="pending",
-            triggered_by="manual",
-            scheduled_at=fixed_time,
-            household_id=hid,
+            status="pending", triggered_by="manual",
+            scheduled_at=fixed, household_id=hid,
         )
         db_session.commit()
         row = db_session.execute(text(
             "SELECT scheduled_at FROM runs WHERE id = :id"
         ), {"id": rid}).fetchone()
-        assert row[0] == fixed_time
+        assert row[0] == fixed

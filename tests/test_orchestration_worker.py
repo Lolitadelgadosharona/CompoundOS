@@ -110,7 +110,7 @@ class TestJobValidation:
             InvalidJobParamsError,
             validate_job_params,
         )
-        with pytest.raises(InvalidJobParamsError, match="accepts no job parameters"):
+        with pytest.raises(InvalidJobParamsError, match="accepts no parameters"):
             validate_job_params("guardian.evaluate_all", {"extra": 1})
 
 
