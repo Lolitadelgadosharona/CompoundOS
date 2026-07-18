@@ -18,7 +18,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 pytestmark = pytest.mark.postgres
 
 
-HEAD_REVISION = "0010_lease_fencing"
+HEAD_REVISION = "0011_fencing_closure"
 PREVIOUS_REVISION = "0006_portfolio_snapshot_status"
 
 GUARDIAN_TABLES = {
