@@ -18,8 +18,13 @@ def _now() -> datetime:
 
 
 def _idempotency_key(job_type: str, scheduled_at: datetime) -> str:
-    """Deterministic idempotency key per the Technical Design §8."""
-    payload = f"{job_type}||{scheduled_at.isoformat()}"
+    """Deterministic idempotency key per Technical Design §8.
+
+    Daily-only scheduling: the time bucket is the calendar date.
+    Formula: SHA256(job_type || canonical_job_params || scheduled_date).
+    """
+    scheduled_date = scheduled_at.date().isoformat()
+    payload = f"{job_type}||{scheduled_date}"
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
@@ -351,6 +356,57 @@ def test_attempt_unique_per_run(db_session: Session) -> None:
             "INSERT INTO attempts (id, run_id, attempt_number)"
             " VALUES (:id, :rid, 1)"
         ), {"id": uuid4(), "rid": rid})
+        db_session.commit()
+
+
+# ── Attempt immutability ──
+
+
+def test_attempt_terminal_state_cannot_revert(db_session: Session) -> None:
+    hid = _setup_household(db_session)
+    jid = _setup_job(db_session, hid)
+    rid = uuid4()
+    aid = uuid4()
+    now = _now()
+    db_session.execute(text(
+        "INSERT INTO runs"
+        " (id, job_definition_id, idempotency_key, status, triggered_by,"
+        " scheduled_at, household_id)"
+        " VALUES (:id, :jid, :ik, 'running', 'manual', :sa, :hid)"
+    ), {"id": rid, "jid": jid, "ik": _idempotency_key("guardian.evaluate_all", now),
+        "sa": now, "hid": hid})
+    db_session.execute(text(
+        "INSERT INTO attempts (id, run_id, attempt_number, status)"
+        " VALUES (:id, :rid, 1, 'succeeded')"
+    ), {"id": aid, "rid": rid})
+    db_session.commit()
+    with pytest.raises(Exception, match="terminal"):
+        db_session.execute(text(
+            "UPDATE attempts SET status = 'running' WHERE id = :id"
+        ), {"id": aid})
+        db_session.commit()
+
+
+def test_attempt_deletion_forbidden(db_session: Session) -> None:
+    hid = _setup_household(db_session)
+    jid = _setup_job(db_session, hid)
+    rid = uuid4()
+    aid = uuid4()
+    now = _now()
+    db_session.execute(text(
+        "INSERT INTO runs"
+        " (id, job_definition_id, idempotency_key, status, triggered_by,"
+        " scheduled_at, household_id)"
+        " VALUES (:id, :jid, :ik, 'running', 'manual', :sa, :hid)"
+    ), {"id": rid, "jid": jid, "ik": _idempotency_key("guardian.evaluate_all", now),
+        "sa": now, "hid": hid})
+    db_session.execute(text(
+        "INSERT INTO attempts (id, run_id, attempt_number, status)"
+        " VALUES (:id, :rid, 1, 'succeeded')"
+    ), {"id": aid, "rid": rid})
+    db_session.commit()
+    with pytest.raises(Exception, match="deletion_forbidden"):
+        db_session.execute(text("DELETE FROM attempts WHERE id = :id"), {"id": aid})
         db_session.commit()
 
 

@@ -86,6 +86,32 @@ END;
 $$
 """.strip()
 
+ATTEMPT_IMMUTABILITY_FN = r"""
+CREATE FUNCTION public.fn_attempt_immutability()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF TG_OP = 'UPDATE' AND OLD.status IN ('succeeded', 'failed', 'aborted') THEN
+        IF NEW.status <> OLD.status THEN
+            RAISE EXCEPTION USING
+                ERRCODE = '55000',
+                MESSAGE = 'orchestration_attempt_terminal_immutable',
+                DETAIL = 'Attempt ' || OLD.id
+                    || ' is in terminal state ' || OLD.status;
+        END IF;
+    END IF;
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION USING
+            ERRCODE = '55000',
+            MESSAGE = 'orchestration_attempt_deletion_forbidden',
+            DETAIL = 'Attempts must never be deleted.';
+    END IF;
+    RETURN NEW;
+END;
+$$
+""".strip()
+
 
 # ---------------------------------------------------------------------------
 # Upgrade
@@ -97,6 +123,7 @@ def upgrade() -> None:
     op.execute(RUN_IMMUTABILITY_FN)
     op.execute(JOB_ALLOWLIST_FN)
     op.execute(LEASE_TAKEOVER_PREVENTION_FN)
+    op.execute(ATTEMPT_IMMUTABILITY_FN)
 
     # --- job_definitions ---
     op.create_table(
@@ -200,6 +227,14 @@ def upgrade() -> None:
         sa.UniqueConstraint("run_id", "attempt_number", name="uq_attempts_run_attempt"),
     )
     op.create_index("ix_attempts_run", "attempts", ["run_id"])
+    # Attempt terminal immutability trigger
+    op.execute(
+        sa.text(
+            "CREATE TRIGGER trg_attempt_immutability"
+            " BEFORE UPDATE OR DELETE ON attempts"
+            " FOR EACH ROW EXECUTE FUNCTION fn_attempt_immutability()"
+        )
+    )
 
     # --- leases ---
     op.create_table(
@@ -247,12 +282,14 @@ def downgrade() -> None:
     op.execute("DROP TRIGGER IF EXISTS trg_job_definition_allowlist ON job_definitions")
     op.execute("DROP TRIGGER IF EXISTS trg_lease_takeover_prevention ON leases")
     op.execute("DROP TRIGGER IF EXISTS trg_run_immutability ON runs")
+    op.execute("DROP TRIGGER IF EXISTS trg_attempt_immutability ON attempts")
     op.execute("DROP INDEX IF EXISTS uq_runs_one_active_per_schedule")
     op.drop_table("leases")
     op.drop_table("attempts")
     op.drop_table("runs")
     op.drop_table("schedules")
     op.drop_table("job_definitions")
+    op.execute("DROP FUNCTION IF EXISTS fn_attempt_immutability")
     op.execute("DROP FUNCTION IF EXISTS fn_lease_takeover_prevention")
     op.execute("DROP FUNCTION IF EXISTS fn_job_definition_allowlist")
     op.execute("DROP FUNCTION IF EXISTS fn_run_immutability")
