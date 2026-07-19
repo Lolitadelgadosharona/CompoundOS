@@ -359,14 +359,37 @@ def discard_guardian_check(session: Session, check_id: UUID) -> None:
 # ---------------------------------------------------------------------------
 
 
+def evaluate_core(
+    session: Session,
+    *,
+    household_id: UUID,
+    as_of_date: date,
+    target_check_id: Optional[UUID] = None,
+) -> dict:
+    """Transaction-neutral Guardian evaluation — NEVER commits.
+
+    Caller is responsible for: session.commit() or session.rollback().
+    Used by: HTTP wrapper (evaluate_all_checks, evaluate_one_check),
+    Worker child process (short fenced transaction).
+    """
+    return _evaluate_core(
+        session, household_id=household_id,
+        as_of_date=as_of_date, target_check_id=target_check_id,
+    )
+
+
 def evaluate_all_checks(
     session: Session,
     *,
     household_id: UUID,
     as_of_date: date,
 ) -> dict:
-    """Entry point: manual evaluate-all."""
-    return _evaluate(session, household_id=household_id, as_of_date=as_of_date)
+    """HTTP entry point: evaluate-all with commit."""
+    result = _evaluate_core(
+        session, household_id=household_id, as_of_date=as_of_date,
+    )
+    session.commit()
+    return result
 
 
 def evaluate_one_check(
@@ -376,12 +399,16 @@ def evaluate_one_check(
     household_id: UUID,
     as_of_date: date,
 ) -> dict:
-    """Entry point: manual evaluate-one."""
-    return _evaluate(session, household_id=household_id, as_of_date=as_of_date,
-                     target_check_id=check_id)
+    """HTTP entry point: evaluate-one with commit."""
+    result = _evaluate_core(
+        session, household_id=household_id, as_of_date=as_of_date,
+        target_check_id=check_id,
+    )
+    session.commit()
+    return result
 
 
-def _evaluate(
+def _evaluate_core(
     session: Session,
     *,
     household_id: UUID,
@@ -414,7 +441,6 @@ def _evaluate(
                     0, 0, as_of_date, "No published Policy version exists")
         _audit_eval(session, household_id, run_id, "skipped",
                     "no_published_policy", 0, 0)
-        session.commit()
         return _load_eval_result(session, run_id)
 
     policy_version_id = str(prow[0])
@@ -453,7 +479,6 @@ def _evaluate(
                     0, 0, as_of_date, "No Portfolio Snapshot exists")
         _audit_eval(session, household_id, run_id, "skipped",
                      "no_portfolio_snapshot", 0, 0)
-        session.commit()
         return _load_eval_result(session, run_id)
 
     snapshot_id = str(srow[0])
@@ -481,7 +506,6 @@ def _evaluate(
                     0, 0, as_of_date, "Portfolio Snapshot has zero total value")
         _audit_eval(session, household_id, run_id, "skipped",
                      "zero_total_value", 0, 0)
-        session.commit()
         return _load_eval_result(session, run_id)
 
     category_map = build_category_map(holdings)
@@ -566,7 +590,6 @@ def _evaluate(
         snapshot_version=snapshot_version,
     )
 
-    session.commit()
     result = _load_eval_result(session, run_id)
     return result
 
