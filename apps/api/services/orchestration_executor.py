@@ -125,35 +125,56 @@ def _run_job_in_child(
 
     try:
         with session_factory() as session:
+            # Write test marker
+            if marker_table and marker_key:
+                try:
+                    session.execute(text(
+                        f"INSERT INTO {marker_table}"
+                        f" (id) VALUES (:id)"
+                        f" ON CONFLICT DO NOTHING"
+                    ), {"id": marker_key})
+                except Exception:
+                    pass
+
+            # Notify parent we've reached the blocking point
+            result_queue.put({"stage": "ready"})
+
+            # Short fenced transaction: lock lease, evaluate, finalize
             with session.begin():
-                # Write test marker if requested (to verify rollback on kill)
-                if marker_table and marker_key:
-                    try:
-                        session.execute(text(
-                            f"INSERT INTO {marker_table}"
-                            f" (id) VALUES (:id)"
-                            f" ON CONFLICT DO NOTHING"
-                        ), {"id": marker_key})
-                    except Exception:
-                        pass
+                # Lock and validate lease with FOR UPDATE
+                row = session.execute(text(
+                    "SELECT 1 FROM leases"
+                    " WHERE id = :lid AND worker_id = :wid"
+                    " AND fencing_token = :token"
+                    " AND released_at IS NULL AND expires_at > :as_of"
+                    " FOR UPDATE"
+                ), {
+                    "lid": lease_id, "wid": worker_id,
+                    "token": fencing_token, "as_of": _utc_now(),
+                }).fetchone()
 
-                # Notify parent we've reached the blocking point
-                result_queue.put({"stage": "ready"})
-
-                # Run Guardian evaluation (commits within the transaction)
-                result = _evaluate_no_commit(
-                    session, household_id, job_type, job_params
-                )
-
-                # Validate lease before completing
-                if not validate_lease_for_commit(
-                    session, lease_id, worker_id, fencing_token,
-                ):
+                if row is None:
                     result_queue.put({
                         "status": "fenced",
                         "error": "Lease lost before commit",
                     })
                     return
+
+                # Run Guardian evaluation (transaction-neutral — no commit)
+                from datetime import date as _date
+
+                from apps.api.services.guardian import evaluate_core
+
+                result = evaluate_core(
+                    session,
+                    household_id=UUID(household_id),
+                    as_of_date=_date.today(),
+                    target_check_id=(
+                        UUID(job_params["check_id"])
+                        if job_type == "guardian.evaluate_one"
+                        else None
+                    ),
+                )
 
                 # Complete attempt
                 attempt_status = (
@@ -181,11 +202,11 @@ def _run_job_in_child(
                 # Release lease
                 session.execute(text(
                     "UPDATE leases SET released_at = NOW()"
-                    " WHERE id = :lid AND worker_id = :wid AND"
-                    " fencing_token = :token"
+                    " WHERE id = :lid AND worker_id = :wid"
+                    " AND fencing_token = :token"
                 ), {"lid": lease_id, "wid": worker_id, "token": fencing_token})
 
-            # Transaction committed — both Guardian and Automation state saved
+            # Transaction committed atomically
             result_queue.put(result)
 
     except Exception as exc:
