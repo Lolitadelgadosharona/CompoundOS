@@ -506,7 +506,6 @@ def _evaluate_core(
                     0, 0, as_of_date, "Portfolio Snapshot has zero total value")
         _audit_eval(session, household_id, run_id, "skipped",
                      "zero_total_value", 0, 0)
-        session.commit()
         return _load_eval_result(session, run_id)
 
     category_map = build_category_map(holdings)
