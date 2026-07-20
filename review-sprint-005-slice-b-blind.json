@@ -1,0 +1,219 @@
+{
+  "review": {
+    "pr": 42,
+    "head": "6e13b6f",
+    "branch": "sprint/005-slice-b-orchestration-worker-api",
+    "target": "main @ 2785b37",
+    "files_reviewed": 8,
+    "lines_added": 2098,
+    "summary": "Blind review of Sprint 005 Slice B: Worker + Backend API. Found 2 BLOCKERs, 5 HIGH, 4 MEDIUM, 3 LOW."
+  },
+  "findings": [
+    {
+      "severity": "BLOCKER",
+      "category": "transaction_ownership",
+      "title": "Multi-schedule single-transaction: one failure rolls back all completed work, causes infinite claim-retry loop",
+      "file": "apps/api/services/orchestration_worker.py",
+      "lines": "187-211",
+      "description": "_claim_and_execute() claims all due schedules via claim_due_schedules() with FOR UPDATE SKIP LOCKED, then executes them one-by-one in a single session/transaction. If schedule N fails after schedules 1..N-1 completed successfully, the entire transaction rolls back. This causes: (a) Guardian evaluation results from completed schedules are lost (rolled back); (b) next_run_at that was advanced for completed schedules reverts to the old (due) value; (c) on the next poll cycle, the same schedules are claimed again but create_run() fails with IntegrityError (duplicate idempotency_key via uq_runs_idempotency_key); (d) the except block in _execute_scheduled catches the IntegrityError silently and returns without advancing next_run_at — so the schedule stays 'due' forever, creating an infinite claim-retry loop with zero progress. Fix: each schedule should execute in its own independent transaction.",
+      "recommendation": "Execute each schedule in its own session/transaction with independent commit. Use claim_due_schedules() only to identify due schedules (or add a lightweight 'claimed' marker), then process each one atomically. At minimum, commit after each successful schedule execution and rollback only the failed one."
+    },
+    {
+      "severity": "BLOCKER",
+      "category": "allowlist",
+      "title": "create_schedule hardcodes job_params to empty JSON, making guardian.evaluate_one unusable via schedules",
+      "file": "apps/api/services/orchestration.py",
+      "lines": "85-91",
+      "description": "create_schedule() inserts job_definitions with hardcoded '{}'::jsonb for job_params, completely ignoring the payload.job_params field from ScheduleCreate. This means: (a) guardian.evaluate_one can never be scheduled with a specific check_id via the API, rendering that half of the allowlist unusable for scheduled execution; (b) the ScheduleCreate schema has a job_params field that appears to accept parameters but they are silently discarded. The only way to create a job_definition with params is via create_job_definition() which has no corresponding schedule API endpoint.",
+      "recommendation": "Use the actual payload.job_params in the INSERT, serialized properly (e.g., via json.dumps or SQLAlchemy JSONB parameter binding)."
+    },
+    {
+      "severity": "HIGH",
+      "category": "fencing_correctness",
+      "title": "Stale run on finalize failure: run stuck in 'running' with no auto-recovery without worker restart",
+      "file": "apps/api/services/orchestration_worker.py",
+      "lines": "269-281",
+      "description": "When finalize_run() returns 0 (lease expired during job execution), _execute_scheduled() returns early without completing the attempt or releasing the lease. The run stays in 'running' status, the attempt stays in 'running', and the lease will eventually expire but won't be explicitly released. The only recovery path is _recover_on_startup() which only runs on worker restart — if the worker stays alive, the stale run persists forever. For jobs that exceed the 60s LEASE_TTL (MAX_RUNTIME_SECONDS=300 is defined but never enforced), this is the expected failure mode.",
+      "recommendation": "Add a background reaper thread or periodic recovery check in the main loop that calls recover_stale_runs() without requiring a restart. Alternatively, heartbeat the lease during long-running job execution."
+    },
+    {
+      "severity": "HIGH",
+      "category": "fencing_correctness",
+      "title": "MAX_RUNTIME_SECONDS declared but never enforced — jobs can exceed lease TTL indefinitely",
+      "file": "apps/api/services/orchestration_repository.py",
+      "lines": "21",
+      "description": "MAX_RUNTIME_SECONDS = 300 is defined in the repository constants but never referenced in the worker, repository, or any other file. The worker executes jobs without any timeout, meaning a hanged or extremely slow Guardian evaluation can run indefinitely. When execution exceeds the 60s LEASE_TTL, finalize_run() returns 0 (expired lease), and the run gets stuck (see HIGH finding above). Without enforcement, MAX_RUNTIME_SECONDS is dead code.",
+      "recommendation": "Enforce a timeout around job execution in _execute_job() or _execute_scheduled(), using MAX_RUNTIME_SECONDS. On timeout, mark the run as 'failed' and release the lease before expiry."
+    },
+    {
+      "severity": "HIGH",
+      "category": "duplicate_execution_prevention",
+      "title": "Fragile JSON serialization: str(dict).replace(\"'\", '\"') will break on nontrivial params",
+      "file": "apps/api/services/orchestration.py",
+      "lines": "46",
+      "description": "create_job_definition() serializes job_params via str(payload.job_params).replace(\"'\", '\"'). This converts the dict to Python repr() then swaps quotes. It breaks on: (a) values containing single quotes (e.g., \"it's\" becomes \"it\"s\" — invalid JSON); (b) nested dicts/lists; (c) non-string keys; (d) any params that Python's repr() doesn't render as valid JSON. Should use json.dumps().",
+      "recommendation": "Replace with json.dumps(payload.job_params) or use SQLAlchemy's native JSONB binding by passing the dict directly."
+    },
+    {
+      "severity": "HIGH",
+      "category": "transaction_ownership",
+      "title": "Guardian evaluation runs inside worker's transaction — rollback discards legitimate evaluation results",
+      "file": "apps/api/services/orchestration_worker.py",
+      "lines": "327-343",
+      "description": "_execute_job() passes the worker's session to Guardian's evaluate_all_checks()/evaluate_one_check(), which write results (guardian_evaluation_runs, guardian_events) within the same transaction. If any schedule in the batch fails, the entire transaction rolls back, discarding all Guardian results that were legitimately computed. The results are permanently lost unless manually re-evaluated.",
+      "recommendation": "Execute each job in its own sub-transaction (nested transaction or separate session). Related to BLOCKER #1."
+    },
+    {
+      "severity": "HIGH",
+      "category": "duplicate_execution_prevention",
+      "title": "Overbroad Exception catch: IntegrityError conflated with all DB errors as 'already claimed'",
+      "file": "apps/api/services/orchestration_worker.py",
+      "lines": "241-244",
+      "description": "create_run() is wrapped in 'except Exception' which logs 'Run already claimed' and returns. This silently swallows: connection errors, schema errors, constraint violations other than idempotency_key (e.g., FK violations), and any other unexpected DB error. All are misattributed as idempotency/overlap conflicts.",
+      "recommendation": "Catch only IntegrityError from create_run(), and check the specific constraint name or error detail to confirm it's the idempotency_key unique violation. Re-raise or log at ERROR level for unexpected errors."
+    },
+    {
+      "severity": "MEDIUM",
+      "category": "graceful_shutdown",
+      "title": "GRACEFUL_SHUTDOWN_SECONDS declared but unused — graceful shutdown doesn't wait for in-flight work",
+      "file": "apps/api/services/orchestration_worker.py",
+      "lines": "351-357",
+      "description": "GRACEFUL_SHUTDOWN_SECONDS = 30 is defined in orchestration_repository.py line 22 but never imported or used by the worker. The _graceful_shutdown() method sets the shutdown flag (preventing new claims) and immediately calls self._engine.dispose(). It does not: (a) wait for in-flight _execute_scheduled() to complete; (b) release active leases; (c) mark in-progress runs. Any job mid-execution when SIGTERM arrives continues to completion (the signal handler only sets a flag), but the docstring claims a 30s wait which doesn't exist. The worker also doesn't catch the shutdown flag inside _execute_scheduled(), so a long-running job won't be interrupted gracefully.",
+      "recommendation": "Implement actual timeout-based waiting: track in-flight work, wait up to GRACEFUL_SHUTDOWN_SECONDS, release leases for unfinished work, then dispose."
+    },
+    {
+      "severity": "MEDIUM",
+      "category": "transaction_ownership",
+      "title": "datetime.now() bare statement — dead code / no-op",
+      "file": "apps/api/services/orchestration.py",
+      "lines": "36, 84",
+      "description": "Both create_job_definition() and create_schedule() contain a bare datetime.now() statement whose return value is discarded. This is dead code, likely leftover from development. It does nothing but may confuse readers.",
+      "recommendation": "Remove the bare datetime.now() calls."
+    },
+    {
+      "severity": "MEDIUM",
+      "category": "fencing_correctness",
+      "title": "clock parameter computed but discarded in create_run() and create_attempt()",
+      "file": "apps/api/services/orchestration_repository.py",
+      "lines": "96, 148",
+      "description": "create_run() line 96 and create_attempt() line 148 compute the clock value but discard it: '(clock or _utc_now)() if callable(clock) else clock or _utc_now()'. Neither function uses the computed 'now' value — create_run() uses the caller-provided scheduled_at, and create_attempt() doesn't set any timestamp. While not a correctness bug (the caller provides timestamps), it's misleading and wastes a clock evaluation. The advance_next_run_at() function (lines 124-131) also accepts a clock parameter but never uses it.",
+      "recommendation": "Either remove the unused clock parameter, or use the computed value (e.g., as a fallback when scheduled_at is not provided). At minimum, document that clock is accepted but not used in these functions."
+    },
+    {
+      "severity": "MEDIUM",
+      "category": "transaction_ownership",
+      "title": "_recover_on_startup doesn't release stale leases — orphan records accumulate",
+      "file": "apps/api/services/orchestration_worker.py",
+      "lines": "167-183",
+      "description": "_recover_on_startup() calls _abort_stale_run() which only calls complete_run(status='aborted'). It does not release the expired lease (set released_at). The stale lease remains with released_at=NULL. While not functionally blocking (new leases use different lease IDs and fencing tokens), orphan lease records accumulate over time and inflate worker_status counts.",
+      "recommendation": "After aborting a stale run, release the corresponding lease (release_lease or direct UPDATE setting released_at)."
+    },
+    {
+      "severity": "LOW",
+      "category": "allowlist",
+      "title": "No test for guardian.evaluate_one scheduling with check_id",
+      "file": "tests/test_orchestration_worker.py",
+      "lines": "all",
+      "description": "Tests only cover guardian.evaluate_all scenarios. There is no test that creates a schedule with job_type='guardian.evaluate_one' and job_params={'check_id': '...'}. Combined with BLOCKER #2, this gap let the hardcoded '{}'::jsonb bug go undetected.",
+      "recommendation": "Add test: POST /api/automation/schedules with job_type='guardian.evaluate_one' and job_params={'check_id': '<UUID>'}, verify the job_definition stores the check_id."
+    },
+    {
+      "severity": "LOW",
+      "category": "dst",
+      "title": "DST spring-forward handling catches overly broad Exception",
+      "file": "apps/api/services/orchestration_scheduling.py",
+      "lines": "123, 138, 166, 178",
+      "description": "The DST spring-forward gap handling uses 'except Exception' to catch NonExistentTimeError. While functionally correct in practice (only NonExistentTimeError should be raised by replace(tzinfo=zone) in available Python versions), catching bare Exception could mask other unexpected errors (e.g., MemoryError, TypeError from a bad timezone object).",
+      "recommendation": "Import and catch the specific exception class (NonExistentTimeError from zoneinfo or pytz, depending on the Python version), or at minimum use a narrow catch and log unexpected exception types."
+    },
+    {
+      "severity": "LOW",
+      "category": "opt_in_default",
+      "title": "Schedule 'enabled' field relies on database default (false) — no explicit Pydantic default",
+      "file": "apps/api/automation_schemas.py",
+      "lines": "58-62",
+      "description": "ScheduleCreate does not have an 'enabled' field. The database default is false (server_default=sa.text('false')). This correctly implements opt-in default, but it's implicit — the response schema shows 'enabled' in ScheduleResponse but the create schema has no way to set it. This is fine for opt-in behavior, but worth documenting explicitly.",
+      "recommendation": "Document in ScheduleCreate docstring that schedules are created disabled (enabled=false) by default and must be explicitly enabled via PATCH."
+    }
+  ],
+  "positive_findings": [
+    {
+      "category": "duplicate_execution_prevention",
+      "detail": "uq_runs_idempotency_key UNIQUE constraint on runs table prevents duplicate runs for same (job_type, params, date). Combined with uq_runs_one_active_per_schedule partial unique index, provides strong database-level duplicate prevention."
+    },
+    {
+      "category": "fencing_correctness",
+      "detail": "fencing_token mechanism with fn_lease_takeover_prevention_v4() trigger provides robust token-gated lease protection: token auto-increments on INSERT, takeover requires strict OLD+1 with expiry check, worker_id immutability enforced."
+    },
+    {
+      "category": "fencing_correctness",
+      "detail": "heartbeat_lease() and finalize_run() both check fencing_token, worker_id, released_at IS NULL, and expires_at > :as_of — correct expired-holder protection."
+    },
+    {
+      "category": "fencing_correctness",
+      "detail": "takeover_lease() uses atomic UPDATE with RETURNING fencing_token, checks base token and expires_at <= as_of. Correctly prevents takeover of unexpired leases."
+    },
+    {
+      "category": "dst",
+      "detail": "resolve_local_time() and compute_next_daily_run() are pure functions with injectable clock. DST spring-forward (nonexistent time advances 1 hour) and fall-back (fold=0 selects first occurrence) are correctly handled per the technical design."
+    },
+    {
+      "category": "allowlist",
+      "detail": "Job type allowlist (guardian.evaluate_all, guardian.evaluate_one) is enforced at three layers: Pydantic schema validators, validate_job_params() pure function, and fn_job_definition_allowlist() database trigger. Strong defense in depth."
+    },
+    {
+      "category": "no_http_loopback",
+      "detail": "GuardianExecutor imports and calls evaluate_all_checks() / evaluate_one_check() directly from apps.api.services.guardian — no HTTP calls, no network dependency for job execution."
+    },
+    {
+      "category": "opt_in_default",
+      "detail": "Schedules are created with enabled=false by database default, confirmed by test_create_schedule asserting data['enabled'] is False. Opt-in semantics correctly implemented."
+    },
+    {
+      "category": "transaction_ownership",
+      "detail": "claim_due_schedules() uses FOR UPDATE OF s SKIP LOCKED — prevents concurrent workers from claiming the same schedule row. Good atomic claim mechanism at the database level."
+    },
+    {
+      "category": "transaction_ownership",
+      "detail": "fn_run_immutability_v2() trigger provides full-row immutability protection for terminal runs — no field can be modified after reaching completed/failed/aborted state."
+    }
+  ],
+  "checks_summary": {
+    "duplicate_execution_prevention": {
+      "status": "PARTIAL",
+      "detail": "Database constraints (uq_runs_idempotency_key, uq_runs_one_active_per_schedule) are solid. Application-level flow has issues: overbroad Exception catch conflates IntegrityError with all errors; multi-schedule single-transaction causes infinite retry loops on rollback."
+    },
+    "fencing_correctness": {
+      "status": "PARTIAL",
+      "detail": "Lease fencing v4 trigger is robust. Application side: finalize failure leaves runs stuck; MAX_RUNTIME_SECONDS never enforced; unused clock computations in create_run/create_attempt."
+    },
+    "dst": {
+      "status": "PASS",
+      "detail": "DST-aware scheduling with spring-forward/fall-back handling. Injectable clock for testing. Minor: overbroad Exception catch in DST gap handling."
+    },
+    "transaction_ownership": {
+      "status": "FAIL",
+      "detail": "BLOCKER: multiple schedules executed in single transaction — one failure rolls back all. Guardian writes are inside the same transaction and can be discarded. Dead code (bare datetime.now() calls)."
+    },
+    "graceful_shutdown": {
+      "status": "PARTIAL",
+      "detail": "Shutdown flag prevents new claims. But GRACEFUL_SHUTDOWN_SECONDS is never used — no actual waiting for in-flight work. No lease release on shutdown. Docstring claims 30s wait that doesn't exist."
+    },
+    "allowlist": {
+      "status": "FAIL",
+      "detail": "Triple enforcement (Pydantic, pure function, DB trigger) is excellent. BLOCKER: create_schedule hardcodes job_params to '{}'::jsonb, making guardian.evaluate_one with check_id impossible via schedules. Also: fragile str(dict).replace() serialization."
+    },
+    "no_http_loopback": {
+      "status": "PASS",
+      "detail": "Worker imports Guardian services directly. No HTTP dependencies."
+    },
+    "opt_in_default": {
+      "status": "PASS",
+      "detail": "Schedules created disabled (enabled=false via DB default). Confirmed by test."
+    },
+    "no_slice_c_scope": {
+      "status": "PASS",
+      "detail": "Only guardian.evaluate_all and guardian.evaluate_one in allowlist. No retry logic, no multi-check orchestration, no notification/delivery — all Slice C concerns correctly excluded."
+    }
+  }
+}
