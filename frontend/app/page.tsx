@@ -15,6 +15,7 @@ export default function HomePage() {
         <Link href="/guardian">Open Guardian Monitoring</Link>
         <Link href="/automation">Open Automation</Link>
         <Link href="/committee">Open AI Investment Committee</Link>
+        <Link href="/health">Open Health Dashboard</Link>
       </nav>
     </main>
   );

@@ -1,0 +1,268 @@
+"""Sprint 007 Slice B — Component health checks.
+
+Read-only. Never writes, mutates, repairs, or restores.
+All time is injectable via clock parameter (default: utcnow).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from typing import Any, Callable, Optional
+
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+HEALTHY = "healthy"
+DEGRADED = "degraded"
+UNAVAILABLE = "unavailable"
+STALE = "stale"
+UNKNOWN = "unknown"
+
+ALLOWED_STATUSES = {HEALTHY, DEGRADED, UNAVAILABLE, STALE, UNKNOWN}
+RPO_HOURS = 24
+BACKUP_STALE_HOURS = 25
+WORKER_STALE_MINUTES = 30
+GUARDIAN_STALE_HOURS = 48
+EXPECTED_MIGRATION_HEAD = "0013_backup_export_foundation"
+
+
+@dataclass
+class ComponentHealth:
+    component: str
+    status: str
+    reason: str = ""
+    last_checked: Optional[datetime] = None
+    details: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class HealthResult:
+    overall: str
+    components: list[ComponentHealth]
+    checked_at: datetime
+
+
+def check_database(session: Session, now: datetime) -> ComponentHealth:
+    try:
+        row = session.execute(text("SELECT 1")).fetchone()
+        if row is None:
+            return ComponentHealth("database", UNAVAILABLE, "No result")
+        return ComponentHealth("database", HEALTHY, "Connected", now)
+    except Exception as e:
+        return ComponentHealth("database", UNAVAILABLE, _safe(str(e)), now)
+
+
+def check_migration_head(session: Session, now: datetime) -> ComponentHealth:
+    try:
+        row = session.execute(text(
+            "SELECT version_num FROM alembic_version")).fetchone()
+        if not row:
+            return ComponentHealth("migration", UNAVAILABLE, "No revision", now)
+        current = row[0]
+        if current != EXPECTED_MIGRATION_HEAD:
+            return ComponentHealth(
+                "migration", DEGRADED,
+                f"Head mismatch: {current}", now)
+        return ComponentHealth("migration", HEALTHY, f"Head {current}", now)
+    except Exception as e:
+        return ComponentHealth("migration", UNAVAILABLE, _safe(str(e)), now)
+
+
+def check_backup(session: Session, now: datetime) -> ComponentHealth:
+    try:
+        row = session.execute(text(
+            "SELECT completed_at FROM backup_records"
+            " WHERE status='completed' ORDER BY completed_at DESC LIMIT 1"
+        )).fetchone()
+        if not row:
+            return ComponentHealth("backup", UNKNOWN, "No backup found", now)
+        last = row[0]
+        if last is None:
+            return ComponentHealth("backup", UNKNOWN, "No completion time", now)
+        age_hours = (now - last).total_seconds() / 3600
+        if age_hours <= RPO_HOURS:
+            return ComponentHealth("backup", HEALTHY,
+                                   f"Last {age_hours:.1f}h ago", now,
+                                   {"rpo_hours": RPO_HOURS})
+        if age_hours <= BACKUP_STALE_HOURS:
+            return ComponentHealth("backup", DEGRADED,
+                                   f"Old {age_hours:.1f}h", now)
+        return ComponentHealth("backup", STALE,
+                               f"Stale {age_hours:.1f}h — RPO {RPO_HOURS}h",
+                               now)
+    except Exception as e:
+        return ComponentHealth("backup", UNKNOWN, _safe(str(e)), now)
+
+
+def check_restore_verification(
+    session: Session, now: datetime,
+) -> ComponentHealth:
+    try:
+        row = session.execute(text(
+            "SELECT 1 FROM backup_records WHERE restore_verified=TRUE LIMIT 1"
+        )).fetchone()
+        if row:
+            return ComponentHealth("restore_verification", HEALTHY,
+                                   "Restore verified", now)
+        return ComponentHealth("restore_verification", UNKNOWN,
+                               "No restore verified", now)
+    except Exception as e:
+        return ComponentHealth("restore_verification", UNKNOWN,
+                               _safe(str(e)), now)
+
+
+def check_worker(session: Session, now: datetime) -> ComponentHealth:
+    try:
+        row = session.execute(text(
+            "SELECT MAX(started_at) FROM runs")).fetchone()
+        if not row or row[0] is None:
+            return ComponentHealth("worker", UNKNOWN, "No runs", now)
+        age_minutes = (now - row[0]).total_seconds() / 60
+        if age_minutes <= WORKER_STALE_MINUTES:
+            return ComponentHealth("worker", HEALTHY,
+                                   f"Last {age_minutes:.0f}m ago", now)
+        return ComponentHealth("worker", STALE,
+                               f"Last {age_minutes:.0f}m ago", now)
+    except Exception as e:
+        return ComponentHealth("worker", UNKNOWN, _safe(str(e)), now)
+
+
+def check_leases(session: Session, now: datetime) -> ComponentHealth:
+    try:
+        active_row = session.execute(text(
+            "SELECT COUNT(*) FROM leases WHERE released_at IS NULL"
+        )).fetchone()
+        stale_row = session.execute(text(
+            "SELECT COUNT(*) FROM leases WHERE released_at IS NULL"
+            " AND expires_at < :now"
+        ), {"now": now}).fetchone()
+        active = active_row[0] if active_row else 0
+        stale = stale_row[0] if stale_row else 0
+        if active == 0:
+            return ComponentHealth("leases", HEALTHY, "No active", now,
+                                   {"active": 0, "stale": 0})
+        if stale > 0:
+            return ComponentHealth("leases", DEGRADED,
+                                   f"{active} active, {stale} stale", now)
+        return ComponentHealth("leases", HEALTHY,
+                               f"{active} active", now)
+    except Exception as e:
+        return ComponentHealth("leases", UNKNOWN, _safe(str(e)), now)
+
+
+def check_guardian(session: Session, now: datetime) -> ComponentHealth:
+    try:
+        row = session.execute(text(
+            "SELECT MAX(evaluated_at) FROM guardian_events"
+        )).fetchone()
+        if not row or row[0] is None:
+            return ComponentHealth("guardian", UNKNOWN, "No evaluations", now)
+        age_hours = (now - row[0]).total_seconds() / 3600
+        if age_hours <= GUARDIAN_STALE_HOURS:
+            return ComponentHealth("guardian", HEALTHY,
+                                   f"Last {age_hours:.1f}h ago", now)
+        return ComponentHealth("guardian", STALE,
+                               f"Last {age_hours:.1f}h ago", now)
+    except Exception as e:
+        return ComponentHealth("guardian", UNKNOWN, _safe(str(e)), now)
+
+
+def check_credential(now: datetime) -> ComponentHealth:
+    try:
+        from apps.api.services.credential_manager import credential_available
+        available = credential_available("deepseek")
+        if available:
+            return ComponentHealth("credential", HEALTHY,
+                                   "Keychain available", now)
+        return ComponentHealth("credential", DEGRADED,
+                               "Credential not found", now)
+    except Exception as e:
+        return ComponentHealth("credential", UNKNOWN, _safe(str(e)), now)
+
+
+def check_launchd(now: datetime) -> ComponentHealth:
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["launchctl", "list", "com.compoundos.backup"],
+            capture_output=True, text=True, timeout=5,
+        )
+        loaded = (result.returncode == 0
+                  and "com.compoundos.backup" in result.stdout)
+        if loaded:
+            return ComponentHealth("launchd", HEALTHY, "Agent loaded", now)
+        return ComponentHealth("launchd", UNKNOWN, "Agent not loaded", now)
+    except Exception as e:
+        return ComponentHealth("launchd", UNKNOWN, _safe(str(e)), now)
+
+
+def check_notification(now: datetime) -> ComponentHealth:
+    return ComponentHealth("notification", UNKNOWN,
+                           "Slice C not implemented", now)
+
+
+CRITICAL = {"database", "migration"}
+DEGRADING = {"backup", "leases", "worker", "credential", "guardian"}
+
+
+def compute_overall(components: list[ComponentHealth]) -> str:
+    for c in components:
+        if c.component in CRITICAL and c.status == UNAVAILABLE:
+            return UNAVAILABLE
+        if c.component in CRITICAL and c.status in (DEGRADED, STALE):
+            return DEGRADED
+    for c in components:
+        if c.component in DEGRADING and c.status == UNAVAILABLE:
+            return DEGRADED
+        if c.component in DEGRADING and c.status == STALE:
+            return DEGRADED
+    for c in components:
+        if c.status == UNKNOWN and c.component in CRITICAL:
+            return DEGRADED
+    return HEALTHY
+
+
+CheckFn = Callable[..., ComponentHealth]
+
+
+def run_all_checks(
+    session: Session,
+    now: Optional[datetime] = None,
+) -> HealthResult:
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    checks: list[CheckFn] = [
+        lambda: check_database(session, now),
+        lambda: check_migration_head(session, now),
+        lambda: check_backup(session, now),
+        lambda: check_restore_verification(session, now),
+        lambda: check_worker(session, now),
+        lambda: check_leases(session, now),
+        lambda: check_guardian(session, now),
+        lambda: check_credential(now),
+        lambda: check_launchd(now),
+        lambda: check_notification(now),
+    ]
+
+    components: list[ComponentHealth] = []
+    for fn in checks:
+        try:
+            components.append(fn())
+        except Exception as e:
+            components.append(
+                ComponentHealth("unknown", UNKNOWN, _safe(str(e)), now))
+
+    return HealthResult(
+        overall=compute_overall(components),
+        components=components,
+        checked_at=now,
+    )
+
+
+def _safe(msg: str) -> str:
+    for pattern in ("password=", "://", "DSN", "/Users/", "/home/", "Traceback"):
+        if pattern in msg:
+            return "Internal error"
+    return msg[:200] if len(msg) > 200 else msg
