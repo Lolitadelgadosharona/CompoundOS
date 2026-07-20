@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tempfile
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -72,19 +73,25 @@ class TestBackupCheck:
         assert c.status == UNKNOWN
 
     def test_recent_backup_healthy(self, db_session: Session) -> None:
+        tf = tempfile.NamedTemporaryFile(suffix=".age", delete=False)
+        tf = open('/tmp/test_health_b.age', 'w'); tf.close()
+        tf.close()
         db_session.execute(text(
             "INSERT INTO backup_records (id, backup_type, file_path, status, started_at, completed_at, sha256)"  # noqa: E501
-            " VALUES (:id, 'full', '/tmp/b.age', 'completed', :t, :t, 'abc')"
-        ), {"id": str(uuid4()), "t": NOW - timedelta(hours=1)})
+            " VALUES (:id, 'full', :fp, 'completed', :t, :t, 'abc')"
+        ), {"id": str(uuid4()), "fp": tf.name, "fp": "/tmp/test_health_b.age", "t": NOW - timedelta(hours=1)})
         db_session.commit()
         c = check_backup(db_session, NOW)
         assert c.status == HEALTHY
 
     def test_old_backup_stale(self, db_session: Session) -> None:
+        import tempfile
+        tf = tempfile.NamedTemporaryFile(suffix=".age", delete=False)
+        tf.close()
         db_session.execute(text(
             "INSERT INTO backup_records (id, backup_type, file_path, status, started_at, completed_at, sha256)"  # noqa: E501
-            " VALUES (:id, 'full', '/tmp/b.age', 'completed', :t, :t, 'abc')"
-        ), {"id": str(uuid4()), "t": NOW - timedelta(hours=30)})
+            " VALUES (:id, 'full', :fp, 'completed', :t, :t, 'abc')"
+        ), {"id": str(uuid4()), "fp": tf.name, "t": NOW - timedelta(hours=30)})
         db_session.commit()
         c = check_backup(db_session, NOW)
         assert c.status == STALE
