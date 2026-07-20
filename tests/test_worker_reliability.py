@@ -54,7 +54,7 @@ class TestRealSubprocessTimeout:
         hid = _setup_household(db_session)
         jid = _setup_job(db_session, hid)
         engine = db_session.get_bind()
-        db_url = str(engine.url)
+        db_url = engine.url.render_as_string(hide_password=False)
 
         rid = str(uuid4())
         aid = str(uuid4())

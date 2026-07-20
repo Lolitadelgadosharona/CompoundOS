@@ -108,7 +108,7 @@ class TestMigrationLifecycle:
     def test_fresh_downgrade_reupgrade(
         self, db_session: Session, postgres_engine: Engine,
     ) -> None:
-        url = str(postgres_engine.url)
+        url = postgres_engine.url.render_as_string(hide_password=False)
         postgres_engine.dispose()
         migration_engine = create_engine(url)
 
@@ -142,7 +142,7 @@ class TestMigrationLifecycle:
     ) -> None:
         """Downgrade to 0011, insert orchestration data, upgrade to 0012,
         verify existing data intact."""
-        url = str(postgres_engine.url)
+        url = postgres_engine.url.render_as_string(hide_password=False)
         postgres_engine.dispose()
         migration_engine = create_engine(url)
         alembic_cfg = Config("alembic.ini")

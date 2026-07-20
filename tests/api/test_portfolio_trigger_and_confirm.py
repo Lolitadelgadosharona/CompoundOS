@@ -521,7 +521,8 @@ def test_alembic_revision_chain_valid(postgres_engine) -> None:
     from alembic.script import ScriptDirectory
 
     config = Config("alembic.ini")
-    config.set_main_option("sqlalchemy.url", str(postgres_engine.url))
+    db_url = postgres_engine.url.render_as_string(hide_password=False)
+    config.set_main_option("sqlalchemy.url", db_url)
     script = ScriptDirectory.from_config(config)
 
     revisions = list(script.walk_revisions())
