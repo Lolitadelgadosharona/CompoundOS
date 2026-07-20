@@ -41,7 +41,7 @@ def _db_url(postgres_engine) -> str:
     test_url = os.environ.get("TEST_DATABASE_URL", "").strip()
     if test_url:
         return test_url
-    return str(postgres_engine.url)
+    return postgres_engine.url.render_as_string(hide_password=False)
 
 
 def _fresh_engine(postgres_engine):
