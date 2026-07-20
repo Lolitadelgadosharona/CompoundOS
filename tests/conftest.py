@@ -49,8 +49,6 @@ def postgres_test_database_url() -> str:
 # Table discovery — auto-detect existing application tables
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Tables that migration lifecycle tests may drop/recreate.
-# We discover at runtime, not hardcode.
 _SYSTEM_TABLES = frozenset({"alembic_version", "spatial_ref_sys"})
 
 
@@ -64,11 +62,7 @@ def _application_table_names(engine: Engine) -> list[str]:
 
 
 def _truncate_all_tables(engine: Engine) -> None:
-    """TRUNCATE all application tables that currently exist.
-
-    Uses table auto-discovery so migration lifecycle tests that
-    downgrade/upgrade don't break TRUNCATE with UndefinedTable errors.
-    """
+    """TRUNCATE all application tables that currently exist."""
     tables = _application_table_names(engine)
     if not tables:
         return
@@ -93,6 +87,27 @@ def _ensure_schema_at_head(engine: Engine) -> None:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Isolation counter — verification that cleanup runs exactly once per test
+# ═══════════════════════════════════════════════════════════════════════════
+
+_isolation_call_count: dict[str, int] = {}
+
+
+def _bump_isolation_counter(test_nodeid: str) -> int:
+    key = test_nodeid
+    _isolation_call_count[key] = _isolation_call_count.get(key, 0) + 1
+    return _isolation_call_count[key]
+
+
+def reset_isolation_counter() -> None:
+    _isolation_call_count.clear()
+
+
+def get_isolation_counter() -> dict[str, int]:
+    return dict(_isolation_call_count)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Fixtures
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -103,7 +118,7 @@ def postgres_engine() -> Generator[Engine, None, None]:
     engine = create_engine(
         database_url,
         pool_pre_ping=True,
-        connect_args={"options": "-c timezone=America/Los_Angeles"},
+        connect_args={"options": "-c timezone=UTC"},
     )
     try:
         with engine.connect() as connection:
@@ -114,33 +129,44 @@ def postgres_engine() -> Generator[Engine, None, None]:
 
 
 @pytest.fixture()
-def db_session(postgres_engine: Engine) -> Generator[Session, None, None]:
-    """Function-scoped clean database session.
+def postgres_test_isolation(
+    postgres_engine: Engine, request: pytest.FixtureRequest,
+) -> Generator[None, None, None]:
+    """Function-scoped: schema head + TRUNCATE — exactly once per test.
 
-    Before each test:
-      1. Upgrade schema to head (idempotent)
-      2. TRUNCATE all application tables (runtime-discovered)
-
-    After:
-      - Auto rollback/close via context manager
+    Both db_session and api_client depend on this fixture.  When a single
+    test requests both, pytest runs this fixture exactly once — no double
+    TRUNCATE.  Only active for postgres-marked tests.
     """
     _ensure_schema_at_head(postgres_engine)
     _truncate_all_tables(postgres_engine)
+    _bump_isolation_counter(request.node.nodeid)
+    yield
+
+
+@pytest.fixture()
+def db_session(
+    postgres_test_isolation: None,
+    postgres_engine: Engine,
+) -> Generator[Session, None, None]:
+    """Function-scoped clean database session.
+
+    Relies on postgres_test_isolation for schema-head + TRUNCATE.
+    """
     factory = sessionmaker(bind=postgres_engine, expire_on_commit=False)
     with factory() as session:
         yield session
 
 
 @pytest.fixture()
-def api_client(postgres_engine: Engine) -> Generator[TestClient, None, None]:
+def api_client(
+    postgres_test_isolation: None,
+    postgres_engine: Engine,
+) -> Generator[TestClient, None, None]:
     """Function-scoped TestClient with clean database.
 
-    Each test gets a fresh TRUNCATE before the TestClient is created.
-    FastAPI handlers get a new Session per request via dependency override.
+    Relies on postgres_test_isolation for schema-head + TRUNCATE.
     """
-    _ensure_schema_at_head(postgres_engine)
-    _truncate_all_tables(postgres_engine)
-
     factory = sessionmaker(bind=postgres_engine, expire_on_commit=False)
 
     def override_session() -> Generator[Session, None, None]:

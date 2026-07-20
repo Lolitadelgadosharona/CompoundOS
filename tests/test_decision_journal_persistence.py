@@ -565,10 +565,13 @@ def test_decision_date_today_allowed(db_session: Session, postgres_engine: Engin
 
 def test_decision_date_tomorrow_rejected(db_session: Session, postgres_engine: Engine) -> None:
     with postgres_engine.connect() as conn:
+        conn.execute(text("SET LOCAL TIME ZONE 'UTC'"))
+        db_today = conn.scalar(text("SELECT CURRENT_DATE"))
+
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
-        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        tomorrow = (db_today + timedelta(days=1)).isoformat()
         with pytest.raises(Exception) as exc:
             confirm_decision(
                 conn, did, drid, vid, decision_date=tomorrow
