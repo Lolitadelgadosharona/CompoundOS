@@ -1,10 +1,9 @@
 # Sprint 006 — Open Questions
 
-> **ALL 15 OWNER DECISIONS RESOLVED (2026-07-20).**
+> **ALL 15 OWNER DECISIONS RESOLVED AND IMPLEMENTED (2026-07-20).**
 >
-> Implementation remains NOT AUTHORIZED.  All slices require separate
-> explicit Owner authorization.  See `SPRINT_006_TECHNICAL_DESIGN.md`
-> for the resolved design and Owner decisions.
+> Sprint 006 is DONE.  See `SPRINT_006_TECHNICAL_DESIGN.md` for the
+> resolved design and `docs/CHANGELOG.md` for full sprint history.
 
 ## Resolution Summary
 
