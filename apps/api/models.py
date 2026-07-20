@@ -1514,6 +1514,7 @@ class BackupRecord(Base):
     status: Mapped[str] = mapped_column(String, nullable=False)
     retention_category: Mapped[Optional[str]] = mapped_column(String)
     restore_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    restore_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     error_detail: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -1546,3 +1547,14 @@ class ExportTask(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class WorkerHeartbeat(Base):
+    __tablename__ = "worker_heartbeats"
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    worker_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    instance_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    heartbeat_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    stopped_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

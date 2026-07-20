@@ -1,13 +1,17 @@
-"""Sprint 007 Slice B — Component health checks.
+"""Sprint 007 Slice B — Component health checks V2 (integrity hardened).
 
-Read-only. Never writes, mutates, repairs, or restores.
-All time is injectable via clock parameter (default: utcnow).
+Changes from V1:
+- Worker: uses worker_heartbeats table, not MAX(runs.started_at)
+- Restore: requires restore_verified_at timestamp within freshness window
+- Backup: verifies artifact file exists + is regular file
+- Mutation gate: middleware blocks writes on DB/schema failure
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 from sqlalchemy import text
@@ -22,9 +26,11 @@ UNKNOWN = "unknown"
 ALLOWED_STATUSES = {HEALTHY, DEGRADED, UNAVAILABLE, STALE, UNKNOWN}
 RPO_HOURS = 24
 BACKUP_STALE_HOURS = 25
-WORKER_STALE_MINUTES = 30
+WORKER_HEARTBEAT_MINUTES = 5
+WORKER_STALE_MINUTES = 15
+RESTORE_FRESH_DAYS = 30
 GUARDIAN_STALE_HOURS = 48
-EXPECTED_MIGRATION_HEAD = "0013_backup_export_foundation"
+EXPECTED_MIGRATION_HEAD = "0014_health_integrity"
 
 
 @dataclass
@@ -62,8 +68,7 @@ def check_migration_head(session: Session, now: datetime) -> ComponentHealth:
         current = row[0]
         if current != EXPECTED_MIGRATION_HEAD:
             return ComponentHealth(
-                "migration", DEGRADED,
-                f"Head mismatch: {current}", now)
+                "migration", DEGRADED, f"Head mismatch: {current}", now)
         return ComponentHealth("migration", HEALTHY, f"Head {current}", now)
     except Exception as e:
         return ComponentHealth("migration", UNAVAILABLE, _safe(str(e)), now)
@@ -72,15 +77,29 @@ def check_migration_head(session: Session, now: datetime) -> ComponentHealth:
 def check_backup(session: Session, now: datetime) -> ComponentHealth:
     try:
         row = session.execute(text(
-            "SELECT completed_at FROM backup_records"
+            "SELECT completed_at, file_path, sha256 FROM backup_records"
             " WHERE status='completed' ORDER BY completed_at DESC LIMIT 1"
         )).fetchone()
         if not row:
             return ComponentHealth("backup", UNKNOWN, "No backup found", now)
-        last = row[0]
-        if last is None:
+        completed_at, file_path, sha256 = row
+        if not completed_at:
             return ComponentHealth("backup", UNKNOWN, "No completion time", now)
-        age_hours = (now - last).total_seconds() / 3600
+        age_hours = (now - completed_at).total_seconds() / 3600
+
+        if file_path and sha256:
+            try:
+                p = Path(file_path)
+                if not p.exists():
+                    return ComponentHealth("backup", STALE,
+                                           "Artifact missing", now)
+                if not p.is_file():
+                    return ComponentHealth("backup", STALE,
+                                           "Artifact not a file", now)
+            except OSError:
+                return ComponentHealth("backup", STALE,
+                                       "Artifact unreadable", now)
+
         if age_hours <= RPO_HOURS:
             return ComponentHealth("backup", HEALTHY,
                                    f"Last {age_hours:.1f}h ago", now,
@@ -89,8 +108,7 @@ def check_backup(session: Session, now: datetime) -> ComponentHealth:
             return ComponentHealth("backup", DEGRADED,
                                    f"Old {age_hours:.1f}h", now)
         return ComponentHealth("backup", STALE,
-                               f"Stale {age_hours:.1f}h — RPO {RPO_HOURS}h",
-                               now)
+                               f"Stale {age_hours:.1f}h — RPO {RPO_HOURS}h", now)
     except Exception as e:
         return ComponentHealth("backup", UNKNOWN, _safe(str(e)), now)
 
@@ -100,13 +118,20 @@ def check_restore_verification(
 ) -> ComponentHealth:
     try:
         row = session.execute(text(
-            "SELECT 1 FROM backup_records WHERE restore_verified=TRUE LIMIT 1"
+            "SELECT restore_verified_at FROM backup_records"
+            " WHERE restore_verified=TRUE AND restore_verified_at IS NOT NULL"
+            " ORDER BY restore_verified_at DESC LIMIT 1"
         )).fetchone()
-        if row:
+        if not row or not row[0]:
+            return ComponentHealth("restore_verification", UNKNOWN,
+                                   "No restore verified", now)
+        verified_at = row[0]
+        age_days = (now - verified_at).total_seconds() / 86400
+        if age_days <= RESTORE_FRESH_DAYS:
             return ComponentHealth("restore_verification", HEALTHY,
-                                   "Restore verified", now)
-        return ComponentHealth("restore_verification", UNKNOWN,
-                               "No restore verified", now)
+                                   f"Last verified {age_days:.0f}d ago", now)
+        return ComponentHealth("restore_verification", STALE,
+                               f"Last verified {age_days:.0f}d ago", now)
     except Exception as e:
         return ComponentHealth("restore_verification", UNKNOWN,
                                _safe(str(e)), now)
@@ -115,15 +140,23 @@ def check_restore_verification(
 def check_worker(session: Session, now: datetime) -> ComponentHealth:
     try:
         row = session.execute(text(
-            "SELECT MAX(started_at) FROM runs")).fetchone()
-        if not row or row[0] is None:
-            return ComponentHealth("worker", UNKNOWN, "No runs", now)
-        age_minutes = (now - row[0]).total_seconds() / 60
-        if age_minutes <= WORKER_STALE_MINUTES:
+            "SELECT heartbeat_at, stopped_at FROM worker_heartbeats"
+            " WHERE stopped_at IS NULL"
+            " ORDER BY heartbeat_at DESC LIMIT 1"
+        )).fetchone()
+        if not row:
+            return ComponentHealth("worker", UNKNOWN,
+                                   "No heartbeat recorded", now)
+        heartbeat_at, stopped_at = row
+        age_minutes = (now - heartbeat_at).total_seconds() / 60
+        if age_minutes <= WORKER_HEARTBEAT_MINUTES:
             return ComponentHealth("worker", HEALTHY,
-                                   f"Last {age_minutes:.0f}m ago", now)
+                                   f"Heartbeat {age_minutes:.0f}m ago", now)
+        if age_minutes <= WORKER_STALE_MINUTES:
+            return ComponentHealth("worker", DEGRADED,
+                                   f"Heartbeat {age_minutes:.0f}m ago", now)
         return ComponentHealth("worker", STALE,
-                               f"Last {age_minutes:.0f}m ago", now)
+                               f"Heartbeat {age_minutes:.0f}m ago", now)
     except Exception as e:
         return ComponentHealth("worker", UNKNOWN, _safe(str(e)), now)
 

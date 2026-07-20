@@ -3,6 +3,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from apps.api.mutation_gate import mutation_gate
 from apps.api.routers.automation import router as automation_router
 from apps.api.routers.backup import router as backup_router
 from apps.api.routers.committee import router as committee_router
@@ -14,6 +15,8 @@ from apps.api.routers.policies import router as policies_router
 from apps.api.routers.portfolios import router as portfolios_router
 
 app = FastAPI(title="CompoundOS API", version="0.1.0")
+
+app.middleware("http")(mutation_gate)
 
 app.add_middleware(
     CORSMiddleware,

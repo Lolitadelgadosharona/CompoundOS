@@ -201,12 +201,12 @@ class TestRestoreVerification:
 
 
 class TestMigration:
-    def test_migration_head_is_0013(self, db_session: Session) -> None:
+    def test_migration_head_is_0014(self, db_session: Session) -> None:
         row = db_session.execute(text(
             "SELECT version_num FROM alembic_version"
         )).fetchone()
         assert row is not None
-        assert row[0] == "0013_backup_export_foundation"
+        assert row[0] == "0014_health_integrity"
 
     def test_backup_records_table_exists(self, db_session: Session) -> None:
         db_session.execute(text("SELECT 1 FROM backup_records LIMIT 0"))
