@@ -14,6 +14,7 @@ export default function HomePage() {
         <Link href="/decisions">Open Decision Journal</Link>
         <Link href="/guardian">Open Guardian Monitoring</Link>
         <Link href="/automation">Open Automation</Link>
+        <Link href="/committee">Open AI Investment Committee</Link>
       </nav>
     </main>
   );
