@@ -1,5 +1,10 @@
 # Sprint 005 — Technical Design Gate
 
+> **STATUS: Implemented / Done (2026-07-20).**  All 15 Owner Decisions resolved
+> and implemented across PRs #38–#48.  Migration chain 0008–0011, 9 Automation
+> endpoints, standalone Worker, /automation frontend, 431 PG / 136 non-PG /
+> 217 frontend test baseline.  See docs/CHANGELOG.md for full sprint history.
+
 ## Executive Summary
 
 Three candidates evaluated. **Orchestration Foundation (B)** is recommended as the next logical infrastructure layer — Guardian is the first real consumer that needs scheduled evaluation, but Orchestration itself is a general-purpose infrastructure service that unlocks all future automated workflows.

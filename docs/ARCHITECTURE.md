@@ -332,3 +332,80 @@ or Slice A persistence design:
 Slice C adds no backend module, database change, dependency, authentication,
 recommendation, Guardian, AI, Broker, trading, market data, or Sprint 004
 behavior.
+
+## Sprint 005 Architecture — Data Orchestration Foundation
+
+### Persistence Layer
+
+Five tables across migrations 0008–0011:
+
+- **job_definitions**: job_type + job_params (JSONB).  Created automatically when
+  a schedule is created.  job_type constrained to approved allowlist.
+- **schedules**: execution_time + timezone + next_run_at + enabled.
+  Daily-only scheduling.  Idempotency key = SHA256(job_type || params || date).
+- **runs**: status lifecycle pending→running→completed/failed/aborted.
+  One active run per schedule enforced by partial unique index.
+- **attempts**: track individual execution attempts with status and error_message.
+- **leases**: fencing_token, worker_id, acquired_at, heartbeat_at, expires_at, released_at.
+  Fencing token protocol v4: atomic takeover (token = OLD + 1), expiry enforcement,
+  complete window refresh required.  Heartbeat and finalize require five conditions:
+  id + worker_id + fencing_token + released_at IS NULL + expires_at > now.
+
+### Worker Architecture
+
+The Worker is a standalone process that connects directly to PostgreSQL — it does
+NOT call the FastAPI HTTP server.  This eliminates the HTTP loopback dependency
+and keeps Guardian evaluation + Automation state in a single database transaction.
+
+Claim loop: claim_due_schedules (FOR UPDATE SKIP LOCKED) → per-schedule transaction:
+  create_run (idempotency key) → advance_next_run_at → create_attempt →
+  acquire_lease → execute with timeout → finalize + release in one commit.
+
+Guardian evaluation uses a transaction-neutral core (`evaluate_core`) that never
+commits.  The Worker child process calls it within a single `session.begin()` block:
+  1. Guardian evaluation (NO lease lock — heartbeat can update freely)
+  2. Final FOR UPDATE on lease (clock_timestamp() for expiry validation)
+  3. Finalize attempt + run + release lease → atomic COMMIT
+
+This ensures Guardian effects and Automation state are all-or-nothing.
+
+### Constants (per Technical Design)
+
+- LEASE_TTL_SECONDS = 60
+- HEARTBEAT_INTERVAL_SECONDS = 15
+- MAX_RUNTIME_SECONDS = 300
+- GRACEFUL_SHUTDOWN_SECONDS = 30
+
+### Timeout and Crash Recovery
+
+- Real multiprocessing spawn child processes with queue-based readiness signaling.
+- Parent joins with timeout; on expiry: terminate() → wait → kill() → wait.
+- Killed child's uncommitted transaction is rolled back by PostgreSQL (TCP disconnect).
+- StaleRunReaper recovers runs stuck in 'running' with expired leases on startup.
+  Uses atomic FOR UPDATE with bool return to prevent double-counting.
+
+### Automation API (9 endpoints)
+
+All under /api/automation:
+- POST/GET /schedules, GET/PATCH/DELETE /schedules/{id}
+- GET /runs, GET /runs/{id}, POST /runs (manual trigger)
+- GET /worker/status (read-only)
+
+### Automation Frontend (/automation)
+
+- Schedule management: create/edit/enable/disable/delete with explicit confirmation.
+- New schedules created disabled by default; enable requires separate explicit action.
+- Manual trigger creates a new Run (never modifies existing Run).
+- Worker status display only — no start/stop/restart controls.
+- Independent AbortControllers for core workspace, schedule detail, runs, and worker.
+- 409 conflict preserves local input with explicit reload.
+
+### PostgreSQL Test Isolation
+
+- Single function-scoped `postgres_test_isolation` fixture shared by db_session + api_client.
+- Table auto-discovery: `inspect(engine).get_table_names()` for runtime TRUNCATE.
+- Connection timezone = UTC default (connect_args).  Tests needing different timezones
+  use `SET LOCAL TIME ZONE` which auto-resets at transaction end.
+- All date-boundary tests source dates from PostgreSQL `CURRENT_DATE`, never
+  Python `date.today()`.
+- COMPOUNDOS_REQUIRE_POSTGRES_TESTS=1 enforcement (0 skipped).
