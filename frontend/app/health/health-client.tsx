@@ -12,8 +12,6 @@ import { getFullHealth, type HealthResult, type ComponentHealth } from "../../li
 const STATUS_LABELS: Record<string, string> = {
   healthy: "Healthy", degraded: "Degraded", unavailable: "Unavailable", stale: "Stale", unknown: "Unknown",
 };
-  healthy: "green", degraded: "orange", unavailable: "red", stale: "yellow", unknown: "gray",
-};
 
 const NOTE = "Health dashboard is read-only. No repair, restart, or restore actions are available here.";
 
