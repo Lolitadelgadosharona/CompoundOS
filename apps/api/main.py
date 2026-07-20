@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from apps.api.routers.automation import router as automation_router
+from apps.api.routers.backup import router as backup_router
 from apps.api.routers.committee import router as committee_router
 from apps.api.routers.decisions import router as decisions_router
 from apps.api.routers.guardian import router as guardian_router
@@ -51,3 +52,4 @@ app.include_router(decisions_router)
 app.include_router(portfolios_router)
 app.include_router(guardian_router)
 app.include_router(committee_router)
+app.include_router(backup_router)

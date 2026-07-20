@@ -79,7 +79,7 @@ def _setup_run(session: Session, hid: str, jid: str, *,
 # ── Migration ──
 
 
-def test_migration_head_is_0012(postgres_engine: Engine) -> None:
+def test_migration_head_is_0013(postgres_engine: Engine) -> None:
     from alembic.config import Config
     from alembic.script import ScriptDirectory
     cfg = Config()
@@ -87,7 +87,7 @@ def test_migration_head_is_0012(postgres_engine: Engine) -> None:
     script = ScriptDirectory.from_config(cfg)
     heads = script.get_heads()
     assert len(heads) == 1
-    assert heads[0] == "0012_ai_committee_foundation"
+    assert heads[0] == "0013_backup_export_foundation"
 
 
 # ── CHECK constraints ──

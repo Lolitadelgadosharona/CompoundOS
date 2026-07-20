@@ -1479,3 +1479,70 @@ class CommitteeOutcome(Base):
     session: Mapped["CommitteeSession"] = relationship(
         "CommitteeSession", back_populates="outcomes",
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Sprint 007 Slice A — Backup & Export
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class BackupRecord(Base):
+    __tablename__ = "backup_records"
+    __table_args__ = (
+        CheckConstraint(
+            "backup_type IN ('full')",
+            name="ck_backup_records_backup_type",
+        ),
+        CheckConstraint(
+            "status IN ('requested', 'running', 'verifying', 'completed', 'failed', 'expired')",
+            name="ck_backup_records_status",
+        ),
+        CheckConstraint(
+            "retention_category IS NULL OR retention_category IN ('daily', 'weekly', 'monthly', 'locked')",
+            name="ck_backup_records_retention_category",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    backup_type: Mapped[str] = mapped_column(String, nullable=False)
+    file_path: Mapped[str] = mapped_column(Text, nullable=False)
+    file_size_bytes: Mapped[Optional[int]] = mapped_column(BigInteger)
+    sha256: Mapped[Optional[str]] = mapped_column(String(64))
+    encryption: Mapped[Optional[str]] = mapped_column(String)
+    age_recipient: Mapped[Optional[str]] = mapped_column(Text)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    retention_category: Mapped[Optional[str]] = mapped_column(String)
+    restore_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    error_detail: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ExportTask(Base):
+    __tablename__ = "export_tasks"
+    __table_args__ = (
+        CheckConstraint(
+            "entity_type IN ('household', 'policy', 'portfolio', 'decisions', 'committee_sessions')",
+            name="ck_export_tasks_entity_type",
+        ),
+        CheckConstraint(
+            "format IN ('csv', 'json')",
+            name="ck_export_tasks_format",
+        ),
+        CheckConstraint(
+            "status IN ('running', 'completed', 'failed')",
+            name="ck_export_tasks_status",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    entity_type: Mapped[str] = mapped_column(String, nullable=False)
+    format: Mapped[str] = mapped_column(String, nullable=False)
+    file_path: Mapped[str] = mapped_column(Text, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    row_count: Mapped[Optional[int]] = mapped_column(Integer)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
