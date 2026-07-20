@@ -605,20 +605,36 @@ def test_decision_date_boundary_timezone_sensitive(
     db_session: Session,
     postgres_engine: Engine,
 ) -> None:
+    """Verify that date checks respect the database timezone.
+
+    Uses SET LOCAL TIME ZONE 'UTC' which auto-resets at transaction
+    end — no pool contamination.
+    """
     with postgres_engine.connect() as conn:
-        conn.execute(text("SET TIME ZONE 'UTC'"))
-        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        conn.execute(text("SET LOCAL TIME ZONE 'UTC'"))
+        db_today = conn.scalar(text("SELECT CURRENT_DATE"))
+        yesterday = db_today - timedelta(days=1)
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
         confirm_decision(
-            conn, did, drid, vid, decision_date=yesterday
+            conn, did, drid, vid,
+            decision_date=yesterday.isoformat(),
         )
         conn.commit()
 
 
 def test_correction_uses_same_date_boundary(db_session: Session, postgres_engine: Engine) -> None:
+    """Correction date must not be in the future — validated by DB clock.
+
+    Reads CURRENT_DATE from PostgreSQL in a SET LOCAL UTC transaction
+    so that tomorrow = DB_CURRENT_DATE + 1 day.  No Python date.today().
+    SET LOCAL auto-resets at commit — no pool contamination.
+    """
     with postgres_engine.connect() as conn:
+        conn.execute(text("SET LOCAL TIME ZONE 'UTC'"))
+        db_today = conn.scalar(text("SELECT CURRENT_DATE"))
+
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
@@ -628,7 +644,7 @@ def test_correction_uses_same_date_boundary(db_session: Session, postgres_engine
         make_correction(conn, did, sid)
         conn.commit()
 
-        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        tomorrow = (db_today + timedelta(days=1)).isoformat()
         with pytest.raises(Exception) as exc:
             make_correction(
                 conn,
