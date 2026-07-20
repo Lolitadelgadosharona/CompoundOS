@@ -74,10 +74,6 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Add AI Investment Committee workflows
 - Add notification escalation capabilities
 
-## In Progress
-
-- Sprint 004: Not Authorized / Not Started
-
 ## Done
 
 - Sprint 001: Project Foundation
