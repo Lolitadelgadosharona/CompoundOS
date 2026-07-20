@@ -292,6 +292,7 @@ _TAKEOVER_SQL = (
     " released_at = NULL"
     " WHERE id = :lid"
     " AND fencing_token = :base"
+    " AND released_at IS NULL"
     " AND expires_at <= :as_of"
     " RETURNING fencing_token"
 )
