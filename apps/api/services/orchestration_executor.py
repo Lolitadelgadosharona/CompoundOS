@@ -162,7 +162,9 @@ def _run_job_in_child(
 
                 # ── Phase 3: Finalize Automation state ──
                 attempt_status = (
-                    "succeeded" if result.get("status") == "completed"
+                    "succeeded"
+                    if result.get("evaluation_run", {}).get("status", "").startswith(
+                        ("completed", "skipped"))
                     else "failed"
                 )
                 session.execute(text(
@@ -174,7 +176,9 @@ def _run_job_in_child(
                 })
 
                 run_status = (
-                    "completed" if result.get("status") == "completed"
+                    "completed"
+                    if result.get("evaluation_run", {}).get("status", "").startswith(
+                        ("completed", "skipped"))
                     else "failed"
                 )
                 session.execute(text(

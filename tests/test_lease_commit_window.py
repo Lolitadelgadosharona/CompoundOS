@@ -712,11 +712,10 @@ class TestGracefulShutdown:
         )
 
         assert result is not None, f"Child should return result, got {result}"
-        # The child returns evaluate_core's result dict which has
-        # 'evaluation_run' and 'events' keys.  A skipped evaluation
-        # (no policy in test env) is still a successful completion.
-        assert result.get("evaluation_run") is not None or result.get(
-            "status") == "completed", (
+        # The child returns evaluate_core's full result dict.
+        # Skipped evaluations (no policy) count as successful completion.
+        eval_status = result.get("evaluation_run", {}).get("status", "")
+        assert eval_status.startswith(("completed", "skipped")), (
             f"Child should complete, got {result}")
 
         with postgres_engine.begin() as verify:
