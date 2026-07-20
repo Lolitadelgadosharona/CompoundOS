@@ -961,11 +961,14 @@ def test_valuation_date_tomorrow_rejected(
     postgres_engine: Engine,
 ) -> None:
     with postgres_engine.connect() as conn:
+        conn.execute(text("SET LOCAL TIME ZONE 'UTC'"))
+        db_today = conn.scalar(text("SELECT CURRENT_DATE"))
+
         hid = create_household(conn)
         pid = create_portfolio_with_draft(conn, hid)
         conn.commit()
 
-        tomorrow = date.today() + timedelta(days=1)
+        tomorrow = db_today + timedelta(days=1)
         assert_db_error(
             conn,
             "ck_portfolio_draft_holdings_valuation_date",
@@ -986,11 +989,14 @@ def test_snapshot_valuation_date_tomorrow_rejected(
     postgres_engine: Engine,
 ) -> None:
     with postgres_engine.connect() as conn:
+        conn.execute(text("SET LOCAL TIME ZONE 'UTC'"))
+        db_today = conn.scalar(text("SELECT CURRENT_DATE"))
+
         hid = create_household(conn)
         pid = create_portfolio_with_draft(conn, hid)
         conn.commit()
 
-        tomorrow = date.today() + timedelta(days=1)
+        tomorrow = db_today + timedelta(days=1)
         assert_db_error(
             conn,
             "ck_portfolio_snapshots_date",
