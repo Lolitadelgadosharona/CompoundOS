@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -544,10 +544,12 @@ def test_draft_text_length_constraints(db_session: Session, postgres_engine: Eng
 
 def test_decision_date_yesterday_allowed(db_session: Session, postgres_engine: Engine) -> None:
     with postgres_engine.connect() as conn:
+        conn.execute(text("SET LOCAL TIME ZONE 'UTC'"))
+        db_today = conn.scalar(text("SELECT CURRENT_DATE"))
+        yesterday = (db_today - timedelta(days=1)).isoformat()
         hid = create_household(conn)
         vid = create_policy_version(conn, hid)
         did, drid = create_decision_with_draft(conn, hid)
-        yesterday = (date.today() - timedelta(days=1)).isoformat()
         confirm_decision(
             conn, did, drid, vid, decision_date=yesterday
         )

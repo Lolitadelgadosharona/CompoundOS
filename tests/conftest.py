@@ -87,27 +87,6 @@ def _ensure_schema_at_head(engine: Engine) -> None:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Isolation counter — verification that cleanup runs exactly once per test
-# ═══════════════════════════════════════════════════════════════════════════
-
-_isolation_call_count: dict[str, int] = {}
-
-
-def _bump_isolation_counter(test_nodeid: str) -> int:
-    key = test_nodeid
-    _isolation_call_count[key] = _isolation_call_count.get(key, 0) + 1
-    return _isolation_call_count[key]
-
-
-def reset_isolation_counter() -> None:
-    _isolation_call_count.clear()
-
-
-def get_isolation_counter() -> dict[str, int]:
-    return dict(_isolation_call_count)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
 # Fixtures
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -130,7 +109,7 @@ def postgres_engine() -> Generator[Engine, None, None]:
 
 @pytest.fixture()
 def postgres_test_isolation(
-    postgres_engine: Engine, request: pytest.FixtureRequest,
+    postgres_engine: Engine,
 ) -> Generator[None, None, None]:
     """Function-scoped: schema head + TRUNCATE — exactly once per test.
 
@@ -140,7 +119,6 @@ def postgres_test_isolation(
     """
     _ensure_schema_at_head(postgres_engine)
     _truncate_all_tables(postgres_engine)
-    _bump_isolation_counter(request.node.nodeid)
     yield
 
 
