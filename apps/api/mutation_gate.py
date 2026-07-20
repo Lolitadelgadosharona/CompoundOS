@@ -12,7 +12,6 @@ from sqlalchemy import text
 
 from apps.api.database import SessionLocal
 
-
 MUTATION_METHODS = {"POST", "PATCH", "PUT", "DELETE"}
 ALLOWED_PATHS = {"/api/health/live", "/api/health/ready", "/api/health/full"}
 
