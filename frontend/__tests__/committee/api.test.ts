@@ -2,8 +2,10 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 
 import {
   createSession,
+  getEvidence,
   getPrivacyPreview,
   getReport,
+  getRunStatus,
   getSession,
   listSessions,
   recordOutcome,
@@ -53,8 +55,8 @@ describe("Committee API client — exact 9 methods/paths", () => {
 
   it("6. GET /api/committee/runs/{id}", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ status: "completed" })));
-    await runSession("s1");
-    expect((fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0]).toContain("/run");
+    await getRunStatus("s1");
+    expect((fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0]).toContain("/runs/s1");
   });
 
   it("7. GET /api/committee/reports/{id}", async () => {
@@ -65,8 +67,8 @@ describe("Committee API client — exact 9 methods/paths", () => {
 
   it("8. GET /api/committee/evidence/{session_id}", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json([])));
-    await listSessions();
-    expect((fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0]).toContain("/sessions");
+    await getEvidence("s1");
+    expect((fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0]).toContain("/evidence/s1");
   });
 
   it("9. POST /api/committee/outcomes", async () => {

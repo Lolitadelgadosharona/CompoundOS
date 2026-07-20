@@ -8,6 +8,7 @@ import {
   createSession,
   getPrivacyPreview,
   getReport,
+  getRunStatus,
   getSession,
   listSessions,
   recordOutcome,
@@ -109,6 +110,7 @@ export default function CommitteeClient() {
 
   // ── Abort ──
   const abortRef = useRef<AbortController | null>(null);
+  const runAbortRef = useRef<AbortController | null>(null);
   const genRef = useRef(0);
 
   function newGen(): number { genRef.current += 1; return genRef.current; }
@@ -143,7 +145,7 @@ export default function CommitteeClient() {
 
   useEffect(() => {
     loadList();
-    return () => abortRef.current?.abort();
+    return () => { abortRef.current?.abort(); runAbortRef.current?.abort(); };
   }, [loadList]);
 
   // ═════════════════════════════════════════════════════════════════════════
@@ -194,7 +196,9 @@ export default function CommitteeClient() {
     setRunning(true);
     setError(null);
     try {
-      const result = await runSession(selectedId);
+      const ac = new AbortController();
+      runAbortRef.current = ac;
+      const result = await runSession(selectedId, ac.signal);
       if (result.status === "completed" && result.report_id) {
         await loadReport(result.report_id);
       } else {
@@ -203,7 +207,7 @@ export default function CommitteeClient() {
         const poll = async () => {
           if (attempts > 30) { setError("Session timed out."); setView("detail"); setRunning(false); return; }
           attempts++;
-          const r = await runSession(selectedId);
+          const r = await getRunStatus(selectedId);
           if (r.status === "completed" && r.report_id) {
             await loadReport(r.report_id);
             setRunning(false);
