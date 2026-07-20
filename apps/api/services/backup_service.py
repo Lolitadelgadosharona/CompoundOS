@@ -15,6 +15,7 @@ from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
+from apps.api.config import get_database_url
 from apps.api.models import BackupRecord
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -43,7 +44,7 @@ def get_db_size_bytes(db_url: str) -> int:
 
 def get_db_size_bytes_via_pg_dump() -> int:
     """Estimate by checking current database size via psql."""
-    return get_db_size_bytes(DATABASE_URL)
+    return get_db_size_bytes(get_database_url())
 
 
 def is_cloud_sync_path(path: str) -> bool:

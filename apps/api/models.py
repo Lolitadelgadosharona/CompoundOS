@@ -1498,7 +1498,7 @@ class BackupRecord(Base):
             name="ck_backup_records_status",
         ),
         CheckConstraint(
-            "retention_category IS NULL OR retention_category IN ('daily', 'weekly', 'monthly', 'locked')",
+            "retention_category IS NULL OR retention_category IN ('daily', 'weekly', 'monthly', 'locked')",  # noqa: E501
             name="ck_backup_records_retention_category",
         ),
     )
@@ -1523,7 +1523,7 @@ class ExportTask(Base):
     __tablename__ = "export_tasks"
     __table_args__ = (
         CheckConstraint(
-            "entity_type IN ('household', 'policy', 'portfolio', 'decisions', 'committee_sessions')",
+            "entity_type IN ('household', 'policy', 'portfolio', 'decisions', 'committee_sessions')",  # noqa: E501
             name="ck_export_tasks_entity_type",
         ),
         CheckConstraint(

@@ -227,7 +227,7 @@ class TestMigration:
     def test_export_constraints_enforced(self, db_session: Session) -> None:
         with pytest.raises(Exception):
             db_session.execute(text(
-                "INSERT INTO export_tasks (id, entity_type, format, file_path, status, started_at, expires_at)"
+                "INSERT INTO export_tasks (id, entity_type, format, file_path, status, started_at, expires_at)"  # noqa: E501
                 " VALUES (:id, 'invalid', 'json', '/tmp/x.json', 'running', now(), now())"
             ), {"id": str(uuid4())})
             db_session.commit()

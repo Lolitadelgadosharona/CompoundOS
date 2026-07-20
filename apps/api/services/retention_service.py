@@ -32,7 +32,7 @@ def apply_retention(session: Session) -> int:
         return 0
 
     # Compute retention windows
-    now = datetime.now(timezone.utc)
+    _now = datetime.now(timezone.utc)
     keep_ids: set[str] = set()
 
     # Daily: last 7 distinct days

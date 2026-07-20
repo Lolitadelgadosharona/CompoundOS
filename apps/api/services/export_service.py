@@ -135,7 +135,7 @@ def _extract(
         )
         return [
             {
-                "id": str(s.id), "confirmed_at": s.confirmed_at.isoformat() if s.confirmed_at else None,
+                "id": str(s.id), "confirmed_at": s.confirmed_at.isoformat() if s.confirmed_at else None,  # noqa: E501
                 "valuation_date": s.valuation_date.isoformat() if s.valuation_date else None,
             }
             for s in snapshots
@@ -150,7 +150,7 @@ def _extract(
         )
         return [
             {
-                "id": str(d.id), "decision_date": d.decision_date.isoformat() if d.decision_date else None,
+                "id": str(d.id), "decision_date": d.decision_date.isoformat() if d.decision_date else None,  # noqa: E501
                 "title": d.title, "summary": d.summary,
             }
             for d in decisions
