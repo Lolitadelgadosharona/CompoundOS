@@ -23,48 +23,6 @@ def _utc_now() -> datetime:
 
 
 # ---------------------------------------------------------------------------
-# Transaction-neutral Guardian evaluation
-# ---------------------------------------------------------------------------
-
-
-def _evaluate_no_commit(
-    session: Any,  # sqlalchemy.orm.Session
-    household_id: str,
-    job_type: str,
-    job_params: dict,
-) -> dict:
-    """Run Guardian evaluation WITHOUT committing.
-
-    Returns {"status": "completed"} or {"status": "skipped"/"failed", ...}.
-    The caller is responsible for: lease validation, commit, rollback.
-    """
-    from datetime import date as _date
-
-    from apps.api.services.guardian import (
-        _evaluate as _guardian_eval_core,
-    )
-
-    try:
-        result = _guardian_eval_core(
-            session,
-            household_id=UUID(household_id),
-            as_of_date=_date.today(),
-            target_check_id=(
-                UUID(job_params["check_id"])
-                if job_type == "guardian.evaluate_one"
-                else None
-            ),
-        )
-        # _evaluate does session.commit() internally — we are in the same
-        # transaction, so this is the full evaluation commit.
-        # The caller then validates the lease and commits automation state.
-        # If lease validation fails, the caller rollbacks the entire transaction.
-        return {"status": "completed", "result": result}
-    except Exception as exc:
-        return {"status": "failed", "error": str(exc)[:500]}
-
-
-# ---------------------------------------------------------------------------
 # Lease validation (must run in same transaction as evaluation)
 # ---------------------------------------------------------------------------
 
@@ -72,7 +30,7 @@ def _evaluate_no_commit(
 _LEASE_VALIDATE_SQL = (
     "SELECT 1 FROM leases"
     " WHERE id = :lid AND worker_id = :wid AND fencing_token = :token"
-    " AND released_at IS NULL AND expires_at > :as_of"
+    " AND released_at IS NULL AND expires_at > clock_timestamp()"
 )
 
 
@@ -84,11 +42,16 @@ def validate_lease_for_commit(
     *,
     clock: Clock = _utc_now,
 ) -> bool:
-    """Check that the lease is still valid before committing."""
-    now = clock()
+    """Check that the lease is still valid before committing.
+
+    Uses PostgreSQL clock_timestamp() for the definitive wall-clock at
+    the instant of validation — not a transaction-start snapshot.
+    The `clock` parameter is retained for testability but is NOT used
+    in the SQL; the database clock is authoritative for the final gate.
+    """
     row = session.execute(
         __import__("sqlalchemy").text(_LEASE_VALIDATE_SQL),
-        {"lid": lease_id, "wid": worker_id, "token": fencing_token, "as_of": now},
+        {"lid": lease_id, "wid": worker_id, "token": fencing_token},
     ).fetchone()
     return row is not None
 
@@ -112,7 +75,17 @@ def _run_job_in_child(
     marker_table: str = "",
     marker_key: str = "",
 ) -> None:
-    """Execute Guardian evaluation + lease-validated commit in a child process.
+    """Execute Guardian evaluation + lease-validated fenced commit.
+
+    CRITICAL ORDER (Sprint 005 Slice B corrective):
+    1. Evaluate Guardian FIRST (no lease lock — parent heartbeat can update)
+    2. Lock lease FOR UPDATE at final commit window
+    3. If lease missing/expired: rollback entire transaction
+    4. Finalize attempt + run + release lease → atomic COMMIT
+
+    The FOR UPDATE lock covers only the short finalization window, NOT
+    the long Guardian evaluation.  Parent heartbeat connections update the
+    same lease row freely during evaluation.
 
     If marker_table/marker_key are provided, writes a test marker row
     to demonstrate that an uncommitted row is rolled back on kill.
@@ -139,28 +112,11 @@ def _run_job_in_child(
             # Notify parent we've reached the blocking point
             result_queue.put({"stage": "ready"})
 
-            # Short fenced transaction: lock lease, evaluate, finalize
+            # Single fenced transaction — lease lock at final window only
             with session.begin():
-                # Lock and validate lease with FOR UPDATE
-                row = session.execute(text(
-                    "SELECT 1 FROM leases"
-                    " WHERE id = :lid AND worker_id = :wid"
-                    " AND fencing_token = :token"
-                    " AND released_at IS NULL AND expires_at > :as_of"
-                    " FOR UPDATE"
-                ), {
-                    "lid": lease_id, "wid": worker_id,
-                    "token": fencing_token, "as_of": _utc_now(),
-                }).fetchone()
-
-                if row is None:
-                    result_queue.put({
-                        "status": "fenced",
-                        "error": "Lease lost before commit",
-                    })
-                    return
-
-                # Run Guardian evaluation (transaction-neutral — no commit)
+                # ── Phase 1: Guardian evaluation (NO lease lock) ──
+                # Parent heartbeat can freely UPDATE the lease row during
+                # this potentially long-running evaluation.
                 from datetime import date as _date
 
                 from apps.api.services.guardian import evaluate_core
@@ -176,9 +132,39 @@ def _run_job_in_child(
                     ),
                 )
 
-                # Complete attempt
+                # ── Phase 2: Final commit window ──
+                # Lock lease with FOR UPDATE and validate with
+                # PostgreSQL clock_timestamp() — the definitive wall-clock
+                # at the instant of validation, not a transaction-start
+                # snapshot.  This correctly detects lease expiry even when
+                # the evaluation ran for a long time.
+                row = session.execute(text(
+                    "SELECT 1 FROM leases"
+                    " WHERE id = :lid AND worker_id = :wid"
+                    " AND fencing_token = :token"
+                    " AND released_at IS NULL"
+                    " AND expires_at > clock_timestamp()"
+                    " FOR UPDATE"
+                ), {
+                    "lid": lease_id, "wid": worker_id,
+                    "token": fencing_token,
+                }).fetchone()
+
+                if row is None:
+                    # Lease was taken over or expired during evaluation.
+                    # Rollback the entire transaction — zero Guardian
+                    # effects persist.
+                    result_queue.put({
+                        "status": "fenced",
+                        "error": "Lease lost before final commit window",
+                    })
+                    return
+
+                # ── Phase 3: Finalize Automation state ──
                 attempt_status = (
-                    "succeeded" if result.get("status") == "completed"
+                    "succeeded"
+                    if result.get("evaluation_run", {}).get("status", "").startswith(
+                        ("completed", "skipped"))
                     else "failed"
                 )
                 session.execute(text(
@@ -189,9 +175,10 @@ def _run_job_in_child(
                     "err": result.get("error"),
                 })
 
-                # Complete run
                 run_status = (
-                    "completed" if result.get("status") == "completed"
+                    "completed"
+                    if result.get("evaluation_run", {}).get("status", "").startswith(
+                        ("completed", "skipped"))
                     else "failed"
                 )
                 session.execute(text(
@@ -199,14 +186,14 @@ def _run_job_in_child(
                     " WHERE id = :id"
                 ), {"id": run_id, "st": run_status})
 
-                # Release lease
+                # ── Phase 4: Release lease ──
                 session.execute(text(
                     "UPDATE leases SET released_at = NOW()"
                     " WHERE id = :lid AND worker_id = :wid"
                     " AND fencing_token = :token"
                 ), {"lid": lease_id, "wid": worker_id, "token": fencing_token})
 
-            # Transaction committed atomically
+            # Transaction committed atomically — all or nothing
             result_queue.put(result)
 
     except Exception as exc:
