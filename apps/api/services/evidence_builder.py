@@ -114,7 +114,7 @@ def _policy_evidence(
         source_type=SOURCE_POLICY,
         source_id=policy.id,
         title=f"Investment Policy v{policy.version_number}",
-        as_of=policy.sealed_at or policy.created_at,
+        as_of=policy.sealed_at or policy.published_at,
         facts=facts,
         citation=f"Policy v{policy.version_number}",
     )
@@ -163,7 +163,7 @@ def _portfolio_evidence(
         source_type=SOURCE_PORTFOLIO,
         source_id=snapshot.id,
         title=f"Portfolio Snapshot {snapshot.id}",
-        as_of=snapshot.confirmed_at or snapshot.created_at,
+        as_of=snapshot.confirmed_at or snapshot.valuation_date,
         facts=facts,
         citation="Portfolio Snapshot §Holdings",
     )

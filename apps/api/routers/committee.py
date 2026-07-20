@@ -310,7 +310,6 @@ def record_outcome(
         co = orch.record_outcome(
             session, cs, payload.outcome,
             owner_rationale=payload.owner_rationale,
-            create_decision_draft=payload.create_decision_draft,
         )
         return OutcomeResponse.model_validate(co)
     except ValueError as e:
