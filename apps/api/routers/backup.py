@@ -18,7 +18,7 @@ from apps.api.database import get_session
 from apps.api.models import BackupRecord, ExportTask
 from apps.api.services import backup_service, export_service, retention_service
 
-router = APIRouter(prefix="/api/backup", tags=["backup"])
+router = APIRouter(prefix="/api", tags=["backup"])
 
 
 def _require_household_id(session: Session) -> UUID:
@@ -66,6 +66,7 @@ def trigger_backup(
 
 @router.get("/backup/records", response_model=list[BackupRecordResponse])
 def list_backups(
+    # Note: single-household MVP — household isolation via DB singleton
     limit: int = 50,
     offset: int = 0,
     session: Session = Depends(get_session),
@@ -83,6 +84,7 @@ def list_backups(
 
 @router.get("/backup/records/{record_id}", response_model=BackupRecordResponse)
 def get_backup(
+    # Note: single-household MVP
     record_id: str,
     session: Session = Depends(get_session),
 ) -> BackupRecordResponse:
@@ -97,7 +99,7 @@ def get_backup(
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-@router.post("/export", response_model=ExportTaskResponse, status_code=201)
+@router.post("/backup/export", response_model=ExportTaskResponse, status_code=201)
 def trigger_export(
     payload: ExportTrigger,
     session: Session = Depends(get_session),
@@ -112,8 +114,9 @@ def trigger_export(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/export/tasks", response_model=list[ExportTaskResponse])
+@router.get("/backup/export/tasks", response_model=list[ExportTaskResponse])
 def list_exports(
+    # Note: single-household MVP
     limit: int = 50,
     offset: int = 0,
     session: Session = Depends(get_session),
@@ -129,8 +132,9 @@ def list_exports(
     return [ExportTaskResponse.model_validate(t) for t in tasks]
 
 
-@router.get("/export/tasks/{task_id}", response_model=ExportTaskResponse)
+@router.get("/backup/export/tasks/{task_id}", response_model=ExportTaskResponse)
 def get_export(
+    # Note: single-household MVP
     task_id: str,
     session: Session = Depends(get_session),
 ) -> ExportTaskResponse:
