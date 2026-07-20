@@ -12,7 +12,6 @@ import { getFullHealth, type HealthResult, type ComponentHealth } from "../../li
 const STATUS_LABELS: Record<string, string> = {
   healthy: "Healthy", degraded: "Degraded", unavailable: "Unavailable", stale: "Stale", unknown: "Unknown",
 };
-const STATUS_COLORS: Record<string, string> = {
   healthy: "green", degraded: "orange", unavailable: "red", stale: "yellow", unknown: "gray",
 };
 
@@ -40,7 +39,7 @@ export default function HealthClient() {
       const result = await getFullHealth(ac.signal);
       setHealth(result);
       setError(null);
-    } catch (err) {
+    } catch {
       if (!ac.signal.aborted) setError("Health service unavailable.");
     } finally {
       if (!ac.signal.aborted) setLoading(false);
@@ -48,6 +47,7 @@ export default function HealthClient() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
     return () => abortRef.current?.abort();
   }, [load]);
