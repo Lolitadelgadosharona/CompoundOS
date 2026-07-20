@@ -1,0 +1,50 @@
+"""Sprint 007 Slice C — Notification schemas."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Optional
+from uuid import UUID
+
+from pydantic import BaseModel, field_validator
+
+
+class NotificationEventResponse(BaseModel):
+    id: UUID
+    source: str
+    event_type: str
+    severity: str
+    title: str
+    body: str
+    delivery_status: str
+    suppressed_reason: Optional[str] = None
+    delivered_at: Optional[datetime] = None
+    acknowledged_at: Optional[datetime] = None
+    occurred_at: datetime
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class PreferencesResponse(BaseModel):
+    id: UUID
+    quiet_hours_start: str
+    quiet_hours_end: str
+    timezone: str
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class PreferencesUpdate(BaseModel):
+    quiet_hours_start: Optional[str] = None
+    quiet_hours_end: Optional[str] = None
+    timezone: Optional[str] = None
+
+    @field_validator("timezone")
+    @classmethod
+    def _check_tz(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            from zoneinfo import ZoneInfo
+            ZoneInfo(v)
+        return v

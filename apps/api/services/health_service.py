@@ -30,7 +30,7 @@ WORKER_HEARTBEAT_MINUTES = 5
 WORKER_STALE_MINUTES = 15
 RESTORE_FRESH_DAYS = 30
 GUARDIAN_STALE_HOURS = 48
-EXPECTED_MIGRATION_HEAD = "0014_health_integrity"
+EXPECTED_MIGRATION_HEAD = "0015_notification_foundation"
 
 
 @dataclass
@@ -230,9 +230,27 @@ def check_launchd(now: datetime) -> ComponentHealth:
         return ComponentHealth("launchd", UNKNOWN, _safe(str(e)), now)
 
 
-def check_notification(now: datetime) -> ComponentHealth:
-    return ComponentHealth("notification", UNKNOWN,
-                           "Slice C not implemented", now)
+def check_notification(session: Session, now: datetime) -> ComponentHealth:
+    try:
+        row = session.execute(text(
+            "SELECT delivery_status FROM notification_events"
+            " ORDER BY occurred_at DESC LIMIT 1"
+        )).fetchone()
+        if not row:
+            return ComponentHealth("notification", UNKNOWN,
+                                   "No events recorded", now)
+        last_status = row[0]
+        if last_status == "delivered":
+            return ComponentHealth("notification", HEALTHY,
+                                   "Last delivery successful", now)
+        if last_status == "failed":
+            return ComponentHealth("notification", DEGRADED,
+                                   "Last delivery failed", now)
+        return ComponentHealth("notification", UNKNOWN,
+                               f"Last status: {last_status}", now)
+    except Exception:
+        return ComponentHealth("notification", UNKNOWN,
+                               "Not configured", now)
 
 
 CRITICAL = {"database", "migration"}
@@ -278,7 +296,7 @@ def run_all_checks(
         lambda: check_guardian(session, now),
         lambda: check_credential(now),
         lambda: check_launchd(now),
-        lambda: check_notification(now),
+        lambda: check_notification(session, now),
     ]
 
     components: list[ComponentHealth] = []

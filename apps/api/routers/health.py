@@ -18,7 +18,7 @@ from apps.api.health_schemas import (
     LivenessResponse,
     ReadinessResponse,
 )
-from apps.api.services.health_service import EXPECTED_MIGRATION_HEAD, run_all_checks, _safe
+from apps.api.services.health_service import EXPECTED_MIGRATION_HEAD, _safe, run_all_checks
 
 router = APIRouter(prefix="/api/health", tags=["health"])
 

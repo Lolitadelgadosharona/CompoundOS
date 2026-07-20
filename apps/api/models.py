@@ -1558,3 +1558,42 @@ class WorkerHeartbeat(Base):
     heartbeat_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     stopped_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+class NotificationEvent(Base):
+    __tablename__ = "notification_events"
+    __table_args__ = (
+        CheckConstraint(
+            "source IN ('guardian', 'committee', 'automation', 'backup', 'health')",
+            name="ck_notification_events_source",
+        ),
+        CheckConstraint(
+            "severity IN ('info', 'warning', 'critical')",
+            name="ck_notification_events_severity",
+        ),
+        CheckConstraint(
+            "delivery_status IN ('pending', 'delivered', 'suppressed', 'failed')",
+            name="ck_notification_events_delivery_status",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    source: Mapped[str] = mapped_column(String, nullable=False)
+    event_type: Mapped[str] = mapped_column(String, nullable=False)
+    severity: Mapped[str] = mapped_column(String, nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    delivered_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    delivery_status: Mapped[str] = mapped_column(String, nullable=False)
+    suppressed_reason: Mapped[Optional[str]] = mapped_column(String)
+    acknowledged_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class NotificationPreferences(Base):
+    __tablename__ = "notification_preferences"
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    quiet_hours_start: Mapped[Any] = mapped_column(Time(timezone=False), nullable=False)
+    quiet_hours_end: Mapped[Any] = mapped_column(Time(timezone=False), nullable=False)
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
