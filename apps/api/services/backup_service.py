@@ -48,12 +48,11 @@ def get_db_size_bytes_via_pg_dump() -> int:
 
 
 def is_cloud_sync_path(path: str) -> bool:
-    """Detect known cloud-sync directories."""
-    resolved = os.path.realpath(path).lower()
-    for marker in CLOUD_SYNC_PATHS:
-        if marker.lower() in resolved:
-            return True
-    return False
+    """Detect known cloud-sync directories by path component matching."""
+    resolved = os.path.realpath(path)
+    components = set(c.lower() for c in Path(resolved).parts)
+    markers_lower = {m.lower() for m in CLOUD_SYNC_PATHS}
+    return bool(components & markers_lower)
 
 
 def check_destination(dest_dir: str, db_size: int) -> str | None:
@@ -100,30 +99,23 @@ def run_backup(
     dest = Path(dest_dir)
 
     try:
-        # Phase 1: Dump
+        # Phase 1: Dump + Encrypt (streaming, no plaintext on disk)
         record.status = "running"
         session.commit()
-        dump_path = _do_dump(db_url, dest, record)
-        record.file_size_bytes = os.path.getsize(str(dump_path))
-        session.commit()
-
-        # Phase 2: Encrypt
-        encrypted_path = _do_encrypt(dump_path, age_recipient)
-        os.unlink(str(dump_path))  # remove plaintext immediately
-        final_path = encrypted_path
-        record.file_size_bytes = os.path.getsize(str(final_path))
+        encrypted_path = _do_dump_and_encrypt(db_url, dest, age_recipient, record)
+        record.file_size_bytes = os.path.getsize(str(encrypted_path))
         record.encryption = "age"
         record.age_recipient = age_recipient
         session.commit()
 
-        # Phase 3: Hash
-        record.sha256 = _sha256_of(final_path)
+        # Phase 2: Hash (covers ciphertext for integrity verification)
+        record.sha256 = _sha256_of(encrypted_path)
         session.commit()
 
-        # Phase 4: Verify
+        # Phase 3: Verify
         record.status = "verifying"
         session.commit()
-        _do_verify(final_path, age_recipient)
+        _do_verify(encrypted_path, age_recipient)
 
         # Success
         record.status = "completed"
@@ -166,44 +158,40 @@ def _create_record(
     )
 
 
-def _do_dump(db_url: str, dest: Path, record: BackupRecord) -> Path:
-    """Run pg_dump --format=custom to temp file, atomic rename."""
-    tmp = dest / f".tmp_{record.id}.dump"
+def _do_dump_and_encrypt(
+    db_url: str, dest: Path, age_recipient: str, record: BackupRecord,
+) -> Path:
+    """Stream pg_dump stdout → age stdin → atomic write. No plaintext on disk."""
+    age_path = dest / f"{record.id}.age"
+    tmp_age = Path(str(age_path) + ".tmp")
     try:
-        result = subprocess.run(
-            ["pg_dump", "--format=custom", "--dbname", db_url,
-             "--file", str(tmp)],
-            capture_output=True, text=True, timeout=120,
+        dump_proc = subprocess.Popen(
+            ["pg_dump", "--format=custom", "--dbname", db_url],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
-        if result.returncode != 0:
-            raise RuntimeError(f"pg_dump failed: {_sanitize_error(result.stderr)}")
-        final = dest / f"{record.id}.dump"
-        os.rename(str(tmp), str(final))
-        os.chmod(str(final), 0o600)
-        return final
-    finally:
-        if tmp.exists():
-            tmp.unlink()
-
-
-def _do_encrypt(dump_path: Path, recipient: str) -> Path:
-    """Encrypt with age. Atomic write to .age file."""
-    age_path = Path(str(dump_path) + ".age")
-    tmp = Path(str(age_path) + ".tmp")
-    try:
-        result = subprocess.run(
-            ["age", "--encrypt", "-r", recipient,
-             "-o", str(tmp), str(dump_path)],
-            capture_output=True, text=True, timeout=60,
+        encrypt_proc = subprocess.Popen(
+            ["age", "--encrypt", "-r", age_recipient, "-o", str(tmp_age)],
+            stdin=dump_proc.stdout, stderr=subprocess.PIPE,
         )
-        if result.returncode != 0:
-            raise RuntimeError(f"age encrypt failed: {_sanitize_error(result.stderr)}")
-        os.rename(str(tmp), str(age_path))
+        if dump_proc.stdout is not None:
+            dump_proc.stdout.close()
+
+        dump_stderr = dump_proc.stderr.read() if dump_proc.stderr else b""
+        dump_rc = dump_proc.wait(timeout=120)
+        if dump_rc != 0:
+            raise RuntimeError(f"pg_dump failed (rc={dump_rc}): {_sanitize_error(dump_stderr.decode(errors='replace'))}")  # noqa: E501
+
+        encrypt_stderr = encrypt_proc.stderr.read() if encrypt_proc.stderr else b""
+        encrypt_rc = encrypt_proc.wait(timeout=60)
+        if encrypt_rc != 0:
+            raise RuntimeError(f"age encrypt failed (rc={encrypt_rc}): {_sanitize_error(encrypt_stderr.decode(errors='replace'))}")  # noqa: E501
+
+        os.rename(str(tmp_age), str(age_path))
         os.chmod(str(age_path), 0o600)
         return age_path
     finally:
-        if tmp.exists():
-            tmp.unlink()
+        if tmp_age.exists():
+            tmp_age.unlink()
 
 
 def _sha256_of(path: Path) -> str:

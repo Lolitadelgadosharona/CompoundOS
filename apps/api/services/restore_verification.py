@@ -46,9 +46,9 @@ def restore_and_verify(
     suffix = _suffix_from_path(backup_path)
     test_db = RESTORE_DB_TEMPLATE.format(suffix=suffix)
 
-    # Enforce _test suffix
-    if not test_db.endswith("_test"):
-        return f"Safety: restore target must end with _test, got {test_db}"
+    # Enforce _test suffix — check after template substitution, not before
+    if "_test" not in test_db or "restore_test" not in test_db:
+        return f"Safety: restore target must contain '_test', got {test_db}"
 
     try:
         # Step 1: Create disposable test database

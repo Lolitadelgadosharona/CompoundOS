@@ -174,6 +174,16 @@ def _extract(
     return [], {}
 
 
+def _sanitize_csv_row(row: dict) -> dict:
+    """Prefix formula-injection characters with single quote."""
+    result = {}
+    for k, v in row.items():
+        if isinstance(v, str) and v and v[0] in ("=", "+", "-", "@"):
+            result[k] = "'" + v
+        else:
+            result[k] = v
+    return result
+
 def _write_json(path: Path, rows: list[dict]) -> None:
     tmp = Path(str(path) + ".tmp")
     try:
@@ -195,7 +205,7 @@ def _write_csv(path: Path, rows: list[dict]) -> None:
         with open(str(tmp), "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
             w.writeheader()
-            w.writerows(rows)
+            w.writerows([_sanitize_csv_row(r) for r in rows])
         os.rename(str(tmp), str(path))
     finally:
         if tmp.exists():

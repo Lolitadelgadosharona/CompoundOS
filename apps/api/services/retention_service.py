@@ -56,22 +56,26 @@ def apply_retention(session: Session) -> int:
     keep_ids.add(str(latest.id))
     latest.retention_category = "locked"
 
-    # Delete
-    deleted = 0
+    # Phase 1: Mark records for deletion (DB operations only)
+    to_delete: list[str] = []
     for record in completed:
         if str(record.id) in keep_ids:
             if record.retention_category is None:
                 record.retention_category = _compute_category(record, daily, weekly, monthly)
             continue
-        # Safety: never delete if it's the last healthy backup
         if _is_last_healthy(session, record):
             record.retention_category = "locked"
             continue
-        _delete_artifact(str(record.file_path))
+        to_delete.append(str(record.file_path))
         session.delete(record)
-        deleted += 1
 
+    # Phase 2: Commit DB changes first
     session.commit()
+    deleted = len(to_delete)
+
+    # Phase 3: Delete files after DB commit — best-effort
+    for path in to_delete:
+        _delete_artifact(path)
     return deleted
 
 
