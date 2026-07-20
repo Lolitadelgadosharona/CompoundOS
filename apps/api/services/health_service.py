@@ -236,7 +236,7 @@ def check_notification(now: datetime) -> ComponentHealth:
 
 
 CRITICAL = {"database", "migration"}
-DEGRADING = {"backup", "leases", "worker", "credential", "guardian"}
+DEGRADING = {"backup", "leases", "worker", "credential", "guardian", "restore_verification"}
 
 
 def compute_overall(components: list[ComponentHealth]) -> str:
@@ -252,6 +252,8 @@ def compute_overall(components: list[ComponentHealth]) -> str:
             return DEGRADED
     for c in components:
         if c.status == UNKNOWN and c.component in CRITICAL:
+            return DEGRADED
+        if c.status == UNKNOWN and c.component in DEGRADING:
             return DEGRADED
     return HEALTHY
 

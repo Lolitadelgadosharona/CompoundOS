@@ -18,7 +18,7 @@ from apps.api.health_schemas import (
     LivenessResponse,
     ReadinessResponse,
 )
-from apps.api.services.health_service import EXPECTED_MIGRATION_HEAD, run_all_checks
+from apps.api.services.health_service import EXPECTED_MIGRATION_HEAD, run_all_checks, _safe
 
 router = APIRouter(prefix="/api/health", tags=["health"])
 
@@ -83,8 +83,3 @@ def full_health(session: Session = Depends(get_session)) -> HealthResponse:
         checked_at=result.checked_at,
     )
 
-
-def _safe(msg: str) -> str:
-    if len(msg) > 200:
-        return msg[:200]
-    return msg
