@@ -1,5 +1,53 @@
 # Changelog
 
+## Sprint 006 — AI Investment Committee Foundation — Done (2026-07-20)
+
+### Technical Design Gate (PR #50)
+- 15 Owner Decisions resolved: AI Committee + Evidence combined sprint,
+  provider-neutral (DeepSeek V1 only), deterministic evidence pipeline,
+  single structured LLM call, 7 perspectives, manual-only, Draft-only
+  Decision Journal integration, macOS Keychain credentials, 50K/8K/$1.00
+  budget, all-or-nothing valid report, max 1 retry (transient only)
+
+### Slice A — Persistence + Evidence (PR #51)
+- Migration 0012 (additive): committee_sessions, committee_evidence_items,
+  committee_reports (immutable), committee_outcomes (append-only)
+- Named CHECK/UNIQUE constraints, immutability trigger, append-only trigger
+- Evidence Packet Builder: deterministic extraction from Policy, Portfolio,
+  Guardian Events, Decisions — category-level only, no holdings/quantities/prices
+- SHA256 content hashing for integrity, evidence IDs, citation references
+- 32 PostgreSQL persistence tests
+
+### Slice B — Provider + Validator + Orchestration + API (PR #53)
+- AIModelProvider interface + DeepSeek adapter (V1 only)
+- Credential management: macOS Keychain → explicit env fallback → fail
+- Provider Output Validator: JSON schema, citation, safety, language validation
+- Committee orchestration: evidence→privacy preview→call→validate→persist
+- 9 API endpoints under /api/committee
+- Budget enforcement (50K/8K/$1.00), retry (max 1, transient only)
+- FakeProvider for deterministic testing — no live LLM calls in CI
+- 31 provider/validator/orchestration tests
+
+### Slice C — Committee Frontend (PR #54)
+- /committee workspace: session create, privacy preview, Owner confirmation,
+  run committee, report with 7 perspectives, outcome recording
+- Manual-only: no auto-trigger, no auto-run on load
+- Evidence citations vs model inference labels
+- Macro insufficient evidence flag
+- recommended_direction neutral display (4 approved enum values)
+- No Buy/Sell/Hold or trading language
+- 25 new frontend tests (10 API client + 7 component + 8 expanded)
+
+### CI Infrastructure Fix (PR #52)
+- Fixed SQLAlchemy URL password redaction in CI tests
+- Replaced 5 instances of str(engine.url) → engine.url.render_as_string(hide_password=False)
+
+### Final Test Baseline
+- 491 PostgreSQL tests (COMPOUNDOS_REQUIRE_POSTGRES_TESTS=1, 0 skipped)
+- 136 non-PostgreSQL tests
+- 242 frontend tests (Vitest + shuffled)
+- ESLint --max-warnings=0, TypeScript --noEmit, Ruff clean
+
 ## Sprint 005 — Data Orchestration Foundation — Done (2026-07-20)
 
 ### Technical Design Gate (PR #37, #38)

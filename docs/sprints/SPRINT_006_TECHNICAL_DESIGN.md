@@ -1,11 +1,12 @@
 # Sprint 006 — Technical Design Gate
 
-> **STATUS: OWNER DECIDED — 15/15 Resolved (2026-07-20). Implementation Not Authorized.**
+> **STATUS: IMPLEMENTED / DONE (2026-07-20).**
 >
-> All Sprint 006 slices require separate explicit Owner authorization.
-> This document reflects Owner decisions.  No implementation is authorized.
-> PR #50 must complete independent review and squash merge before any Slice
-> may be authorized.
+> All 15 Owner Decisions resolved and implemented across PRs #50–#54.
+> Migration 0012, 9 Committee API endpoints, Provider Output Validator,
+> DeepSeek adapter, /committee frontend workspace.
+> 491 PG / 136 non-PG / 242 frontend test baseline.
+> See docs/CHANGELOG.md for full sprint history.
 
 ## Executive Summary
 
@@ -666,13 +667,17 @@ preservation, no auto-run on page load.
 
 ## Implementation Status
 
-- **Sprint 006 Implementation: NOT AUTHORIZED.**
-- All slices require separate explicit Owner authorization.
-- This document is the resolved Technical Design Gate deliverable.
-- No migration, backend, frontend, or dependency changes are authorized.
+- **Sprint 006: DONE.** All three slices (A, B, C) implemented and merged.
+- Slice A (Persistence + Evidence): PR #51 → main
+- Slice B (Provider + Validator + API): PR #53 → main
+- Slice C (Committee Frontend): PR #54 → main
+- Migration head: 0012
+- 491 PG / 136 non-PG / 242 frontend test baseline
 
 ## Review Status
 
 - Owner Decisions: 15/15 resolved (2026-07-20).
-- Independent technical design review: Pending.
-- PR #50: Draft → Ready after review passes.
+- Slice A review: 0 BLOCKER/HIGH/MEDIUM (PR #51).
+- Slice B review: 1 BLOCKER + 2 HIGH → fixed → 0 BLOCKER/HIGH/MEDIUM (PR #53).
+- Slice C post-merge review: dispatched.
+- Sprint 006 Technical Design Gate: COMPLETE.

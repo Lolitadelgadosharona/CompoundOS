@@ -1,8 +1,8 @@
 # CompoundOS
 
-CompoundOS is a long-term AI Family Office and Wealth Operating System for
-personal, local, single-user use. Sprint 005 adds Data Orchestration: automated
-Guardian scheduling, Worker execution, and the /automation dashboard.
+CompoundOS is a personal, local AI Family Office and Wealth Operating System.
+Sprint 006 adds the AI Investment Committee: multi-perspective decision support
+with deterministic evidence, provider abstraction, and mandatory Owner confirmation.
 
 > **Local-only security boundary:** This build is for local, single-user
 > development only. It has no authentication and must not be exposed to the
@@ -21,7 +21,7 @@ Guardian scheduling, Worker execution, and the /automation dashboard.
   schedules with IANA timezone, created disabled by default, requiring
   explicit enable.  Manual one-shot triggers, run history, Worker status.
 - A standalone Worker process connects directly to PostgreSQL (not HTTP).
-- 431 PostgreSQL / 136 non-PostgreSQL / 217 frontend test baseline.
+- 491 PostgreSQL / 136 non-PostgreSQL / 242 frontend test baseline.
 - Keep broker, trading, recommendation, market data, AI/LLM, and
   authentication behavior outside the current implementation.
 
@@ -127,6 +127,44 @@ and a Policy-filtered audit timeline under `/api/policies`.
 Percentages are JSON decimal strings such as `"12.50"`. These endpoints record
 only user-entered policy information; they do not evaluate, recommend, score, or
 execute anything.
+
+## AI Investment Committee (/committee)
+
+The Committee workspace lets the Owner submit investment proposals for
+structured multi-perspective analysis.  The system extracts deterministic
+evidence from your Household, Policy, Portfolio, Guardian Events, and
+Decision Journal — then sends only minimized structured facts to an
+external LLM provider.
+
+### Session lifecycle
+
+1. Create a session with a title and proposal
+2. Review the privacy preview — see exactly what data will be sent
+3. Confirm and run the committee (single structured call, 7 perspectives)
+4. View the balanced report: supporting/opposing arguments, risks,
+   policy alignment, minority opinions, evidence citations
+5. Record your outcome: Accept, Reject, or Defer
+
+### Safety boundaries
+
+- **Manual only**: every session is Owner-initiated.  No automatic triggers.
+- **Privacy preview**: full Policy text, Portfolio holdings, quantities,
+  and prices are never sent to the provider.
+- **No investment advice**: the Committee provides decision support only.
+- **No autonomous trading**: no orders, trades, or automatic mutations.
+- **Evidence vs inference**: every claim is either cited from evidence
+  or explicitly marked as model inference.
+
+### Provider setup
+
+```bash
+# macOS Keychain (preferred)
+security add-generic-password -s compoundos-deepseek -a compoundos -w "sk-..."
+
+# Or environment variable (requires explicit opt-in)
+export COMPOUNDOS_ALLOW_ENV_CREDENTIALS=1
+export COMPOUNDOS_DEEPSEEK_API_KEY="sk-..."
+```
 
 ### Frontend
 

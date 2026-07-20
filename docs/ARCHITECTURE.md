@@ -409,3 +409,55 @@ All under /api/automation:
 - All date-boundary tests source dates from PostgreSQL `CURRENT_DATE`, never
   Python `date.today()`.
 - COMPOUNDOS_REQUIRE_POSTGRES_TESTS=1 enforcement (0 skipped).
+
+## Sprint 006 Architecture — AI Investment Committee Foundation
+
+### Persistence (Migration 0012)
+
+Four additive tables:
+- **committee_sessions**: draft→queued→running→completed/failed lifecycle
+- **committee_evidence_items**: 6 source types, provenance, confidence, content hash
+- **committee_reports**: immutable (UPDATE blocked), 1:1 with session
+- **committee_outcomes**: append-only (UPDATE/DELETE blocked), accepted/rejected/deferred
+
+### Evidence Pipeline
+
+Deterministic extraction from CompoundOS entities (Slice A, used by Slice B):
+- Policy: objectives, time_horizon, allocations (category-level only)
+- Portfolio: category breakdown — no individual holdings, quantities, or prices
+- Guardian: event summaries per check (exceeded count, latest detection)
+- Decisions: recent confirmed decisions (ID, date)
+- SHA256 content hashing for integrity
+
+### Provider Architecture
+
+Provider-neutral `AIModelProvider` interface.  V1 implements DeepSeek adapter only.
+Credential flow: macOS Keychain → explicit env fallback (COMPOUNDOS_ALLOW_ENV_CREDENTIALS=1) → fail.
+No plaintext config files.  FakeProvider for deterministic testing — no live LLM calls in CI.
+
+### Committee Orchestration
+
+Full pipeline: evidence→privacy preview→Owner confirmation→single structured call→
+validation→immutable report persistence.
+
+Provider Output Validator: JSON schema, citation validation, safety/language checks,
+budget enforcement.  All-or-nothing — single validation failure = full rejection.
+
+### Safety Boundaries
+
+- Manual-only: Owner initiates every session.  No Schedule/Guardian/Portfolio trigger.
+- recommended_direction: 4 approved enum values (aligned, not_aligned, conditional, insufficient_evidence).
+- No autonomous trading, no automatic mutations of Policy/Portfolio/Guardian.
+- Privacy preview before every provider call.
+- No raw prompt/response or API key in logs/database.
+
+### API (9 endpoints under /api/committee)
+
+POST/GET /sessions, GET /sessions/{id}, GET /sessions/{id}/privacy-preview,
+POST /sessions/{id}/run, GET /runs/{id}, GET /reports/{id},
+GET /evidence/{session_id}, POST /outcomes
+
+### Frontend (/committee)
+
+TypeScript API client, session management, privacy preview with Owner checkbox,
+7 perspective report display, outcome recording with append-only history.
