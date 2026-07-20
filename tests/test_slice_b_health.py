@@ -104,7 +104,7 @@ class TestCredentialCheck:
 
 class TestNotificationCheck:
     def test_returns_unknown(self) -> None:
-        c = check_notification(NOW)
+        c = check_notification(None, NOW)
         assert c.status == UNKNOWN
 
 

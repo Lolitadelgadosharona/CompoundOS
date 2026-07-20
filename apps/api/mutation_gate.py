@@ -8,12 +8,13 @@ from __future__ import annotations
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import text
+from sqlalchemy import create_engine, text
 
-from apps.api.database import SessionLocal
+from apps.api.config import get_database_url
 
 MUTATION_METHODS = {"POST", "PATCH", "PUT", "DELETE"}
 ALLOWED_PATHS = {"/api/health/live", "/api/health/ready", "/api/health/full"}
+EXPECTED_HEAD = "0015_notification_foundation"
 
 
 async def mutation_gate(request: Request, call_next):
@@ -24,24 +25,24 @@ async def mutation_gate(request: Request, call_next):
         return await call_next(request)
 
     try:
-        session = SessionLocal()
+        engine = create_engine(get_database_url())
         try:
-            session.execute(text("SELECT 1")).fetchone()
-            row = session.execute(text(
-                "SELECT version_num FROM alembic_version"
-            )).fetchone()
-            expected = "0014_health_integrity"
-            if not row or row[0] != expected:
-                return JSONResponse(
-                    status_code=503,
-                    content={"detail": "System degraded — migration mismatch. Try again later."},
-                )
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+                row = conn.execute(text(
+                    "SELECT version_num FROM alembic_version"
+                )).fetchone()
+                if not row or row[0] != EXPECTED_HEAD:
+                    return JSONResponse(
+                        status_code=503,
+                        content={"detail": "System degraded — migration mismatch."},
+                    )
         finally:
-            session.close()
+            engine.dispose()
     except Exception:
         return JSONResponse(
             status_code=503,
-            content={"detail": "System unavailable — database not reachable. Try again later."},
+            content={"detail": "System unavailable — database not reachable."},
         )
 
     return await call_next(request)
