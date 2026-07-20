@@ -46,8 +46,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   - Slice C — Committee Frontend: Done (PR #54, /committee workspace)
   - 15 Owner Decisions all resolved and implemented
   - 491 PG / 136 non-PG / 242 frontend test baseline
-- Sprint 007: Technical Design Gate — In Review (Owner Decisions Required)
-  - Technical Design / Open Questions: Draft PR pending
+- Sprint 007: Technical Design Gate — Owner Decided (15/15 resolved)
+  - Technical Design / Open Questions: docs revision complete, PR pending
   - Slice A (Backup, Export, Recovery): Not Authorized / Not Started
   - Slice B (Health Dashboard, Credential UX): Not Authorized / Not Started
   - Slice C (Lightweight Notification): Not Authorized / Not Started
