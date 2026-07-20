@@ -7,7 +7,7 @@ All time is injectable via clock parameter (default: utcnow).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
 from sqlalchemy import text
