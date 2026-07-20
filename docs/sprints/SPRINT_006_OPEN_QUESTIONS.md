@@ -1,41 +1,48 @@
 # Sprint 006 — Open Questions
 
-> **All 15 Owner Decisions require explicit Owner resolution before any
-> Sprint 006 slice is authorized for implementation.**
+> **ALL 15 OWNER DECISIONS RESOLVED (2026-07-20).**
+>
+> Implementation remains NOT AUTHORIZED.  All slices require separate
+> explicit Owner authorization.  See `SPRINT_006_TECHNICAL_DESIGN.md`
+> for the resolved design and Owner decisions.
 
-| ID | Question | Status |
-|----|----------|--------|
-| OD-6-1 | Sprint 006 candidate: AI Committee + Evidence (A), Market Data only (B), or Notifications only (C)? | **Owner Decision Required** |
-| OD-6-2 | External LLM provider: provider-neutral abstraction (A), DeepSeek only (B), or OpenAI only (C)? | **Owner Decision Required** |
-| OD-6-3 | Send financial data to external LLM: minimized structured facts only (A), full Policy/Portfolio text (B), or no external LLM — local only (C)? | **Owner Decision Required** |
-| OD-6-4 | Evidence foundation: combined sprint with committee (A), separate evidence sprint first (B), or committee without evidence (C)? | **Owner Decision Required** |
-| OD-6-5 | Committee design: deterministic evidence + LLM narration (A), multi-role separate LLM calls (B), or single structured prompt (C)? | **Owner Decision Required** |
-| OD-6-6 | Minimum V1 roles: Long-Term + Risk + Policy Alignment + Synthesis (A), all 7 roles (B), or single role only (C)? | **Owner Decision Required** |
-| OD-6-7 | Data model: Committee Session + Report (A), Proposal + Run + Roles (B), or reuse Decision Journal (C)? | **Owner Decision Required** |
-| OD-6-8 | Report language: balanced with mandatory opposing views (A), recommendation allowed (B), or narrative without structure (C)? | **Owner Decision Required** |
-| OD-6-9 | Owner outcome: Accept only → Decision Journal (A), Accept/Reject/Defer → Journal (B), or report only — no Decision (C)? | **Owner Decision Required** |
-| OD-6-10 | Model/prompt version: store per report immutable (A), store latest only (B), or don't store (C)? | **Owner Decision Required** |
-| OD-6-11 | Token/cost cap: per-session budget (A), monthly only (B), or no cap (C)? | **Owner Decision Required** |
-| OD-6-12 | Provider failure: partial report with succeeded roles (A), full retry or nothing (B), or silent fallback (C)? | **Owner Decision Required** |
-| OD-6-13 | Raw provider response: metadata only — no financial data in logs (A), full prompt + response (B), or nothing (C)? | **Owner Decision Required** |
-| OD-6-14 | Credential storage: system keyring — macOS Keychain (A), env var only (B), or config file (C)? | **Owner Decision Required** |
-| OD-6-15 | External market data in V1: deferred — CompoundOS internal only (A), minimal free tier (B), or full provider integration (C)? | **Owner Decision Required** |
+## Resolution Summary
 
-## Resolution Process
+| ID | Question | Resolution | Resolved |
+|----|----------|------------|----------|
+| OD-6-1 | Sprint 006 candidate | **A**: AI Committee + internal Evidence Pipeline. No Market Data/Notifications/Family Goals in Sprint 006. | 2026-07-20 |
+| OD-6-2 | External LLM provider | **A, V1-limited**: Provider-neutral interface; DeepSeek adapter only. Model ID configured. | 2026-07-20 |
+| OD-6-3 | Data sent to provider | **A**: Minimized structured facts only. Privacy Preview required. No raw Policy/Portfolio text. | 2026-07-20 |
+| OD-6-4 | Evidence foundation | **A**: Combined sprint. No LLM call without Evidence Packet. | 2026-07-20 |
+| OD-6-5 | Committee design | **A**: Deterministic evidence + one structured LLM call. | 2026-07-20 |
+| OD-6-6 | Committee roles | **B, single-call**: All 7 perspectives in one call. Macro declares insufficient evidence. | 2026-07-20 |
+| OD-6-7 | Data model | **A + Outcome entity**: Sessions, Evidence, Reports (immutable), Outcomes (append-only). | 2026-07-20 |
+| OD-6-8 | Report language | **B, restricted**: recommended_direction with approved enum. No Buy/Sell/Hold. | 2026-07-20 |
+| OD-6-9 | Owner outcome | **B, Draft-only**: Accept/Reject/Defer → Outcomes → optionally creates Decision Draft only. | 2026-07-20 |
+| OD-6-10 | Version retention | **A**: Every Report stores provider/model/prompt/schema/temperature/tokens/cost. | 2026-07-20 |
+| OD-6-11 | Token/cost cap | **A, explicit defaults**: 50K/8K/$1.00 per session. Configurable by Owner. | 2026-07-20 |
+| OD-6-12 | Provider failure | **B, explicit retry**: All-or-nothing, max 1 retry (transient only). No partial report. | 2026-07-20 |
+| OD-6-13 | Response logging | **A, clarified**: No raw prompt/response persisted. Normalized immutable Report required for history. | 2026-07-20 |
+| OD-6-14 | Credential storage | **A**: macOS Keychain. CI uses env var. Plaintext config forbidden. | 2026-07-20 |
+| OD-6-15 | Market data in V1 | **A**: Deferred. CompoundOS internal data only. External source_type reserved, unused. | 2026-07-20 |
 
-1. Owner reviews each OD in the Technical Design document.
-2. Owner selects one option per OD (or provides an alternative).
-3. All decisions are recorded in this document with resolution date and rationale.
-4. Technical Design is updated to reflect resolved decisions.
-5. Only after ALL 15 ODs are resolved may any Slice be authorized.
+## Additional Owner Constraints
+
+- **Manual-only**: Committee is completely manual-only.  No Schedule,
+  Guardian Event, Portfolio Confirm, or Automation Worker may trigger it.
+  Future automation requires a new Owner Decision.
+- **V1 temperature**: 0 or lowest deterministic value available.
+- **Decision Journal integration**: Creates Draft only; never auto-confirms.
+  Existing Decision lifecycle unchanged.
 
 ## Implementation Status
 
-- **Sprint 006 Implementation: NOT AUTHORIZED**
-- All slices require separate explicit Owner authorization after OD resolution.
+- **Sprint 006 Implementation: NOT AUTHORIZED.**
+- All slices require separate explicit Owner authorization.
+- This document is complete pending independent technical design review.
 
 ## Dependencies
 
-- Sprint 001–005: Done (all Foundation capabilities available)
-- External: None required for design gate
-- CI: N/A (docs-only at this stage)
+- Sprint 001–005: Done.
+- External: DeepSeek API (V1 provider).  No other external dependencies.
+- CI: N/A (docs-only at this stage).

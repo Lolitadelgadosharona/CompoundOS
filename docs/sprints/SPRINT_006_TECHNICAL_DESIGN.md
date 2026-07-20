@@ -1,30 +1,43 @@
 # Sprint 006 — Technical Design Gate
 
-> **STATUS: Owner Decisions Required — Implementation Not Authorized**
+> **STATUS: OWNER DECIDED — 15/15 Resolved (2026-07-20). Implementation Not Authorized.**
 >
-> Sprint 006 slices must receive separate explicit Owner authorization.
-> This document provides the analysis, comparison, and Owner Decisions
-> needed before any implementation begins.
+> All Sprint 006 slices require separate explicit Owner authorization.
+> This document reflects Owner decisions.  No implementation is authorized.
+> PR #50 must complete independent review and squash merge before any Slice
+> may be authorized.
 
 ## Executive Summary
 
-**Recommended candidate: AI Investment Committee Foundation (A)** with a
-prerequisite lightweight Market Data & Evidence ingestion (B) in the same
-sprint as a combined evidence+committee foundation.
+**Approved candidate: AI Investment Committee Foundation with internal Evidence Pipeline.**
 
-Rationale: the Committee is the highest-owner-value, most Vision-aligned
-candidate. It directly consumes all Foundation data already built across
-Sprints 001–005. However, without an evidence contract (who said what,
-when, with what confidence), the Committee would generate opinions from
-model training data rather than from Owner's actual financial context.
-A minimal evidence pipeline (CompoundOS internal facts + Owner-provided
-claims, no external price feeds) must ship alongside the Committee.
+Sprint 006 delivers three capabilities in one sprint:
 
-The combined sprint delivers: the Owner can submit a proposal with
-supporting evidence, the system runs a multi-perspective analysis using
-deterministic facts from CompoundOS plus Owner-provided context, and
-produces a balanced report with supporting arguments, opposing arguments,
-risks, and policy alignment — never a one-sided recommendation.
+1. **Evidence Pipeline** — deterministic extraction of structured facts from
+   CompoundOS internal data (Household, Policy, Portfolio, Decisions,
+   Guardian Events) plus Owner-provided claims.  Every fact carries a
+   citation reference.  No external market data in V1.
+
+2. **AI Investment Committee** — Owner submits a proposal.  A single
+   structured LLM call returns all seven approved perspectives plus a
+   Synthesis.  The LLM receives only minimal structured facts
+   (never raw financial text).  Output is validated through schema,
+   citation, safety, and language checks before becoming an immutable
+   Committee Report.
+
+3. **Committee Outcomes** — Owner records Accept/Reject/Defer with
+   rationale in append-only `committee_outcomes`.  Outcome can optionally
+   create a Decision Journal Draft (never auto-confirmed).
+
+**Architecture: Deterministic evidence pipeline + one structured LLM call.**
+
+The LLM is a narrator, not an analyst.  Facts come from CompoundOS.
+The LLM organizes, explains, and provides perspectives — but every
+factual claim must cite an evidence ID or be rejected as invalid.
+
+**Manual only.** No Schedule, no Guarduan Event, no Portfolio Confirm,
+no Automation Worker may trigger the Committee.  Owner initiates every
+session explicitly.
 
 ---
 
@@ -33,608 +46,633 @@ risks, and policy alignment — never a one-sided recommendation.
 | Sprint | Status | Key Deliverables |
 |--------|--------|-----------------|
 | 001 | Done | Foundation, health endpoints, CI |
-| 002 | Done | Household, Policy (Draft/Version/Allocations), Decision Journal |
+| 002 | Done | Household, Policy, Decision Journal |
 | 003 | Done | Portfolio Snapshot + Holdings |
 | 004 | Done | Guardian (Checks, Evaluation, Events) |
-| 005 | Done | Orchestration (Worker, Schedules, Runs, Leases), Automation Frontend |
+| 005 | Done | Orchestration (Worker, Schedules, Runs, Automation Frontend) |
 
 All 11 migrations intact. 431 PG / 136 non-PG / 217 frontend test baseline.
-Personal-use-only boundary in canonical docs. main @ 790e33e, CI green.
+Personal-use-only boundary in canonical docs. main @ 790e33e.
 
-**PREDECESSOR VERIFIED — Sprint 006 Technical Design Gate may proceed.**
-
----
-
-## 2. Candidate Analysis
-
-### Candidate A — AI Investment Committee Foundation
-
-**Goal:** Owner submits an investment proposal. System analyzes from multiple
-complementary perspectives: long-term compounding, risk/capital preservation,
-policy alignment, and devil's advocate. Produces balanced report with
-supporting arguments, opposing arguments, key risks, evidence citations,
-and policy consistency check. Owner reviews and decides — no autonomous action.
-
-**Inputs available today:**
-- Household profile (horizon, liquidity, risk statement)
-- Published Investment Policy (objectives, allocations, constraints)
-- Portfolio Snapshot (holdings, valuation, categories)
-- Decision Journal (past decisions, corrections, rationale)
-- Guardian Events (exceeded thresholds, drift, staleness)
-- Automation Runs (evaluation history)
-
-**Owner Direct Value:** High. Every investment decision the Owner considers
-would benefit from structured multi-perspective analysis leveraging all
-accumulated Foundation data. This is the first feature that genuinely
-feels like an "AI Family Office."
-
-**Dependencies:** All Foundation data present. Missing: real-time market
-data (prices, indices). Mitigation: V1 limits analysis to Owner-provided
-proposal + CompoundOS internal evidence. External price feeds deferred.
-
-**Data Model Complexity:** Medium. 3-4 new tables: sessions, proposals,
-role opinions, synthesis reports, evidence citations.
-
-**External Services:** LLM API required (OpenAI, Anthropic, or DeepSeek).
-This is the first external dependency. Requires credential management,
-provider abstraction, cost tracking, and data minimization.
-
-**Financial/Safety Risk:** HIGH. LLM outputs could be misinterpreted as
-investment advice. Hallucination risk is real. Prompt injection via
-Owner-authored Policy/Decision text. Mitigation: deterministic evidence
-pipeline, citation requirements, mandatory opposing arguments, neutral
-language enforcement.
-
-**Privacy/Security:** HIGH. Portfolio holdings, Policy allocations, and
-Guardian thresholds would be sent to external LLM providers. Sensitive
-financial data leaves the local machine.
-
-**Testability:** Medium. Non-deterministic LLM outputs. Mock-based tests
-validate structure not content. Evidence pipeline is fully testable.
-
-**Local-only Feasibility:** Low. No high-quality local models exist for
-this use case. External provider is a hard dependency for V1. A
-provider-neutral abstraction supports future local model migration.
-
-**Estimated Slices:** 3 slices (A: Persistence + Evidence, B: Provider +
-Orchestration + API, C: Frontend). R2/R2/R1.
-
-**Future Unlocks:** High. Committee is the gateway to all future AI-driven
-decision support. Enables AI-assisted Policy drafting, Portfolio review,
-Guardian response planning.
-
-### Candidate B — Market Data & Evidence Ingestion
-
-**Goal:** Ingestion pipeline for prices, indices, exchange rates, macro
-data. Quality checks, timestamps, provenance, failure visibility.
-
-**Owner Direct Value:** Medium. Enables data-driven Committee analysis
-but doesn't directly answer investment questions. Foundation capability.
-
-**Dependencies:** External data providers (Alpha Vantage, Yahoo Finance,
-etc.). API keys, rate limits, cost.
-
-**Data Model Complexity:** Low-Medium. ~2 tables: data_sources,
-market_observations with provenance and quality metadata.
-
-**External Services:** Required. Provider API keys, rate limiting,
-retry, caching.
-
-**Financial/Safety Risk:** Low. Read-only data ingestion. Risk: stale
-or incorrect data presented as current.
-
-**Testability:** High. Deterministic ingestion pipeline, mock providers.
-
-**Local-only Feasibility:** Medium. External APIs needed but data is
-read-only and cacheable.
-
-**Estimated Slices:** 1-2 slices.
-
-**Verdict:** Should be built as **prerequisite evidence pipeline for
-Candidate A**, not as standalone Sprint. The evidence contract (who
-said what, when, with what confidence) is needed for the Committee.
-
-### Candidate C — Notification Escalation
-
-**Goal:** Guardian/Automation events escalate to Owner via local inbox
-or future channels (email, SMS). No investment action taken.
-
-**Owner Direct Value:** Medium. Useful when evaluations are automated
-and Owner doesn't actively check /guardian. But current Automation
-runs already provide history visibility.
-
-**Dependencies:** All present. Guardian Events + Automation Runs exist.
-
-**Data Model Complexity:** Low. ~2 tables: notifications, acknowledgments.
-
-**External Services:** None for V1 (local inbox only). Future: email/SMS.
-
-**Financial/Safety Risk:** Low. Read-only notification. Risk: severity
-labels misinterpreted — mitigated by neutral language.
-
-**Testability:** High. No external dependencies.
-
-**Estimated Slices:** 1 slice.
-
-**Verdict:** DEFER. Automation Frontend already provides run history and
-event visibility. Notification adds value only when there are multiple
-automated workflows generating events that need triage. Premature for
-a single workstream (Guardian only).
-
-### Candidate D — Family Goals & Reporting
-
-**Goal:** Education, retirement, charity, cash reserve goals tracked
-with monthly/quarterly/annual reports against Portfolio+Policy.
-
-**Owner Direct Value:** High for long-term planning. Provides the "why"
-behind asset allocation and decisions.
-
-**Dependencies:** Portfolio Snapshot + Policy exist. Missing: goal
-tracking models, projection logic, report generation.
-
-**Data Model Complexity:** Medium. ~3 tables: goals, goal_allocations,
-reports/snapshots.
-
-**External Services:** None required for V1.
-
-**Financial/Safety Risk:** Low-Medium. Projections could be misinterpreted
-as guarantees. Mitigation: explicit "projections are not predictions."
-
-**Testability:** High. Deterministic calculations.
-
-**Estimated Slices:** 2-3 slices.
-
-**Verdict:** DEFER. While valuable, Family Goals is a consumer of the
-Committee (Owner discusses goals → Committee analyzes → Owner decides).
-Building Committee first creates the decision infrastructure that Goals
-would feed into. Also needs Portfolio projections which aren't built yet.
-
-### Candidate Comparison Matrix
-
-| Dimension | A: AI Committee | B: Market Data | C: Notifications | D: Family Goals |
-|-----------|:-:|:-:|:-:|:-:|
-| Owner value | ★★★★★ | ★★★ | ★★ | ★★★★ |
-| Deps satisfied | ✓ (all Foundation) | ✓ (ext APIs needed) | ✓ | ✓ (projections needed) |
-| Personal V1 importance | ★★★★★ | ★★★★ | ★★ | ★★★ |
-| Data model complexity | Med | Low-Med | Low | Med |
-| External services | LLM API required | Data APIs required | None (V1) | None |
-| Financial/safety risk | HIGH | Low | Low | Low-Med |
-| Hallucination risk | HIGH | None | None | None |
-| Testability | Med | High | High | High |
-| Local-only viable | Low | Med | High | High |
-| Explainability | ★★★ (citations needed) | ★★★★★ | ★★★★★ | ★★★★★ |
-| Feedback loop | Owner decides | Data drives decisions | Owner acknowledges | Owner tracks |
-| Implementation slices | 3 | 1-2 | 1 | 2-3 |
-| Future unlocks | ★★★★★ | ★★★★ | ★★ | ★★★ |
-| Estimated time | 3-4 weeks | 1-2 weeks | 1 week | 2-3 weeks |
-
-### Recommendation
-
-**Sprint 006 = AI Committee Foundation (A) + Evidence Pipeline (B), combined.**
-
-The evidence pipeline is a prerequisite — the Committee needs an evidence
-contract to distinguish "this is a fact from your Portfolio" from "this
-is the model's opinion." Without it, the Committee is just a chat interface
-with no audit trail.
-
-V1 scope: Owner-initiated proposals with CompoundOS internal evidence
-(Household, Policy, Portfolio, Decisions, Guardian Events). External market
-data deferred to a future evidence source integration.
+**PREDECESSOR VERIFIED.**
 
 ---
 
-## 3. AI Committee Design Approach Comparison
+## 2. Candidate Analysis (Resolved)
 
-### Approach 1 — Single-model structured multi-perspective analysis
+Four candidates were compared (see original gate analysis for full details).
 
-One LLM call. Prompt includes all context (Policy, Portfolio, proposal).
-Model outputs structured JSON with all role perspectives in one response.
+| Candidate | Decision | Rationale |
+|-----------|----------|-----------|
+| A: AI Investment Committee + Evidence | **SELECTED** | Highest Owner value, uses all Foundation data |
+| B: Market Data & Evidence | DEFERRED | Needed as internal pipeline (combined with A in V1), no external data |
+| C: Notification Escalation | DEFERRED | Premature for single consumer (Guardian only) |
+| D: Family Goals & Reporting | DEFERRED | Consumer of Committee, not predecessor |
 
-| Aspect | Assessment |
-|--------|-----------|
-| Correctness | Low. Single model has no adversary. No disagreement. |
-| Explainability | Medium. All output from one source — hard to attribute. |
-| Token/cost | Low. One call. |
-| Latency | Low. One round trip. |
-| Failure isolation | None. One failure = all perspectives lost. |
-| Provider portability | Medium. Single prompt, easy to swap. |
-| Reproducibility | Low. Non-deterministic. |
-| Prompt injection | High risk. All context in one prompt. |
-| Testability | Low. Mock validates structure only. |
-| Owner experience | Clean but shallow. No visible deliberation. |
-
-### Approach 2 — Multi-call role-separated committee
-
-Separate LLM calls for each role (Long-Term, Risk, Policy Alignment,
-Devil's Advocate). Each receives role-specific context and instructions.
-Synthesis call aggregates all role outputs.
-
-| Aspect | Assessment |
-|--------|-----------|
-| Correctness | Medium. Multiple perspectives reduce blind spots. |
-| Explainability | High. Each role attributable. No synthesis can erase minority. |
-| Token/cost | High. N roles × context. Synthesis adds more. |
-| Latency | High. Sequential or parallel calls. |
-| Failure isolation | Good. One role fails → others complete → partial report. |
-| Provider portability | Medium. Per-role prompts, more surface area. |
-| Reproducibility | Low. Each call non-deterministic. |
-| Prompt injection | Medium. Each role gets limited context. |
-| Testability | Medium. Mock per-role, validate synthesis structure. |
-| Owner experience | Rich. Visible multi-perspective deliberation. |
-
-### Approach 3 — Deterministic evidence pipeline + optional LLM narration
-
-Deterministic rules query CompoundOS for facts. Evidence packet built
-with citations (Policy §X, Portfolio holding Y, Guardian Event Z).
-LLM receives facts only — no raw data. LLM organizes and explains but
-cannot invent facts. Every claim must cite an evidence ID or be marked
-"model inference."
-
-| Aspect | Assessment |
-|--------|-----------|
-| Correctness | Highest. Facts are deterministic. LLM cannot fabricate. |
-| Explainability | Highest. Every claim traceable to evidence or model inference. |
-| Token/cost | Medium. Evidence packet is compact. LLM narrates only. |
-| Latency | Low-Medium. Evidence query + LLM narration. |
-| Failure isolation | Excellent. Evidence fails → no LLM call. LLM fails → facts still available. |
-| Provider portability | High. Evidence is provider-independent. LLM is swappable. |
-| Reproducibility | High. Evidence is deterministic. LLM output varies but facts are stable. |
-| Prompt injection | Lowest. LLM receives structured facts, not raw user text. |
-| Testability | Highest. Evidence pipeline fully testable. LLM narration tested for structure. |
-| Owner experience | Best. Facts you can verify. Opinions clearly labeled. |
-
-### Recommendation
-
-**Approach 3 — Deterministic evidence pipeline + LLM narration.**
-
-V1 should use a single LLM call for narration (cost-effective) but with
-deterministic evidence as the sole factual input. If Approach 2's
-multi-role deliberation is desired, it can be layered on top of the
-evidence pipeline in a future sprint — the evidence contract doesn't
-change.
-
-Combination: Evidence Pipeline (deterministic) → structured facts →
-LLM narration (one call, structured output with mandatory opposing views).
+Evidence Pipeline in Sprint 006 V1 is **internal only** — CompoundOS facts
+and Owner-provided claims.  No external price, index, rate, or macro feeds.
+External market data is a Sprint 007 candidate, not in Sprint 006 scope.
 
 ---
 
-## 4. Data Model Approaches
+## 3. Design Approach (Resolved)
 
-### Candidate A — Committee Session + immutable Report
+**Approved: Deterministic evidence pipeline + one structured LLM call.**
 
-```
-committee_sessions (id, household_id, title, proposal_text, status, created_at)
-  ├── evidence_items (id, session_id, source_type, source_id, content, citation_ref)
-  └── committee_reports (id, session_id, model_provider, model_version,
-       prompt_version, temperature, token_count, cost_estimate,
-       supporting_arguments, opposing_arguments, risks, policy_alignment,
-       minority_opinions, evidence_citations, model_inference_labels,
-       insufficient_evidence_flags, report_text, generated_at)
-```
+V1 uses a single provider call — not multiple independent role calls.
+That single call returns all seven perspectives and a Synthesis in a
+structured JSON response.
 
-All reports immutable. Re-run creates new session + new report.
-Status: draft → queued → running → completed / partial_failure / failed.
-
-### Candidate B — Proposal + Run + Role Opinion + Synthesis
+### Execution Flow
 
 ```
-proposals (id, household_id, title, body, status)
-runs (id, proposal_id, model_provider, started_at, completed_at, status)
-role_opinions (id, run_id, role_name, opinion_text, evidence_refs, generated_at)
-synthesis_reports (id, run_id, report_text, conflict_flags, generated_at)
+1. Deterministic evidence extraction
+   ├── Query CompoundOS entities (Policy, Portfolio, Guardian, Decisions)
+   ├── Extract relevant structured facts
+   ├── Assign evidence IDs, citations, freshness, confidence
+   └── Build evidence packet
+2. Privacy / redaction preview
+   ├── Owner reviews exactly what will be sent to provider
+   ├── No raw financial text in evidence packet
+   └── Only category-level aggregates, constraint summaries, structured facts
+3. Explicit Owner confirmation
+   ├── Display estimated token count and cost
+   ├── Owner must explicitly click "Run Committee"
+   └── No auto-run, no schedule, no event trigger
+4. Single provider call
+   ├── Evidence packet + proposal text + role instructions
+   ├── All seven perspectives + Synthesis in one response
+   └── Single API call; no multi-call fan-out
+5. Provider Output Validation
+   ├── JSON schema validation (required sections, types, bounds)
+   ├── Citation validation (factual claims must cite evidence_id)
+   ├── Safety/language validation (no trading language, neutral tone)
+   └── Token/cost metadata consistency check
+6. Immutable report persistence
+   ├── Normalized immutable committee_report row
+   ├── Metadata: provider, model, prompt/schema version, temperature, tokens, cost
+   └── Content hash for integrity
 ```
 
-More granular but duplicates orchestration patterns from Sprint 005.
-Confusing overlap with automation "runs" namespace.
+### Important Safety Qualification
 
-### Candidate C — Reuse Decision Journal
-
-Add AI-generated analysis as a new Decision Journal entity type.
-Decisions already have confirmed snapshots and corrections. AI analysis
-becomes a non-confirmed append-only record attached to Decision identity.
-
-Avoids new domain. But conflates "Owner's actual decision" with
-"AI's analysis of a proposal." Different semantics, different lifecycle.
-
-### Recommendation
-
-**Candidate A — Committee Session + immutable Report.**
-
-Clean separation from Decision Journal (analysis ≠ decision).
-Session groups evidence + report. Report is immutable (no edits, only
-re-run to create new session). Evidence items cite CompoundOS entities
-by ID (portfolio_snapshot, policy_version, guardian_event).
-
-Decision Journal handoff: when Owner accepts/rejects based on report,
-a Decision Journal entry is created referencing the committee_session_id
-as its evidence source. The Committee doesn't mutate Decisions.
+> The LLM may hallucinate.  Any factual claim not citing an evidence_id
+> must be rejected by the Provider Output Validator or explicitly marked
+> as model inference.  When automatic distinction is impossible, the
+> entire response validation fails.  This design mitigates hallucination
+> risk through strict validation — it does not eliminate it.
 
 ---
 
-## 5. Safety Model
+## 4. Committee Roles (Resolved — 7 perspectives, single call)
 
-### Core Safety Rules
+All seven perspectives are returned by one structured LLM call.
+No separate API calls per role.
 
-1. AI output is **decision support**, not investment advice.
+| # | Role | Purpose | No-Evidence Behavior |
+|---|------|---------|---------------------|
+| 1 | Long-Term Compounding | Alignment with compounding strategy, drift assessment | Uses Policy + Portfolio evidence |
+| 2 | Index / Passive Investing | Alternative: what would a passive approach look like? | Uses Policy + Portfolio evidence |
+| 3 | Macroeconomic Context | Macro landscape relevant to proposal | Must state: "Insufficient current macro evidence — no external market data in V1" |
+| 4 | Risk / Capital Preservation | Risk exposure, concentration, capital preservation | Uses Portfolio + Guardian evidence |
+| 5 | Devil's Advocate | Strongest opposing arguments | Must be non-empty. Must challenge the proposal. |
+| 6 | Policy Alignment | Proposal vs. Policy objectives, constraints, prohibitions | Uses Policy evidence |
+| 7 | Synthesis / Chair | Balanced summary, preserves minority opinion, does not erase disagreement | Aggregates all role outputs |
+
+### Constraints
+
+- Macro (role 3) has no external market data in V1 — must declare insufficient evidence.
+- Must not use model training knowledge to impersonate real-time macro data.
+- Devil's Advocate (role 5) and Opposing Arguments must be non-empty.
+- Synthesis (role 7) must preserve minority opinions and disagreements — no forced consensus.
+
+---
+
+## 5. Data Model (Resolved)
+
+### Entities (Migration 0012 — additive only, never modifies 0001–0011)
+
+```
+committee_sessions
+  id (UUID PK)
+  household_id (FK → household_profiles.id)
+  parent_session_id (FK self, nullable — for re-runs)
+  title (text, NOT NULL)
+  proposal_text (text, NOT NULL — what the Owner typed)
+  status (text: draft | queued | running | completed | failed)
+  created_at (timestamptz)
+  updated_at (timestamptz)
+
+committee_evidence_items
+  id (UUID PK)
+  session_id (FK → committee_sessions.id, CASCADE)
+  source_type (text: portfolio_snapshot | policy_version | guardian_event |
+    decision | owner_claim — external reserved, unused in V1)
+  source_id (UUID — CompoundOS entity)
+  source_title (text)
+  as_of (timestamptz)
+  content_hash (text — SHA256)
+  structured_facts (JSONB — key-value extracted deterministically)
+  provenance (text: compoundos_internal | owner_provided)
+  freshness (text)
+  confidence (text: high | medium)
+  citation_ref (text — human-readable ref, e.g. "Policy v3 §Allocations")
+  created_at (timestamptz)
+
+committee_reports
+  id (UUID PK)
+  session_id (FK → committee_sessions.id, CASCADE, UNIQUE)
+  provider (text — e.g. "deepseek")
+  model_id (text — e.g. "deepseek-v3")
+  model_version (text)
+  prompt_version (text)
+  schema_version (text)
+  temperature (numeric)
+  provider_params (JSONB)
+  input_tokens (int)
+  output_tokens (int)
+  estimated_cost (numeric)
+  report_content (JSONB — normalized, validated, immutable)
+    ├── supporting_arguments
+    ├── opposing_arguments
+    ├── risks
+    ├── policy_alignment
+    ├── minority_opinions
+    ├── evidence_citations
+    ├── limitations
+    ├── recommended_direction (enum, see §6)
+    └── sections (role-by-role output)
+  content_hash (text — SHA256 of normalized report)
+  generated_at (timestamptz)
+  created_at (timestamptz)
+  -- Reports are immutable.  No UPDATE allowed after creation.
+  -- Re-runs create new sessions (parent_session_id links to origin).
+
+committee_outcomes
+  id (UUID PK)
+  session_id (FK → committee_sessions.id, CASCADE)
+  report_id (FK → committee_reports.id)
+  outcome (text: accepted | rejected | deferred)
+  owner_rationale (text)
+  decision_draft_id (UUID, nullable — FK to decision_drafts)
+  recorded_at (timestamptz)
+  -- Append-only.  No UPDATE, no DELETE.
+```
+
+### Lifecycle
+
+```
+Session: draft → queued → running → completed | failed
+  completed: report generated and validated
+  failed: provider failure (2 attempts exhausted) or validation failure
+
+Outcome: recorded after completed session
+  accepted/rejected/deferred — append-only, Owner rationale required
+
+Decision Journal: when Owner explicitly creates a Decision from Outcome:
+  → creates Decision Draft (never auto-confirmed)
+  → Draft references committee_outcomes.id
+  → Existing Decision lifecycle unchanged
+```
+
+### Constraints
+
+- `committee_reports.content` is immutable after creation (trigger-enforced).
+- `committee_outcomes` is append-only (no UPDATE, no DELETE).
+- Re-runs create new sessions with `parent_session_id` linking to origin.
+  Old reports are never overwritten.
+- Household isolation: all queries filtered by `household_id`.
+- Evidence items cascade-delete with session.
+- Reports cascade-delete with session (re-run creates new session + new report).
+
+---
+
+## 6. Report Language & recommended_direction (Resolved)
+
+`recommended_direction` is an allowed field with these exact enum values:
+
+| Value | Meaning |
+|-------|---------|
+| `aligned_with_policy` | Proposal is consistent with Policy objectives |
+| `not_aligned_with_policy` | Proposal conflicts with Policy |
+| `conditionally_aligned` | Aligned IF certain conditions are met |
+| `insufficient_evidence` | Cannot determine — not enough data |
+
+The field must NEVER contain: "buy", "sell", "hold", trade instructions,
+ticker symbols, price targets, or any language that could be interpreted
+as investment advice or trading instructions.
+
+### Required Report Sections (all mandatory)
+
+- `supporting_arguments` — must be non-empty
+- `opposing_arguments` — must be non-empty
+- `risks` — must be non-empty
+- `policy_alignment` — Policy sections cited
+- `minority_opinions` — preserved from Synthesis
+- `evidence_citations` — linked to evidence_ids
+- `limitations` — what this report cannot address
+- `recommended_direction` — one of the four enum values
+- `sections` — per-role output (7 sections)
+
+---
+
+## 7. Safety Model (Resolved + Mandatory Corrections)
+
+### Core Safety Rules (unchanged from original gate)
+
+1. AI output is DECISION SUPPORT, not investment advice.
 2. No autonomous trading, order generation, or execution.
 3. No automatic Portfolio, Policy, Guardian, or Schedule mutation.
 4. No automatic Decision confirmation or creation.
 5. Owner explicitly initiates every session.
-6. Owner explicitly accepts/rejects/records outcome in Decision Journal.
-7. Supporting AND opposing arguments must both be present.
-8. No one-sided recommendation allowed.
-9. When evidence is insufficient, report must say "insufficient evidence."
-10. Never claim real-time market data unless source and timestamp are verifiable.
-11. Model/provider/prompt version must be recorded and traceable.
-12. Temperature and parameters recorded per approved policy.
+6. Owner explicitly records outcome.
+7. Supporting AND opposing arguments both mandatory.
+8. `recommended_direction` uses approved enum only — no Buy/Sell/Hold.
+9. When evidence insufficient: state "insufficient evidence."
+10. Never claim real-time market data unless source/timestamp verifiable.
+11. Model/provider/prompt version recorded and traceable.
+12. Temperature set to 0 or lowest deterministic value available.
 13. External provider failure must not fabricate results.
-14. Partial role failure (if multi-role) must be clearly displayed.
-15. All output uses neutral, non-advisory language.
 
-### Prompt Injection & Data Security
+### Hallucination Acknowledgment (Mandatory Correction)
 
-- Owner Policy/Decision/Portfolio text is **untrusted data** — treated as input, not instruction.
-- Evidence content must not change system policy or evaluation rules.
-- Provider allowlist (only approved LLM APIs; no arbitrary URL fetch).
-- No code execution via LLM output or evidence content.
-- No secret, API key, or credential in prompts, DB, logs, or audit metadata.
-- Financial data minimization: only send what's needed for the specific session.
-- Redact unnecessary identifiers before sending to provider.
-- Provider request/response logging: store metadata (provider, model, tokens, cost),
-  not full prompt text (contains financial data). Configurable retention.
-- Local encrypted credential storage (keyring or env-based; compare approaches).
-- Timeout, retry, rate-limit, circuit breaker on provider calls.
-- Token/cost budget per session and per billing period.
-- Provider data-retention/privacy terms reviewed.
-- Offline/unavailable state: show cached past reports, disable new sessions.
+> The LLM may hallucinate.  This design does not claim to prevent
+> hallucination.  Instead, it mitigates risk through:
+>
+> 1. **Strict JSON schema validation** — hallucinated fields with wrong
+>    types or missing sections are rejected.
+> 2. **Citation validation** — any factual claim not citing an evidence_id
+>    is rejected unless marked as model inference.
+> 3. **Provider Output Validator** — post-response validation pipeline
+>    that rejects the entire response when violations are detected.
+> 4. **No raw financial text in evidence packet** — the LLM receives
+>    structured facts only, reducing hallucination surface area.
 
-### Provider Abstraction
+### Provider Output Validator
 
-Single `AIModelProvider` interface with implementations for:
-- OpenAI (GPT-4o, GPT-4o-mini)
-- Anthropic (Claude Sonnet)
-- DeepSeek (DeepSeek-V3)
+```python
+def validate_provider_output(response: dict, evidence_ids: set) -> ValidationResult:
+    """Reject or accept LLM output.  Never silently accept invalid output."""
+    errors = []
 
-Provider selection per configuration, not hardcoded. Default: DeepSeek
-(cost-effective, strong reasoning). Owner can configure.
+    # 1. JSON schema validation
+    schema_errors = validate_json_schema(response, COMMITTEE_OUTPUT_SCHEMA)
+    errors.extend(schema_errors)
 
----
+    # 2. Required sections present and non-empty
+    for section in REQUIRED_SECTIONS:
+        if not response.get(section):
+            errors.append(f"Missing required section: {section}")
 
-## 6. Evidence Contract
+    # 3. Opposing arguments must be non-empty
+    if not response.get("opposing_arguments"):
+        errors.append("opposing_arguments must be non-empty")
 
-### Evidence Item Schema
+    # 4. Citation validation — every factual claim must cite evidence_id
+    for claim in extract_factual_claims(response):
+        if not claim.get("evidence_ref"):
+            if not claim.get("model_inference"):
+                errors.append(
+                    f"Factual claim without evidence citation or inference label"
+                )
 
-```json
-{
-  "id": "evt-<uuid>",
-  "source_type": "portfolio_snapshot | policy_version | guardian_event | decision | owner_claim | external",
-  "source_id": "<CompoundOS entity UUID or external identifier>",
-  "source_title": "Q2 2026 Portfolio Snapshot v3",
-  "observed_at": "2026-07-15T00:00:00Z",
-  "as_of": "2026-06-30",
-  "content_hash": "sha256:abc123...",
-  "structured_facts": {
-    "total_value": "1,500,000.00",
-    "equity_allocation_pct": "65.0",
-    "cash_allocation_pct": "5.0"
-  },
-  "provenance": "compoundos_internal",
-  "freshness": "current",
-  "confidence": "high",
-  "citation_ref": "Portfolio Snapshot v3 §Holdings",
-  "model_inference": false
-}
+    # 5. Forbidden language detection
+    if contains_trading_language(response):
+        errors.append("Response contains trading/investment-advice language")
+
+    # 6. Neutral language check
+    if not uses_neutral_language(response):
+        errors.append("Response language is not neutral/advisory")
+
+    # 7. Token/cost metadata consistency
+    if not metadata_consistent(response):
+        errors.append("Token/cost metadata inconsistent")
+
+    if errors:
+        return ValidationResult.rejected(errors)
+    return ValidationResult.accepted()
 ```
 
-### Evidence Source Types
+### Prompt Injection & Data Security (unchanged)
 
-| Type | Origin | Freshness | Confidence |
-|------|--------|-----------|------------|
-| portfolio_snapshot | CompoundOS | as_of date | high (immutable) |
-| policy_version | CompoundOS | sealed_at | high (immutable) |
-| guardian_event | CompoundOS | detected_at | high (immutable) |
-| decision | CompoundOS | decision_date | high (confirmed) |
-| automation_run | CompoundOS | completed_at | high (immutable) |
-| owner_claim | Owner-provided | stated by Owner | medium (unverified) |
-| external | External source | as reported | variable (unverified) |
+- Owner Policy/Decision/Portfolio text treated as UNTRUSTED DATA.
+- Evidence content cannot change system policy or evaluation rules.
+- Provider allowlist: only approved LLM APIs.
+- No arbitrary URL fetch unless separately authorized.
+- No code execution via LLM output or evidence.
+- No secret/API key/credential in prompts, DB, logs, or audit metadata.
 
-### Citation Rules
+### Privacy & Data Minimization
 
-Every factual claim in the report must:
-- Cite at least one evidence_id, OR
-- Be explicitly marked "[model inference — not based on provided evidence]"
+What MAY be sent to provider:
 
-No claim may present model training knowledge as real-time evidence.
+- Owner's proposal text (what they typed into this session)
+- Structured facts: category-level allocation percentages, relevant
+  Policy constraint summaries, Guardian condition summaries,
+  relevant prior-decision structured summaries, evidence IDs,
+  as_of timestamps, freshness labels.
 
----
+What must NEVER be sent to provider:
 
-## 7. Committee Roles (V1 Minimum)
+- Household name or personally identifiable information
+- Account identifiers
+- Full Policy text (objectives, time_horizon, decision_process, etc.)
+- Full Portfolio holdings (names, quantities, unit prices, notes)
+- Full Decision Journal text
+- Full Guardian Event details
+- Aggregate value calculations, specific dollar amounts
 
-### Recommended: 3 roles + Synthesis
+### Privacy Preview UI
 
-| Role | Input | Output | Prohibitions |
-|------|-------|--------|-------------|
-| **Long-Term Compounding** | Policy allocations, Portfolio holdings, Decision history | Analysis of alignment with long-term compounding strategy, drift assessment | No market timing advice, no short-term trading suggestions |
-| **Risk & Capital Preservation** | Household risk statement, liquidity needs, Portfolio composition | Risk exposure analysis, concentration warnings, capital preservation assessment | No panic-selling language, no "safe" guarantees |
-| **Policy Alignment** | Current Published Policy, Guardian Events, Portfolio allocations | Check proposal against Policy objectives, constraints, and prohibitions | No Policy interpretation beyond literal text |
-| **Synthesis** | All role outputs | Balanced summary, supporting arguments, opposing arguments, key risks, minority opinions preserved | No elimination of minority views, no single recommendation |
+Before the Owner clicks "Run Committee," a preview screen shows exactly
+the structured data that will be sent to the provider.  Owner must
+explicitly review this before confirming.  No provider call without
+preview.
 
-### Non-Goals for V1
+### Manual-Only Constraint (Owner Addition)
 
-- Devil's Advocate (separate role — can be folded into Risk)
-- Macroeconomic Context (no external market data)
-- Index/Passive Investing (covered by Long-Term)
-- Chair/Synthesis should not override role outputs
+The Committee is **completely manual-only** in Sprint 006:
 
----
+- Not scheduleable through Automation
+- Not triggerable by Guardian Events
+- Not triggerable by Portfolio Confirm
+- Not callable by the Automation Worker
+- Not runnable from any automated workflow
 
-## 8. API Contract (Future Implementation)
-
-| Method | Path | Purpose | Status |
-|--------|------|---------|--------|
-| POST | /api/committee/sessions | Create new analysis session | 201 |
-| GET | /api/committee/sessions | List sessions (pagination) | 200 |
-| GET | /api/committee/sessions/{id} | Session detail with report | 200 |
-| POST | /api/committee/sessions/{id}/run | Start analysis run | 201 |
-| GET | /api/committee/runs/{id} | Run status + partial results | 200 |
-| GET | /api/committee/reports/{id} | Full immutable report | 200 |
-| GET | /api/committee/evidence/{session_id} | Evidence items for session | 200 |
-| GET | /api/committee/audit | Committee audit timeline | 200 |
-
-All POST endpoints require explicit Owner confirmation. No auto-run.
-Session → Run → Report lifecycle is immutable after completion.
+Only the Owner, through the `/committee` UI, can create a session
+and explicitly confirm a provider call.  Future automation requires
+a new Owner Decision.
 
 ---
 
-## 9. UI States (Future Implementation)
+## 8. Provider Abstraction & Retry (Resolved)
 
-- Loading, no household, no Published Policy, no Portfolio Snapshot
-- Empty proposals list, proposal editor, local validation
-- Evidence review (what will be sent to provider)
-- Privacy/redaction review before run
-- Explicit run confirmation with cost estimate
-- Queued/running with role progress indicators
-- Partial role failure display
-- Provider unavailable / timeout / rate limit states
-- Insufficient evidence warning
-- Completed balanced report with:
-  - Supporting arguments
-  - Opposing arguments (mandatory)
-  - Key risks
-  - Minority opinions (preserved)
-  - Evidence citations (linked)
-  - Stale evidence warnings
-  - Model inference labels
-- Owner accept/reject/defer actions
-- Decision Journal handoff (create Decision from report)
-- History/detail, audit timeline
-- Conflict/dirty state preservation
-- Retry reads vs explicit rerun distinction
+### Provider Interface
+
+Provider-neutral interface.  V1 implements only a DeepSeek adapter.
+
+- `AIModelProvider` abstract interface
+- `DeepSeekProvider` — V1 implementation
+- OpenAI/Anthropic adapters NOT implemented in V1
+- Model ID configured, not hardcoded
+- Adding a new provider requires separate Owner authorization
+
+### Retry Boundary
+
+All-or-nothing valid report.  No partial report display.
+
+Maximum 1 automatic retry, allowed only for:
+
+- Connection timeout
+- HTTP 429 (rate limit)
+- Transient provider 5xx
+- Provider returns explicitly retryable temporary error
+
+Retry is FORBIDDEN for:
+
+- Schema validation failure
+- Citation validation failure
+- Safety validation failure
+- Token/cost cap exceeded
+- Prompt injection detection
+- Non-transient 4xx
+
+After 2 failures (original + 1 retry):
+
+- Session status → `failed`
+- Evidence packet and metadata preserved
+- No committee_report created
+- UI displays clear "provider failure" state
+- Owner can explicitly re-run (creates new session)
+
+### Per-Session Budget (Resolved)
+
+| Cap | Default Value | Enforcement |
+|-----|---------------|-------------|
+| Max input tokens | 50,000 | Pre-flight estimate; reject if exceeded |
+| Max output tokens | 8,000 | Provider parameter |
+| Max estimated cost | USD 1.00 | Pre-flight estimate; reject if exceeded |
+
+- Owner may adjust caps in local secure configuration (lower or higher).
+- Caps are never auto-increased.
+- Actual usage and cost recorded as metadata.
+- Provider pricing changes do not silently bypass token cap.
 
 ---
 
-## 10. Test Strategy
+## 9. Credential Storage (Resolved)
+
+- **Production (macOS):** macOS Keychain.
+- **CI:** Environment variable with fake/test credential.
+- API key never enters DB, repository, logs, prompt payload, or frontend.
+- Keychain dependency must be minimal and independently reviewed.
+- If Keychain is unavailable, production must NOT silently fallback to
+  plaintext file.  Environment fallback only with explicit Owner config.
+- Plaintext config files for credentials are FORBIDDEN.
+
+---
+
+## 10. Evidence Contract (Unchanged from original gate)
+
+Each evidence item carries:
+
+| Field | Description |
+|-------|-------------|
+| source_type | portfolio_snapshot, policy_version, guardian_event, decision, owner_claim (external reserved) |
+| source_id | CompoundOS entity UUID |
+| as_of | Timestamp of source data |
+| content_hash | SHA256 for integrity |
+| structured_facts | Key-value pairs extracted deterministically |
+| provenance | compoundos_internal or owner_provided |
+| freshness | current / stale |
+| confidence | high / medium |
+| citation_ref | Human-readable reference |
+
+### Evidence vs. Inference (Mandatory Correction)
+
+**Evidence** comes from verifiable CompoundOS or Owner-provided sources.
+It is stored in `committee_evidence_items`.
+
+**Model inference** exists only in the Committee Report.  It is not evidence.
+The `evidence_items` table has no `model_inference` field.  Inference labels
+belong to report claims/sections, not to evidence.
+
+Every factual claim in the report must cite an evidence_id OR be explicitly
+marked as model inference.  Claims that are neither are rejected by the
+Provider Output Validator.
+
+---
+
+## 11. API Contract (Future Implementation — Not Authorized)
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | /api/committee/sessions | Create new session (draft) |
+| GET | /api/committee/sessions | List sessions (pagination) |
+| GET | /api/committee/sessions/{id} | Session detail with report + evidence |
+| POST | /api/committee/sessions/{id}/run | Start analysis (after privacy preview) |
+| GET | /api/committee/runs/{id} | Run status |
+| GET | /api/committee/reports/{id} | Immutable report |
+| GET | /api/committee/evidence/{session_id} | Evidence items |
+| POST | /api/committee/outcomes | Record Owner outcome |
+| GET | /api/committee/audit | Committee audit timeline |
+
+All POST endpoints require explicit Owner confirmation.  No auto-run.
+Session → Evidence → Run → Report → Outcome lifecycle.
+
+---
+
+## 12. UI States (Future Implementation — Not Authorized)
+
+At minimum: loading, no household, no Published Policy, no Portfolio
+Snapshot, empty sessions, session editor, privacy/redaction preview
+(mandatory before provider call), explicit run confirmation with cost
+estimate, queued/running, provider failure (all-or-nothing — no partial),
+insufficient evidence warning, completed report with all sections,
+supporting + opposing arguments, risks, minority opinions, evidence
+citations, recommended_direction, Owner accept/reject/defer, Decision
+Journal handoff (Draft only), history/detail, audit, dirty/conflict
+preservation, no auto-run on page load.
+
+---
+
+## 13. Test Strategy (Future Implementation — Not Authorized)
+
+**No live external LLM calls in CI.**  All provider calls mocked.
 
 ### Persistence (Slice A)
-- Migration lifecycle (00012 + additive)
-- Immutability: reports uneditable after generation
-- Household isolation: sessions/reports filtered
+- Migration 0012 lifecycle (fresh, incremental, downgrade/re-upgrade)
+- Report immutability (no UPDATE allowed)
+- Outcome append-only (no UPDATE/DELETE)
+- Household isolation
 - Evidence provenance tracking
-- Model/prompt version stored per report
-- Corrections via re-run (new session)
-- Token/cost tracking per session
+- Content hash integrity
+- Cascade delete behavior
 
 ### Provider Abstraction (Slice B)
-- Mock provider only in CI (no live LLM calls)
-- Schema validation for provider output
-- Timeout enforcement
-- Rate limit handling
-- Malformed/missing output handling
-- Partial response handling
-- Provider unavailable → graceful degradation
+- Mock provider validates schema, timeout, rate limit
+- Malformed output rejected
+- Retry boundary enforced (1 retry, transient errors only)
 - Token/cost cap enforcement
-- No secrets in logs or error messages
+- No secrets in error messages or logs
 
-### Committee Orchestration (Slice B)
-- Role isolation (if multi-role)
-- Deterministic evidence packet construction
-- Citation validation (every claim must cite)
-- Minority opinion preservation in synthesis
-- Synthesis cannot invent evidence
-- No evidence → "insufficient evidence" flag
-- Partial role failure → partial report
-- Idempotency (re-run = new session)
-- Session failure → full rollback
+### Provider Output Validator (Slice B)
+- Schema validation: required sections, types, bounds
+- Citation validation: claims without evidence_id rejected
+- Forbidden language detection (Buy/Sell/Hold, trading language)
+- Neutral language enforcement
+- Evidence/Inference boundary enforced
 
 ### Safety (Slice B)
 - Prompt injection resistance
 - Malicious evidence rejection
-- Fabricated citation detection
 - Stale evidence warning
-- No trading/tool call generation
-- No mutation of Policy/Portfolio/Guardian
-- Neutral language enforcement
-- Owner confirmation required
+- No trading/tool call in output
+- No Policy/Portfolio/Guardian mutation
+- Owner confirmation required for all actions
+- Manual-only constraint: no automated Committee calls
 
 ### Frontend (Slice C)
 - All approved UI states
-- Accessibility (labels, roles, keyboard)
-- Dirty/conflict preservation
-- No auto-run on page load
+- Privacy Preview state
+- Accessibility, dirty/conflict
+- No auto-run on load
 - No mutation retry
-- Evidence/citation display with links
+- Evidence citation display
 
 ---
 
-## 11. Slice Decomposition (R2/R2/R1)
+## 14. Slice Decomposition (R2/R2/R1 — Not Authorized)
 
 ### Slice A — Persistence + Evidence Contracts (R2)
-- Migration 0012: committee_sessions, evidence_items, committee_reports
+- Migration 0012: sessions, evidence_items, reports, outcomes
 - ORM models, named constraints, immutability triggers
-- Evidence packet builder (deterministic queries against CompoundOS entities)
+- Evidence Packet Builder (deterministic queries against CompoundOS)
 - Citation reference generation
-- Source type registry
+- Source type registry (CompoundOS internal + owner_claim only in V1)
 - 80+ PostgreSQL tests
-- No API, no LLM, no frontend
+- **No API, no LLM, no frontend.**
 
-### Slice B — Provider Adapter + Committee Orchestration + API (R2)
-- AIModelProvider interface (OpenAI, Anthropic, DeepSeek adapters)
-- Credential management (keyring/env)
-- Committee orchestration: evidence → prompt → parse → validate → store
-- 8 API endpoints under /api/committee
-- Provider failure handling, rate limiting, cost tracking
-- Deterministic evidence pipeline tests (mock provider)
-- Safety tests (prompt injection, citation validation, neutral language)
-- No frontend
+### Slice B — Provider + Output Validator + API (R2)
+- AIModelProvider interface + DeepSeek adapter only
+- Credential management (macOS Keychain)
+- Provider Output Validator (schema, citation, safety, language)
+- Committee orchestration: evidence → privacy preview → provider call →
+  validate → persist
+- 9 API endpoints under /api/committee
+- Retry, rate-limiting, cost tracking, budget enforcement
+- Mock provider for all CI tests
+- Safety tests (prompt injection, citation validation, hallucination rejection)
+- **No frontend.  No OpenAI/Anthropic adapters.**
 
 ### Slice C — Committee Frontend (R1)
-- /committee page with typed API client
-- All UI states from §9
-- Evidence review and privacy redaction before run
-- Report display with linked citations
-- Decision Journal handoff
+- `/committee` page with typed API client
+- All approved UI states including Privacy Preview
+- Report display with evidence citations
+- Decision Journal handoff (Draft only)
 - Full accessibility and component tests
+- **No auto-run.  Manual-only.**
 
 ---
 
-## 12. Owner Decisions Required
+## 15. Owner Decisions — All Resolved
 
-| ID | Question | Option A | Option B | Option C | Recommended | Rationale |
-|----|----------|----------|----------|----------|-------------|-----------|
-| OD-6-1 | Sprint 006 candidate | AI Committee + Evidence | Market Data only | Notifications only | **A** | Highest owner value, uses all Foundation data |
-| OD-6-2 | External LLM provider | Provider-neutral abstraction | DeepSeek only | OpenAI only | **A** | Portability, cost flexibility |
-| OD-6-3 | Send financial data to external LLM | Minimized structured facts only | Full Portfolio/Policy text | No external LLM (local only) | **A** | Evidence pipeline minimizes exposure |
-| OD-6-4 | Evidence foundation first | Combined sprint (evidence + committee) | Evidence sprint before committee | Committee without evidence | **A** | Committee needs citations to be trustworthy |
-| OD-6-5 | Committee design approach | Deterministic evidence + LLM narration | Multi-role separate LLM calls | Single structured prompt | **A** | Most testable, explainable, safe |
-| OD-6-6 | Minimum V1 roles | Long-Term + Risk + Policy Alignment + Synthesis | All 7 roles | Single role only | **A** | Balanced without over-engineering |
-| OD-6-7 | Data model | Committee Session + Report (Candidate A) | Proposal + Run + Roles (Candidate B) | Reuse Decision Journal (Candidate C) | **A** | Clean separation from Decisions |
-| OD-6-8 | Report language | Balanced with mandatory opposing views | Recommendation allowed | Narrative without structure | **A** | Safety requirement: no one-sided advice |
-| OD-6-9 | Owner outcome lifecycle | Accept → Decision Journal | Accept/Reject/Defer → Journal | Report only (no Decision) | **B** | Full lifecycle without forcing action |
-| OD-6-10 | Model/prompt version retention | Store per report (immutable) | Store latest only | Don't store | **A** | Audit trail and reproducibility |
-| OD-6-11 | Token/cost cap | Per-session budget | Monthly budget only | No cap | **A** | Prevents surprise costs, per-session is granular |
-| OD-6-12 | Provider failure handling | Partial report (roles that succeeded) | Full retry or nothing | Silent fallback | **A** | Transparency — Owner sees what's available |
-| OD-6-13 | Raw provider response retention | Metadata only (tokens, model, cost) | Full prompt + response | Nothing | **A** | Financial data in prompts — don't persist |
-| OD-6-14 | Credential storage | System keyring (macOS Keychain) | Environment variable only | Config file | **A** | Most secure local option |
-| OD-6-15 | External market data in V1 | Deferred — no external data | Minimal (free tier only) | Full provider integration | **A** | V1 works with CompoundOS internal data only |
+| ID | Question | Resolution |
+|----|----------|------------|
+| OD-6-1 | Sprint 006 candidate | **A**: AI Committee + internal Evidence Pipeline. No Market Data/Notifications/Family Goals. |
+| OD-6-2 | LLM provider | **A, V1-limited**: Provider-neutral interface; only DeepSeek adapter implemented in V1. Model ID configured, not hardcoded. |
+| OD-6-3 | Financial data to provider | **A**: Minimized structured facts only. Privacy Preview required. Full Policy/Portfolio/Guardian text never sent. |
+| OD-6-4 | Evidence foundation sequencing | **A**: Combined sprint. Committee never calls LLM without evidence packet. |
+| OD-6-5 | Design approach | **A**: Deterministic evidence + one structured LLM call. Single call returns all 7 perspectives. |
+| OD-6-6 | Committee roles | **B, single-call**: All 7 perspectives in one call. Macro must declare insufficient evidence. |
+| OD-6-7 | Data model | **A + Outcome entity**: Sessions, Evidence Items, Reports (immutable), Outcomes (append-only). Separate from Decision Journal. |
+| OD-6-8 | Report language | **B, restricted**: recommended_direction with approved enum. Never Buy/Sell/Hold. |
+| OD-6-9 | Owner outcome | **B, Draft-only**: Accept/Reject/Defer → append-only Outcomes → optionally creates Decision Draft (never auto-confirmed). |
+| OD-6-10 | Version retention | **A**: Every immutable Report stores provider, model, prompt version, schema, temperature, tokens, cost. |
+| OD-6-11 | Token/cost cap | **A, explicit defaults**: 50K input / 8K output / $1.00 per session. Configurable by Owner. |
+| OD-6-12 | Provider failure | **B, explicit retry**: All-or-nothing report, max 1 retry (transient only). No partial report. |
+| OD-6-13 | Response logging | **A, clarified**: No raw prompt/response. Normalized immutable Report must be persisted for history. |
+| OD-6-14 | Credential storage | **A**: macOS Keychain. CI uses env var. No plaintext config. |
+| OD-6-15 | External market data | **A**: Deferred. V1 CompoundOS internal only. Macro section declares insufficient evidence. |
+
+### Additional Owner Constraints Applied
+
+- **Manual-only**: No Schedule, Guarduan Event, Portfolio Confirm, or Automation Worker may trigger Committee.
+- **V1 temperature**: 0 or lowest deterministic value available.
+- **Decision Journal integration**: Creates Draft only; never auto-confirms.
+
+---
+
+## 16. Mandatory Design Corrections Applied
+
+1. ✅ Architecture unified: deterministic evidence + one structured call.  Multi-call/partial-role-failure removed.
+2. ✅ Safety language corrected: LLM can hallucinate.  Mitigation via strict validation, not claimed prevention.
+3. ✅ Committee Outcome entity added with append-only lifecycle.
+4. ✅ Decision Journal integration: Draft only, never auto-confirmed.  Existing Decision lifecycle unchanged.
+5. ✅ Evidence/Inference separation: Evidence = verifiable source.  Inference = report claims only.
+6. ✅ Provider Output Validator: schema, citation, safety, language validation pipeline.
+7. ✅ Privacy Preview UI state: Owner reviews structured facts before provider call.
+8. ✅ External market data scope deleted from Sprint 006.  External source_type reserved but unused in V1.
+9. ✅ All API, data model, state machine, test matrix aligned with resolved decisions.
 
 ---
 
 ## Predecessors & Dependencies
 
-- Sprint 001–005: Done (Foundation complete)
-- All 11 migrations intact
-- Guardian/Automation operational
-- personal-use-only boundary in canonical docs
+- Sprint 001–005: Done.
+- All 11 migrations intact.
+- Guardian/Automation operational.
+- Personal-use-only boundary in canonical docs.
 
 ## Implementation Status
 
-- **Sprint 006 Implementation: NOT AUTHORIZED**
-- All slices require separate explicit Owner authorization
-- This document is a design gate deliverable only
-- No migration, backend, frontend, or dependency changes are authorized
+- **Sprint 006 Implementation: NOT AUTHORIZED.**
+- All slices require separate explicit Owner authorization.
+- This document is the resolved Technical Design Gate deliverable.
+- No migration, backend, frontend, or dependency changes are authorized.
 
 ## Review Status
 
-- Independent technical design review: Pending
-- Owner Decisions: 15 pending (OD-6-1 through OD-6-15)
-- Resolution required before any Slice authorization
+- Owner Decisions: 15/15 resolved (2026-07-20).
+- Independent technical design review: Pending.
+- PR #50: Draft → Ready after review passes.
