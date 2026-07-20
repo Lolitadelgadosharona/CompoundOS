@@ -35,7 +35,7 @@ The LLM is a narrator, not an analyst.  Facts come from CompoundOS.
 The LLM organizes, explains, and provides perspectives — but every
 factual claim must cite an evidence ID or be rejected as invalid.
 
-**Manual only.** No Schedule, no Guarduan Event, no Portfolio Confirm,
+**Manual only.** No Schedule, no Guardian Event, no Portfolio Confirm,
 no Automation Worker may trigger the Committee.  Owner initiates every
 session explicitly.
 
@@ -393,7 +393,7 @@ preview.
 
 The Committee is **completely manual-only** in Sprint 006:
 
-- Not scheduleable through Automation
+Not scheduleable through Automation
 - Not triggerable by Guardian Events
 - Not triggerable by Portfolio Confirm
 - Not callable by the Automation Worker
@@ -637,7 +637,7 @@ preservation, no auto-run on page load.
 
 ### Additional Owner Constraints Applied
 
-- **Manual-only**: No Schedule, Guarduan Event, Portfolio Confirm, or Automation Worker may trigger Committee.
+- **Manual-only**: No Schedule, Guardian Event, Portfolio Confirm, or Automation Worker may trigger Committee.
 - **V1 temperature**: 0 or lowest deterministic value available.
 - **Decision Journal integration**: Creates Draft only; never auto-confirms.
 
