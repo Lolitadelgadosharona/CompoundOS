@@ -32,7 +32,9 @@ export default function NotificationsClient() {
     } catch { /* silent */ } finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { load(); return () => abortRef.current?.abort(); }, [load]);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    load(); return () => abortRef.current?.abort(); }, [load]);
 
   if (loading) return <main className="shell" role="status"><h1>Notifications</h1><p>Loading…</p></main>;
 

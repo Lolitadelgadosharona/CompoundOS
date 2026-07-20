@@ -20,7 +20,10 @@ QUIET_START_DEFAULT = time(22, 0)
 QUIET_END_DEFAULT = time(8, 0)
 
 
-def compute_fingerprint(source: str, event_type: str, severity: str, entity_id: str | None = None) -> str:
+def compute_fingerprint(
+    source: str, event_type: str, severity: str,
+    entity_id: str | None = None,
+) -> str:
     raw = f"{source}:{event_type}:{severity}:{entity_id or ''}"
     return hashlib.sha256(raw.encode()).hexdigest()
 
