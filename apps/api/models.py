@@ -1300,3 +1300,182 @@ class GuardianEvent(Base):
         Boolean, nullable=False, default=True, server_default=text("TRUE")
     )
     as_of_date: Mapped[Any] = mapped_column(Date, nullable=False)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Sprint 006 — AI Committee Foundation
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class CommitteeSession(Base):
+    __tablename__ = "committee_sessions"
+    __table_args__ = (
+        Index("ix_committee_sessions_household", "household_id"),
+        CheckConstraint(
+            "status IN ('draft', 'queued', 'running', 'completed', 'failed')",
+            name="ck_committee_sessions_status",
+        ),
+        CheckConstraint(
+            "char_length(title) > 0",
+            name="ck_committee_sessions_title_not_empty",
+        ),
+        CheckConstraint(
+            "char_length(proposal_text) > 0",
+            name="ck_committee_sessions_proposal_not_empty",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    household_id: Mapped[UUID] = mapped_column(
+        ForeignKey("household_profiles.id", ondelete="RESTRICT"),
+    )
+    parent_session_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("committee_sessions.id", ondelete="SET NULL"),
+    )
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    proposal_text: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'draft'"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+        server_default=func.now(), onupdate=func.now(),
+    )
+    # Relationships
+    evidence_items: Mapped[list["CommitteeEvidenceItem"]] = relationship(
+        "CommitteeEvidenceItem", back_populates="session",
+        cascade="all, delete-orphan",
+    )
+    report: Mapped[Optional["CommitteeReport"]] = relationship(
+        "CommitteeReport", back_populates="session", uselist=False,
+        cascade="all, delete-orphan",
+    )
+    outcomes: Mapped[list["CommitteeOutcome"]] = relationship(
+        "CommitteeOutcome", back_populates="session",
+        cascade="all, delete-orphan",
+    )
+
+
+class CommitteeEvidenceItem(Base):
+    __tablename__ = "committee_evidence_items"
+    __table_args__ = (
+        Index("ix_committee_evidence_items_session", "session_id"),
+        CheckConstraint(
+            "source_type IN ("
+            " 'portfolio_snapshot', 'policy_version', 'guardian_event',"
+            " 'decision', 'owner_claim', 'external'"
+            ")",
+            name="ck_evidence_items_source_type",
+        ),
+        CheckConstraint(
+            "provenance IN ('compoundos_internal', 'owner_provided')",
+            name="ck_evidence_items_provenance",
+        ),
+        CheckConstraint(
+            "confidence IN ('high', 'medium')",
+            name="ck_evidence_items_confidence",
+        ),
+        CheckConstraint(
+            "char_length(freshness) > 0",
+            name="ck_evidence_items_freshness_not_empty",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    session_id: Mapped[UUID] = mapped_column(
+        ForeignKey("committee_sessions.id", ondelete="CASCADE"),
+    )
+    source_type: Mapped[str] = mapped_column(Text, nullable=False)
+    source_id: Mapped[Optional[UUID]] = mapped_column()
+    source_title: Mapped[str] = mapped_column(Text, nullable=False)
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    content_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    structured_facts: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    provenance: Mapped[str] = mapped_column(Text, nullable=False)
+    freshness: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence: Mapped[str] = mapped_column(Text, nullable=False)
+    citation_ref: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(),
+    )
+    session: Mapped["CommitteeSession"] = relationship(
+        "CommitteeSession", back_populates="evidence_items",
+    )
+
+
+class CommitteeReport(Base):
+    __tablename__ = "committee_reports"
+    __table_args__ = (
+        UniqueConstraint("session_id", name="uq_committee_reports_session"),
+        CheckConstraint(
+            "char_length(provider) > 0",
+            name="ck_committee_reports_provider_not_empty",
+        ),
+        CheckConstraint(
+            "char_length(model_id) > 0",
+            name="ck_committee_reports_model_id_not_empty",
+        ),
+        CheckConstraint(
+            "temperature >= 0 AND temperature <= 2.0",
+            name="ck_committee_reports_temperature_range",
+        ),
+        CheckConstraint(
+            "char_length(content_hash) > 0",
+            name="ck_committee_reports_content_hash_not_empty",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    session_id: Mapped[UUID] = mapped_column(
+        ForeignKey("committee_sessions.id", ondelete="CASCADE"),
+    )
+    provider: Mapped[str] = mapped_column(Text, nullable=False)
+    model_id: Mapped[str] = mapped_column(Text, nullable=False)
+    model_version: Mapped[Optional[str]] = mapped_column(Text)
+    prompt_version: Mapped[str] = mapped_column(Text, nullable=False)
+    schema_version: Mapped[str] = mapped_column(Text, nullable=False)
+    temperature: Mapped[Decimal] = mapped_column(Numeric(3, 2), nullable=False)
+    provider_params: Mapped[Optional[dict]] = mapped_column(JSONB)
+    input_tokens: Mapped[Optional[int]] = mapped_column(BigInteger)
+    output_tokens: Mapped[Optional[int]] = mapped_column(BigInteger)
+    estimated_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 6))
+    report_content: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    content_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    generated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(),
+    )
+    session: Mapped["CommitteeSession"] = relationship(
+        "CommitteeSession", back_populates="report",
+    )
+
+
+class CommitteeOutcome(Base):
+    __tablename__ = "committee_outcomes"
+    __table_args__ = (
+        Index("ix_committee_outcomes_session", "session_id"),
+        CheckConstraint(
+            "outcome IN ('accepted', 'rejected', 'deferred')",
+            name="ck_committee_outcomes_outcome",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    session_id: Mapped[UUID] = mapped_column(
+        ForeignKey("committee_sessions.id", ondelete="CASCADE"),
+    )
+    report_id: Mapped[UUID] = mapped_column(
+        ForeignKey("committee_reports.id", ondelete="RESTRICT"),
+    )
+    outcome: Mapped[str] = mapped_column(Text, nullable=False)
+    owner_rationale: Mapped[Optional[str]] = mapped_column(Text)
+    decision_draft_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("decision_drafts.id", ondelete="SET NULL"),
+    )
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(),
+    )
+    session: Mapped["CommitteeSession"] = relationship(
+        "CommitteeSession", back_populates="outcomes",
+    )
