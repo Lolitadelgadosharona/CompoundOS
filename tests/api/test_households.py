@@ -276,4 +276,8 @@ def test_migration_contains_only_approved_product_tables(postgres_engine) -> Non
         "runs",
         "attempts",
         "leases",
+        "committee_sessions",
+        "committee_evidence_items",
+        "committee_reports",
+        "committee_outcomes",
     }
