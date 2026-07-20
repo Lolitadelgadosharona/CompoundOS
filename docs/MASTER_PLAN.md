@@ -39,7 +39,12 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   - Migrations 0008–0011: job_definitions, schedules, runs, attempts, leases
   - 9 Automation endpoints, /automation workspace, Worker status
   - 431 PG / 136 non-PG / 217 frontend test baseline
-- Sprint 006: Not Authorized / Not Started
+- Sprint 006: Technical Design Gate — In Review (docs only)
+  - Technical Design / Open Questions: PR pending
+  - Slice A (Persistence + Evidence): Not Authorized / Not Started
+  - Slice B (Provider + Orchestration + API): Not Authorized / Not Started
+  - Slice C (Committee Frontend): Not Authorized / Not Started
+  - 15 Owner Decisions pending (OD-6-1 through OD-6-15)
 - Sprint 007: Not Authorized / Not Started
 
 ## Backlog
