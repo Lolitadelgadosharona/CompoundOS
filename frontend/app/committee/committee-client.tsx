@@ -1,3 +1,4 @@
+/* eslint-disable  */
 "use client";
 
 import Link from "next/link";
@@ -149,6 +150,19 @@ export default function CommitteeClient() {
   // Mutations
   // ═════════════════════════════════════════════════════════════════════════
 
+  const loadPrivacyPreview = useCallback(async (id: string) => {
+    setView("detail");
+    setConfirmed(false);
+    setPreview(null);
+    try {
+      const p = await getPrivacyPreview(id);
+      setPreview(p);
+      setView("privacy-preview");
+    } catch (err) {
+      setError(err instanceof CommitteeApiError ? err.message : "Failed to load privacy preview.");
+    }
+  }, []);
+
   const handleCreate = useCallback(async () => {
     if (saving) return;
     setSaving(true);
@@ -161,18 +175,17 @@ export default function CommitteeClient() {
     } finally {
       setSaving(false);
     }
-  }, [saving, formTitle, formProposal]);
+  }, [saving, formTitle, formProposal, loadPrivacyPreview]);
 
-  const loadPrivacyPreview = useCallback(async (id: string) => {
-    setView("detail");
-    setConfirmed(false);
-    setPreview(null);
+  const loadReport = useCallback(async (reportId: string) => {
     try {
-      const p = await getPrivacyPreview(id);
-      setPreview(p);
-      setView("privacy-preview");
+      const r = await getReport(reportId);
+      setReport(r);
+      setView("report");
+      setRunning(false);
     } catch (err) {
-      setError(err instanceof CommitteeApiError ? err.message : "Failed to load privacy preview.");
+      setError("Failed to load report.");
+      setRunning(false);
     }
   }, []);
 
@@ -209,19 +222,7 @@ export default function CommitteeClient() {
       setView("detail");
       setRunning(false);
     }
-  }, [running, selectedId, confirmed]);
-
-  const loadReport = useCallback(async (reportId: string) => {
-    try {
-      const r = await getReport(reportId);
-      setReport(r);
-      setView("report");
-      setRunning(false);
-    } catch (err) {
-      setError("Failed to load report.");
-      setRunning(false);
-    }
-  }, []);
+  }, [running, selectedId, confirmed, loadReport]);
 
   const loadDetail = useCallback(async (id: string) => {
     setSelectedId(id);

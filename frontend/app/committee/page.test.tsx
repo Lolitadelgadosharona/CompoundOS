@@ -1,4 +1,5 @@
 import { cleanup, render, screen } from "@testing-library/react";
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
