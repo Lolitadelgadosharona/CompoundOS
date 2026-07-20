@@ -175,13 +175,49 @@ using character length rather than byte length.
   when its real database URL is unavailable.
 - Existing health, lint, type-check, test, build, audit, Compose, and CI checks pass.
 
-## Explicit Non-Goals for Slice 1
+## Sprint 005 — Automation Foundation
 
-- Investment Policy, target asset allocation, policy lifecycle, Decision Journal,
-  or DecisionCorrection
-- AI, AI Investment Committee, Guardian logic, thresholds, alerts, or notifications
-- Broker integrations, market data, recommendations, suitability, eligibility,
-  scores, rankings, or trading
-- Authentication, authorization, household members, multiple households, or tenancy
-- Accounts, holdings, amounts, balances, quantities, prices, costs, returns, or trades
-- Export, product hard delete, Redis product logic, public deployment, or Slice 2
+### Completed Capabilities
+
+- Guardian manual monitoring (Sprint 004) now complemented by Owner-opt-in local automation.
+- Daily schedules with IANA timezone support, created disabled by default.
+- Explicit enable/disable per schedule (never auto-enabled).
+- Manual trigger creates a new Run; never modifies existing Run.
+- Run/Attempt history and detail views.
+- Worker status (read-only: worker_count, active_leases, running_runs).
+- 9 Automation API endpoints under /api/automation.
+- /automation frontend workspace.
+- Standalone Worker with direct PostgreSQL connection (no HTTP loopback).
+- Lease-based fencing with atomic takeover, heartbeat, and crash recovery.
+
+### Personal-Use-Only Product Direction
+
+CompoundOS serves the Project Owner and their family.  It is not planned as a
+SaaS product or for external sale.
+
+Explicit long-term non-goals include:
+
+- Multi-tenant architecture
+- Billing, subscriptions, or payment processing
+- Public sign-up or self-service onboarding
+- Commercial customer administration
+- Public deployment or cloud hosting
+- Customer support platform
+
+Preserved commitments:
+
+- Local and private use
+- Explainable decision support (no black-box recommendations)
+- No autonomous trading or execution
+- Owner confirmation required for all mutations
+- Future read-only data integrations (broker, bank) when authorized
+
+### Explicit Non-Goals (Sprint 005)
+
+- Notifications (email/SMS/push) — deferred to future sprint
+- Multiple Workers or Worker orchestration
+- Cron expression support (daily-only)
+- Automatic Guardian schedule creation
+- Worker start/stop/restart from browser
+- AI/LLM integration
+- Market data or trading

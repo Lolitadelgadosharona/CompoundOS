@@ -1,37 +1,78 @@
 # CompoundOS
 
-CompoundOS is a long-term AI Family Office and Wealth Operating System. Sprint
-003 adds Portfolio Snapshot and Holdings on top of the Household, Investment
-Policy, and Decision Journal foundation.
+CompoundOS is a long-term AI Family Office and Wealth Operating System for
+personal, local, single-user use. Sprint 005 adds Data Orchestration: automated
+Guardian scheduling, Worker execution, and the /automation dashboard.
 
-> **Local-only security boundary:** This Sprint 002 build is for local,
-> single-user development only. It has no authentication and must not be exposed
-> to the public internet.
+> **Local-only security boundary:** This build is for local, single-user
+> development only. It has no authentication and must not be exposed to the
+> public internet.
 
 ## Current Scope
 
-- Create, read, and update the sole `HouseholdProfile`.
-- Persist the profile and append-only `AuditEvent` records in PostgreSQL.
-- Show the household summary and read-only audit timeline at `/household`.
-- Record user-authored Investment Policy Draft text and target percentages through
-  the backend API, then publish immutable Version snapshots.
-- Use `/policy` to create and edit the sole Policy Draft, explicitly save text and
-  allocations, review and publish immutable Versions, inspect history and audit
-  events, and start a blank or current-Published-derived Draft.
-- Record user-maintained Portfolio holdings through `/portfolio` — create a
-  Draft, add/edit/reorder holdings with decimal precision, confirm immutable
-  Snapshots, browse version history, and inspect the audit timeline.
-- Use `/decisions` to create and manage Decision Journal entries.
-- Keep Guardian, broker, trading, recommendation, market data, and
+- Create, read, and update the sole `HouseholdProfile` at `/household`.
+- Author Investment Policy Draft text and target allocations at `/policy`;
+  publish immutable Version snapshots.
+- Record Portfolio holdings through `/portfolio` with decimal precision,
+  draft/confirm lifecycle, and snapshot history.
+- Create and manage Decision Journal entries at `/decisions`.
+- Configure Guardian monitoring checks at `/guardian`; run evaluations.
+- **Schedule automated Guardian evaluations at `/automation`** — daily
+  schedules with IANA timezone, created disabled by default, requiring
+  explicit enable.  Manual one-shot triggers, run history, Worker status.
+- A standalone Worker process connects directly to PostgreSQL (not HTTP).
+- 431 PostgreSQL / 136 non-PostgreSQL / 217 frontend test baseline.
+- Keep broker, trading, recommendation, market data, AI/LLM, and
   authentication behavior outside the current implementation.
 
 ## Repository Layout
 
 - apps/api: FastAPI backend service
-- frontend: Next.js frontend application shell
-- migrations: explicit Alembic database migrations
+- frontend: Next.js frontend application (App Router)
+- migrations: explicit Alembic database migrations (0001–0011)
 - docs: product, architecture, and governance documentation
 - tests: backend health, API, validation, migration, and PostgreSQL integration tests
+
+## Automation (/automation)
+
+The Automation workspace lets the Owner create daily schedules for Guardian
+evaluation.  Schedules are **created disabled** — enable them explicitly after
+review.  The Worker process connects directly to PostgreSQL; it never calls
+the FastAPI HTTP server.
+
+### Schedule lifecycle
+
+1. Create a schedule (job type, execution time, IANA timezone)
+2. Review and **explicitly enable** the schedule
+3. The Worker picks up due schedules and executes them
+4. View run history and attempt details in the dashboard
+5. Disable or delete schedules at any time
+
+### Manual trigger
+
+Use "Trigger run now" on a schedule detail to create a one-shot manual run.
+This creates a new Run — it never modifies existing Run history.
+
+### Worker
+
+The Worker runs as a separate process (`python scripts/worker.py` or via
+launchd).  The `/automation` page shows Worker status (read-only) —
+it does **not** start, stop, or restart the Worker from the browser.
+
+### Database safety
+
+The test database name **must end with `_test`** (e.g., `compoundos_test`).
+Destructive tests are rejected against non-test databases.  Run the full
+PostgreSQL suite with:
+
+```
+COMPOUNDOS_REQUIRE_POSTGRES_TESTS=1 \
+TEST_DATABASE_URL="postgresql+psycopg://user:pass@localhost:5432/compoundos_test" \
+DATABASE_URL="$TEST_DATABASE_URL" \
+pytest -q -m postgres
+```
+
+Never run destructive tests against the `compoundos` development database.
 
 ## Local Development
 

@@ -1,5 +1,66 @@
 # Changelog
 
+## Sprint 005 — Data Orchestration Foundation — Done (2026-07-20)
+
+### Technical Design Gate (PR #37, #38)
+- 15 Owner Decisions resolved (daily-only, default-off, direct PostgreSQL Worker,
+  atomic fenced commit, lease fencing v4, no HTTP loopback, no notifications)
+- Sprint 005 Technical Design and Open Questions documents merged
+
+### Slice A — Orchestration Persistence (PR #38, #39, #40, #41)
+- Migrations 0008–0011: job_definitions, schedules, runs, attempts, leases
+- Fencing token protocol (v1→v4): atomic takeover, expiry enforcement, window refresh
+- CHECK constraints, UNIQUE constraints, partial indexes for overlap prevention
+- PL/pgSQL trigger functions: lease takeover prevention, terminal immutability
+- Idempotency key: SHA256(job_type || params || scheduled_date)
+
+### Slice B — Worker + Backend API (PR #42, #43, #44, #45, #46)
+- 9 Automation endpoints under /api/automation
+- Standalone Worker with direct PostgreSQL connection (no HTTP loopback)
+- Claim + execute per-schedule transaction isolation
+- Lease TTL 60s / heartbeat 15s / max runtime 300s / graceful shutdown 30s
+- Process timeout enforcement with real multiprocessing spawn→kill→rollback
+- Stale-run recovery (reaper) with atomic FOR UPDATE claim
+- Guardian transaction-neutral core: evaluate_core never commits
+- Final lease FOR UPDATE at commit window only (not during evaluation)
+- clock_timestamp() for definitive expiry validation
+- Heartbeat not blocked during Guardian evaluation
+- Both takeover race orderings verified (takeover-first, lock-first)
+- Graceful shutdown: real multiprocessing terminate→kill→orphan check
+- Released lease is terminal (takeover SQL guards released_at IS NULL)
+
+### Slice B — PostgreSQL Isolation Stabilization (PR #47)
+- Single function-scoped postgres_test_isolation fixture
+- Table auto-discovery (inspect→get_table_names) replacing hardcoded lists
+- connect_args timezone=UTC default
+- All date-boundary tests use SET LOCAL + CURRENT_DATE from PostgreSQL
+- 10/10 pre-existing cross-test failures eliminated
+- Two direct-main review fixes recorded (393a20d)
+
+### Slice C — Automation Frontend (PR #48)
+- /automation workspace: schedule CRUD, manual trigger, run history, worker status
+- 9-endpoint typed Automation API client with AbortSignal support
+- Default disabled on create; explicit enable required; no auto-trigger on load
+- Independent abort controllers: core/schedule/runs/worker
+- 409 conflict preserves local input; neutral language throughout
+- 217 frontend tests (19 API client + 15 component); full accessibility
+
+### Final Test Baseline
+- 431 PostgreSQL tests (COMPOUNDOS_REQUIRE_POSTGRES_TESTS=1, 0 skipped)
+- 136 non-PostgreSQL tests
+- 217 frontend tests (Vitest + shuffled)
+- ESLint --max-warnings=0, TypeScript --noEmit, Ruff clean
+
+### Explicit Product Boundary (Sprint 005 Closeout)
+- Personal-use-only product direction
+- Schedule explicit opt-in / default off
+- No notifications in Sprint 005
+- No automatic Guardian schedule creation
+- Worker direct PostgreSQL (not HTTP to FastAPI)
+- Atomic fenced effect commit (Guardian + Automation in one transaction)
+- PostgreSQL _test database isolation enforced
+- Direct-main commit exception (393a20d) recorded; normal PR workflow resumed
+
 ## Sprint 003 — Portfolio Snapshot + Holdings Foundation — Done (2026-07-17)
 
 ### Slice A: Portfolio Persistence (PR #20, e9743a5)

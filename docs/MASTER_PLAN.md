@@ -30,10 +30,15 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   - Slice A (Persistence): Done (PR #26, migration 0007)
   - Slice B (Backend API): Done (PR #27, #28, #29, #30, #31)
   - Slice C (Frontend): Done (PR #32, #33, #34, #35)
-- Sprint 005: Technical Design Gate — Data Orchestration Foundation (Owner Decided)
-  - Slice A (Orchestration Persistence): Not Authorized / Not Started
-  - Slice B (Orchestration API + Guardian Integration): Not Authorized / Not Started
-  - Slice C (Orchestration Frontend): Not Authorized / Not Started
+- Sprint 005: Data Orchestration Foundation — Done ✓
+  - Technical Design Gate: Done (PR #37, #38)
+  - Slice A — Orchestration Persistence: Done (PR #38, 0008 base; PR #39 hardening; PR #40 lease fencing; PR #41 fencing closure)
+  - Slice B — Worker + Backend API: Done (PR #42; PR #43 reliability; PR #44 process integrity; PR #45 atomic commit; PR #46 lease commit window)
+  - Slice B — PostgreSQL Isolation Stabilization: Done (PR #47)
+  - Slice C — Automation Frontend: Done (PR #48)
+  - Migrations 0008–0011: job_definitions, schedules, runs, attempts, leases
+  - 9 Automation endpoints, /automation workspace, Worker status
+  - 431 PG / 136 non-PG / 217 frontend test baseline
 - Sprint 006: Not Authorized / Not Started
 - Sprint 007: Not Authorized / Not Started
 
