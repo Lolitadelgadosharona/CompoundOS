@@ -18,6 +18,7 @@ export default function NotificationsClient() {
   const [events, setEvents] = useState<NotificationEvent[]>([]);
   const [prefs, setPrefs] = useState<Preferences | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [toggling, setToggling] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -29,8 +30,8 @@ export default function NotificationsClient() {
         getJSON<NotificationEvent[]>("/api/notifications/events", ac.signal),
         getJSON<Preferences>("/api/notifications/preferences", ac.signal),
       ]);
-      setEvents(e); setPrefs(p);
-    } catch { /* silent */ } finally { setLoading(false); }
+      setEvents(e); setPrefs(p); setError(false);
+    } catch { setError(true); } finally { setLoading(false); }
   }, []);
 
   useEffect(() => {
@@ -54,6 +55,7 @@ export default function NotificationsClient() {
   }, [prefs]);
 
   if (loading) return <main className="shell" role="status"><h1>Notifications</h1><p>Loading…</p></main>;
+  if (error) return <main className="shell" role="alert"><h1>Notifications</h1><p>Failed to load. <button onClick={load}>Retry</button></p></main>;
 
   return (
     <main className="shell" aria-label="Notifications">
