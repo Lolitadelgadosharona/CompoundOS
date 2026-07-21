@@ -1,10 +1,12 @@
-"""Sprint 007 Slice C — Notification service V2 (integrity hardened).
+"""Sprint 007 Slice C — Notification service V3 (integrity hardened, source wired).
 
 Changes:
 - Explicit opt-in: enabled=False by default, Owner must PATCH preferences
 - Adapter=None → delivery_status=unavailable (not delivered)
 - AppleScript: static script + argv (no string interpolation)
-- Dedup: advisory lock + atomic INSERT with ON CONFLICT
+- Dedup: advisory lock + household-scoped fingerprint
+- Structured templates: title/body generated from approved templates only
+- Health service wired: dispatches notification on degradation
 """
 
 from __future__ import annotations
@@ -25,12 +27,97 @@ ALLOWED_SEVERITIES = {"info", "warning", "critical"}
 CRITICAL = "critical"
 DEDUP_WINDOW_HOURS = 24
 
+# ── Structured notification templates ──
+# Only approved event types with privacy-safe templates.
+# title/body are generated from template + context; never free-form from callers.
+
+NOTIFICATION_TEMPLATES: dict[str, dict[str, dict[str, str]]] = {
+    "health": {
+        "degraded": {
+            "title": "CompoundOS Health Degraded",
+            "body": "Health check returned {overall}. Check the dashboard for details.",
+        },
+        "unavailable": {
+            "title": "CompoundOS Unavailable",
+            "body": "Health check returned {overall}. Critical component failure.",
+        },
+    },
+    "guardian": {
+        "breach": {
+            "title": "Guardian Threshold Breach",
+            "body": "A Guardian threshold has been exceeded. Review the Guardian dashboard.",
+        },
+    },
+    "backup": {
+        "completed": {
+            "title": "Backup Complete",
+            "body": "Database backup completed successfully.",
+        },
+        "failed": {
+            "title": "Backup Failed",
+            "body": "Database backup failed. Review backup logs.",
+        },
+    },
+    "committee": {
+        "completed": {
+            "title": "Committee Session Complete",
+            "body": "AI Committee session finished. Review the Committee workspace.",
+        },
+    },
+    "automation": {
+        "failed": {
+            "title": "Automation Run Failed",
+            "body": "An automation run has failed. Review automation logs.",
+        },
+    },
+}
+
+
+def dispatch_notification(
+    session: Session,
+    source: str,
+    event_type: str,
+    severity: str,
+    *,
+    household_id: UUID | None = None,
+    entity_id: str | None = None,
+    context: dict | None = None,
+    now: datetime | None = None,
+    adapter=None,
+) -> NotificationEvent | None:
+    """Dispatch a notification from a structured, approved template.
+
+    Callers must use allowlisted (source, event_type) pairs with pre-approved templates.
+    Free-form title/body is NOT accepted — privacy contract enforced at dispatch.
+    """
+    if source not in ALLOWED_SOURCES:
+        raise ValueError(f"Invalid source: {source}")
+    tmpl = NOTIFICATION_TEMPLATES.get(source, {}).get(event_type)
+    if tmpl is None:
+        raise ValueError(
+            f"No approved template for source={source} event_type={event_type}"
+        )
+    ctx = context or {}
+    title = tmpl["title"].format(**ctx)
+    body = tmpl["body"].format(**ctx)
+    return notify(
+        session, source, event_type, severity, title, body,
+        household_id=household_id, entity_id=entity_id, now=now, adapter=adapter,
+    )
+
 
 def compute_fingerprint(
     source: str, event_type: str, severity: str,
+    household_id: UUID | None = None,
     entity_id: str | None = None,
 ) -> str:
-    raw = f"{source}:{event_type}:{severity}:{entity_id or ''}"
+    """Household-scoped fingerprint v2.
+
+    Includes household_id to prevent cross-household dedup collision.
+    Semantic version v2: adds household_id to the fingerprint input.
+    """
+    hid = str(household_id) if household_id else ""
+    raw = f"v2:{hid}:{source}:{event_type}:{severity}:{entity_id or ''}"
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
@@ -84,6 +171,7 @@ def notify(
     title: str,
     body: str,
     *,
+    household_id: UUID | None = None,
     entity_id: str | None = None,
     now: datetime | None = None,
     adapter=None,
@@ -133,7 +221,7 @@ def notify(
         session.commit()
         return ne
 
-    fp = compute_fingerprint(source, event_type, severity, entity_id)
+    fp = compute_fingerprint(source, event_type, severity, household_id, entity_id)
 
     # Dedup with advisory lock
     try:

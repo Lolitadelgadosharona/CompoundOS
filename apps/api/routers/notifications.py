@@ -31,7 +31,7 @@ def get_events(
     session: Session = Depends(get_session),
 ) -> list[NotificationEventResponse]:
     events = list_events(session, limit=limit, offset=offset)
-    return [NotificationEventResponse.model_validate(e) for e in events]
+    return [NotificationEventResponse.from_event(e) for e in events]
 
 
 @router.post("/events/{event_id}/acknowledge", status_code=204)

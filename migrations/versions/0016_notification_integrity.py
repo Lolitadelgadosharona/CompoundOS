@@ -1,4 +1,4 @@
-"""Sprint 007 Slice C Integrity — explicit opt-in + source prefs.
+"""Sprint 007 Slice C Integrity — explicit opt-in + source prefs + singleton.
 
 Revision ID: 0016_notification_integrity
 Revises: 0015_notification_foundation
@@ -41,9 +41,15 @@ def upgrade() -> None:
         "notification_events",
         "delivery_status IN ('pending', 'delivered', 'suppressed', 'failed', 'unavailable')",
     )
+    # Singleton enforcement: at most one preferences row
+    op.execute(
+        "CREATE UNIQUE INDEX uq_notification_preferences_singleton"
+        " ON notification_preferences ((1))"
+    )
 
 
 def downgrade() -> None:
+    op.execute("DROP INDEX IF EXISTS uq_notification_preferences_singleton")
     # Revert CHECK constraint
     op.execute(
         "ALTER TABLE notification_events DROP CONSTRAINT ck_notification_events_delivery_status"

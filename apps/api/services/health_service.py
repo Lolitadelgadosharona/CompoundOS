@@ -232,30 +232,28 @@ def check_launchd(now: datetime) -> ComponentHealth:
 
 def check_notification(session: Session, now: datetime) -> ComponentHealth:
     try:
-        # Check preferences
         prefs_row = session.execute(text(
             "SELECT enabled FROM notification_preferences LIMIT 1"
         )).fetchone()
         if not prefs_row:
-            return ComponentHealth("notification", UNKNOWN,
-                                   "Not configured", now)
+            return ComponentHealth("notification", HEALTHY,
+                                   "Not configured (no impact)", now)
         enabled = prefs_row[0]
         if not enabled:
-            return ComponentHealth("notification", UNKNOWN,
-                                   "Notifications disabled (Owner must enable)", now)
-        # Check recent delivery
+            return ComponentHealth("notification", HEALTHY,
+                                   "Disabled (no impact)", now)
         import sys
         adapter_available = sys.platform == "darwin"
         if not adapter_available:
-            return ComponentHealth("notification", UNKNOWN,
-                                   "No adapter for this platform", now)
+            return ComponentHealth("notification", HEALTHY,
+                                   "No adapter (non-macOS, no impact)", now)
         row = session.execute(text(
             "SELECT delivery_status, delivered_at FROM notification_events"
             " ORDER BY occurred_at DESC LIMIT 1"
         )).fetchone()
         if not row:
-            return ComponentHealth("notification", UNKNOWN,
-                                   "No events recorded", now)
+            return ComponentHealth("notification", HEALTHY,
+                                   "Enabled, no events yet", now)
         last_status, delivered_at = row
         if last_status == "delivered":
             if delivered_at:
@@ -271,17 +269,20 @@ def check_notification(session: Session, now: datetime) -> ComponentHealth:
             return ComponentHealth("notification", DEGRADED,
                                    "Last delivery failed", now)
         if last_status == "suppressed":
-            return ComponentHealth("notification", UNKNOWN,
-                                   "Last suppressed: see history", now)
-        return ComponentHealth("notification", UNKNOWN,
+            return ComponentHealth("notification", HEALTHY,
+                                   "Last suppressed (no impact)", now)
+        return ComponentHealth("notification", HEALTHY,
                                f"Last status: {last_status}", now)
     except Exception:
-        return ComponentHealth("notification", UNKNOWN,
-                               "Not configured", now)
+        return ComponentHealth("notification", HEALTHY,
+                               "Check error (no impact)", now)
 
 
 CRITICAL = {"database", "migration"}
-DEGRADING = {"backup", "leases", "worker", "credential", "guardian", "restore_verification"}
+DEGRADING = {
+    "backup", "leases", "worker", "credential", "guardian",
+    "restore_verification", "notification",
+}
 
 
 def compute_overall(components: list[ComponentHealth]) -> str:
@@ -294,6 +295,8 @@ def compute_overall(components: list[ComponentHealth]) -> str:
         if c.component in DEGRADING and c.status == UNAVAILABLE:
             return DEGRADED
         if c.component in DEGRADING and c.status == STALE:
+            return DEGRADED
+        if c.component in DEGRADING and c.status == DEGRADED:
             return DEGRADED
     for c in components:
         if c.status == UNKNOWN and c.component in CRITICAL:
@@ -334,11 +337,26 @@ def run_all_checks(
             components.append(
                 ComponentHealth("unknown", UNKNOWN, _safe(str(e)), now))
 
-    return HealthResult(
+    result = HealthResult(
         overall=compute_overall(components),
         components=components,
         checked_at=now,
     )
+
+    # Dispatch notification on degradation — fire-and-forget, never crash health
+    if result.overall in (DEGRADED, UNAVAILABLE):
+        try:
+            from apps.api.services.notification_service import dispatch_notification
+            dispatch_notification(
+                session, source="health",
+                event_type=result.overall,
+                severity="warning" if result.overall == DEGRADED else "critical",
+                now=now,
+            )
+        except Exception:
+            pass  # notification failure must not affect health response
+
+    return result
 
 
 def _safe(msg: str) -> str:

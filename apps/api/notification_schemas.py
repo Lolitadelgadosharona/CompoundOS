@@ -15,7 +15,7 @@ class NotificationEventResponse(BaseModel):
     event_type: str
     severity: str
     title: str
-    body: str
+    preview: str = ""
     delivery_status: str
     suppressed_reason: Optional[str] = None
     delivered_at: Optional[datetime] = None
@@ -24,6 +24,24 @@ class NotificationEventResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @classmethod
+    def from_event(cls, event) -> "NotificationEventResponse":
+        body = getattr(event, "body", "") or ""
+        return cls(
+            id=event.id,
+            source=event.source,
+            event_type=event.event_type,
+            severity=event.severity,
+            title=event.title,
+            preview=body[:100] if body else "",
+            delivery_status=event.delivery_status,
+            suppressed_reason=event.suppressed_reason,
+            delivered_at=event.delivered_at,
+            acknowledged_at=event.acknowledged_at,
+            occurred_at=event.occurred_at,
+            created_at=event.created_at,
+        )
 
 
 class PreferencesResponse(BaseModel):
