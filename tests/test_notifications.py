@@ -166,8 +166,9 @@ class TestQuietHours:
     def test_inside_quiet_hours_suppresses(self, db_session: Session) -> None:
         _enable(db_session)
         night = datetime(2026, 7, 20, 23, 0, 0, tzinfo=timezone.utc)
-        ne = notify(db_session, "automation", "done", "info", "T", "B", now=night)
+        ne = notify(db_session, "health", "done", "info", "T", "B", now=night)
         assert ne.delivery_status == "suppressed"
+        assert ne.suppressed_reason == "quiet_hours"
 
     def test_critical_bypasses_quiet_hours(self, db_session: Session) -> None:
         _enable(db_session)
