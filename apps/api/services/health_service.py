@@ -30,7 +30,7 @@ WORKER_HEARTBEAT_MINUTES = 5
 WORKER_STALE_MINUTES = 15
 RESTORE_FRESH_DAYS = 30
 GUARDIAN_STALE_HOURS = 48
-EXPECTED_MIGRATION_HEAD = "0015_notification_foundation"
+EXPECTED_MIGRATION_HEAD = "0016_notification_integrity"
 
 
 @dataclass
@@ -232,20 +232,47 @@ def check_launchd(now: datetime) -> ComponentHealth:
 
 def check_notification(session: Session, now: datetime) -> ComponentHealth:
     try:
+        # Check preferences
+        prefs_row = session.execute(text(
+            "SELECT enabled FROM notification_preferences LIMIT 1"
+        )).fetchone()
+        if not prefs_row:
+            return ComponentHealth("notification", UNKNOWN,
+                                   "Not configured", now)
+        enabled = prefs_row[0]
+        if not enabled:
+            return ComponentHealth("notification", UNKNOWN,
+                                   "Notifications disabled (Owner must enable)", now)
+        # Check recent delivery
+        import sys
+        adapter_available = sys.platform == "darwin"
+        if not adapter_available:
+            return ComponentHealth("notification", UNKNOWN,
+                                   "No adapter for this platform", now)
         row = session.execute(text(
-            "SELECT delivery_status FROM notification_events"
+            "SELECT delivery_status, delivered_at FROM notification_events"
             " ORDER BY occurred_at DESC LIMIT 1"
         )).fetchone()
         if not row:
             return ComponentHealth("notification", UNKNOWN,
                                    "No events recorded", now)
-        last_status = row[0]
+        last_status, delivered_at = row
         if last_status == "delivered":
+            if delivered_at:
+                age_hours = (now - delivered_at).total_seconds() / 3600
+                if age_hours <= 24:
+                    return ComponentHealth("notification", HEALTHY,
+                                           "Recent delivery", now)
+                return ComponentHealth("notification", HEALTHY,
+                                       f"Last delivery {age_hours:.0f}h ago", now)
             return ComponentHealth("notification", HEALTHY,
                                    "Last delivery successful", now)
         if last_status == "failed":
             return ComponentHealth("notification", DEGRADED,
                                    "Last delivery failed", now)
+        if last_status == "suppressed":
+            return ComponentHealth("notification", UNKNOWN,
+                                   "Last suppressed: see history", now)
         return ComponentHealth("notification", UNKNOWN,
                                f"Last status: {last_status}", now)
     except Exception:

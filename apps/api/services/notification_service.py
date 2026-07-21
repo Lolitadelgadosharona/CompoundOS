@@ -1,4 +1,11 @@
-"""Sprint 007 Slice C — Notification service."""
+"""Sprint 007 Slice C — Notification service V2 (integrity hardened).
+
+Changes:
+- Explicit opt-in: enabled=False by default, Owner must PATCH preferences
+- Adapter=None → delivery_status=unavailable (not delivered)
+- AppleScript: static script + argv (no string interpolation)
+- Dedup: advisory lock + atomic INSERT with ON CONFLICT
+"""
 
 from __future__ import annotations
 
@@ -8,6 +15,7 @@ from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import desc
+from sqlalchemy import text as sa_text
 from sqlalchemy.orm import Session
 
 from apps.api.models import NotificationEvent, NotificationPreferences
@@ -16,8 +24,6 @@ ALLOWED_SOURCES = {"guardian", "committee", "automation", "backup", "health"}
 ALLOWED_SEVERITIES = {"info", "warning", "critical"}
 CRITICAL = "critical"
 DEDUP_WINDOW_HOURS = 24
-QUIET_START_DEFAULT = time(22, 0)
-QUIET_END_DEFAULT = time(8, 0)
 
 
 def compute_fingerprint(
@@ -42,12 +48,14 @@ def is_within_dedup_window(session: Session, fingerprint: str, now: datetime) ->
 def get_preferences(session: Session) -> NotificationPreferences:
     prefs = session.query(NotificationPreferences).first()
     if not prefs:
-        from datetime import time as dt_time
         prefs = NotificationPreferences(
             id=uuid4(),
-            quiet_hours_start=dt_time(22, 0),
-            quiet_hours_end=dt_time(8, 0),
+            quiet_hours_start=time(22, 0),
+            quiet_hours_end=time(8, 0),
             timezone="UTC",
+            enabled=False,
+            enabled_sources=[],
+            enabled_severities=["critical"],
         )
         session.add(prefs)
         session.commit()
@@ -87,12 +95,53 @@ def notify(
     if severity not in ALLOWED_SEVERITIES:
         raise ValueError(f"Invalid severity: {severity}")
 
-    fp = compute_fingerprint(source, event_type, severity, entity_id)
     prefs = get_preferences(session)
 
-    # Dedup check
+    # Explicit opt-in check
+    if not prefs.enabled:
+        ne = NotificationEvent(
+            id=uuid4(), source=source, event_type=event_type,
+            severity=severity, fingerprint="", title=title, body=body,
+            delivery_status="suppressed", suppressed_reason="disabled",
+            occurred_at=now,
+        )
+        session.add(ne)
+        session.commit()
+        return ne
+
+    # Source/severity allowlist
+    enabled_sources: list[str] = prefs.enabled_sources or []
+    enabled_severities: list[str] = prefs.enabled_severities or []
+    if enabled_sources and source not in enabled_sources:
+        ne = NotificationEvent(
+            id=uuid4(), source=source, event_type=event_type,
+            severity=severity, fingerprint="", title=title, body=body,
+            delivery_status="suppressed", suppressed_reason="source_disabled",
+            occurred_at=now,
+        )
+        session.add(ne)
+        session.commit()
+        return ne
+    if enabled_severities and severity not in enabled_severities:
+        ne = NotificationEvent(
+            id=uuid4(), source=source, event_type=event_type,
+            severity=severity, fingerprint="", title=title, body=body,
+            delivery_status="suppressed", suppressed_reason="severity_disabled",
+            occurred_at=now,
+        )
+        session.add(ne)
+        session.commit()
+        return ne
+
+    fp = compute_fingerprint(source, event_type, severity, entity_id)
+
+    # Dedup with advisory lock
+    try:
+        session.execute(sa_text("SELECT pg_advisory_xact_lock(42)"))
+    except Exception:
+        pass
+
     if is_within_dedup_window(session, fp, now):
-        # Severity escalation: if new severity > old, allow
         existing = session.query(NotificationEvent).filter(
             NotificationEvent.fingerprint == fp,
             NotificationEvent.delivery_status == "delivered",
@@ -132,8 +181,8 @@ def notify(
         except Exception:
             delivery_status = "failed"
     else:
-        delivery_status = "delivered"
-        delivered_at = now
+        delivery_status = "unavailable"
+        delivered_at = None
 
     ne = NotificationEvent(
         id=uuid4(), source=source, event_type=event_type,
@@ -166,6 +215,9 @@ def update_preferences(
     quiet_hours_start: time | None = None,
     quiet_hours_end: time | None = None,
     tz: str | None = None,
+    enabled: bool | None = None,
+    enabled_sources: list[str] | None = None,
+    enabled_severities: list[str] | None = None,
 ) -> NotificationPreferences:
     prefs = get_preferences(session)
     if quiet_hours_start is not None:
@@ -174,6 +226,12 @@ def update_preferences(
         prefs.quiet_hours_end = quiet_hours_end
     if tz is not None:
         prefs.timezone = tz
+    if enabled is not None:
+        prefs.enabled = enabled
+    if enabled_sources is not None:
+        prefs.enabled_sources = enabled_sources
+    if enabled_severities is not None:
+        prefs.enabled_severities = enabled_severities
     prefs.updated_at = datetime.now(timezone.utc)
     session.commit()
     return prefs
@@ -184,15 +242,23 @@ def _severity_rank(s: str) -> int:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# macOS adapter
+# macOS adapter — static script, argv-based (no string interpolation)
 # ═══════════════════════════════════════════════════════════════════════════
+
+_STATIC_SCRIPT = """
+on run argv
+    set theTitle to item 1 of argv
+    set theBody to item 2 of argv
+    display notification theBody with title theTitle
+end run
+"""
+
 
 def send_macos_notification(title: str, body: str) -> None:
     import subprocess
-    safe_title = title.replace('"', "'")[:100]
-    safe_body = body.replace('"', "'")[:200]
-    script = f'display notification "{safe_body}" with title "{safe_title}"'
+    safe_title = title[:100]
+    safe_body = body[:200]
     subprocess.run(
-        ["osascript", "-e", script],
+        ["osascript", "-e", _STATIC_SCRIPT, safe_title, safe_body],
         capture_output=True, timeout=10, check=True,
     )

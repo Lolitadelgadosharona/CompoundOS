@@ -1,4 +1,4 @@
-"""Sprint 007 Slice C — Notification schemas."""
+"""Sprint 007 Slice C — Notification schemas V2 (integrity hardened)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class NotificationEventResponse(BaseModel):
@@ -31,6 +31,9 @@ class PreferencesResponse(BaseModel):
     quiet_hours_start: str
     quiet_hours_end: str
     timezone: str
+    enabled: bool = False
+    enabled_sources: list[str] = Field(default_factory=list)
+    enabled_severities: list[str] = Field(default_factory=list)
     updated_at: datetime
 
     model_config = {"from_attributes": True}
@@ -40,6 +43,9 @@ class PreferencesUpdate(BaseModel):
     quiet_hours_start: Optional[str] = None
     quiet_hours_end: Optional[str] = None
     timezone: Optional[str] = None
+    enabled: Optional[bool] = None
+    enabled_sources: Optional[list[str]] = None
+    enabled_severities: Optional[list[str]] = None
 
     @field_validator("timezone")
     @classmethod
