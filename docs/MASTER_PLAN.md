@@ -58,6 +58,11 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   - PG 552 / non-PG 134+2 / frontend 251 test baseline
   - Squash merge: 031ebdaed7a287d70287bacc5a55e62ff825ac2f
   - Main CI run 29886582098: 3/3 success
+- Sprint 008: Planning/Proposal — Authorized (planning only)
+  - Proposal: docs/sprints/SPRINT_008_PROPOSAL.md
+  - Open Questions: docs/sprints/SPRINT_008_OPEN_QUESTIONS.md (8 Owner Decisions pending)
+  - Implementation: NOT AUTHORIZED
+  - Each Slice requires separate explicit Owner authorization after Owner Decision resolution
 
 ## Backlog
 
