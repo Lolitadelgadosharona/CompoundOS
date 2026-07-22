@@ -89,13 +89,8 @@ class TestGuardianHTTPNotification:
     def test_disabled_preferences_no_dispatch(
         self, db_session: Session,
     ) -> None:
-        """_maybe_notify_guardian with disabled preferences creates no events."""
+        """When disabled, notify() records suppressed event with delivery_status='suppressed'."""
         update_preferences(db_session, enabled=False)
-        # Verify preferences are actually disabled
-        from apps.api.services.notification_service import get_preferences
-        prefs = get_preferences(db_session)
-        assert prefs.enabled is False, "preferences must be disabled for this test"
-
         from apps.api.services.guardian import _maybe_notify_guardian
         before = len(list_events(db_session))
         _maybe_notify_guardian(
@@ -104,7 +99,11 @@ class TestGuardianHTTPNotification:
             uuid4(), target_check_id=uuid4(),
         )
         after = len(list_events(db_session))
-        assert after == before, f"expected 0 new events, got {after - before}"
+        # notify() persists suppressed events — one event created with suppressed status
+        assert after == before + 1
+        events = list_events(db_session)
+        assert events[0].delivery_status == "suppressed"
+        assert events[0].suppressed_reason == "disabled"
 
     def test_evaluate_one_breach_dispatches(
         self, db_session: Session,
