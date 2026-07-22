@@ -90,6 +90,8 @@ class TestGuardianHTTPNotification:
         self, db_session: Session,
     ) -> None:
         """_maybe_notify_guardian with disabled preferences creates no events."""
+        # Explicitly disable preferences to override any state from other tests
+        update_preferences(db_session, enabled=False)
         from apps.api.services.guardian import _maybe_notify_guardian
         before = len(list_events(db_session))
         _maybe_notify_guardian(
