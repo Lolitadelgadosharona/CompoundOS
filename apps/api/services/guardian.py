@@ -389,6 +389,7 @@ def evaluate_all_checks(
         session, household_id=household_id, as_of_date=as_of_date,
     )
     session.commit()
+    _maybe_notify_guardian(result, household_id, target_check_id=None)
     return result
 
 
@@ -405,7 +406,46 @@ def evaluate_one_check(
         target_check_id=check_id,
     )
     session.commit()
+    _maybe_notify_guardian(result, household_id, target_check_id=check_id)
     return result
+
+
+def _maybe_notify_guardian(
+    result: dict,
+    household_id: UUID,
+    target_check_id: UUID | None = None,
+) -> None:
+    """Dispatch Guardian notification if evaluation produced new breach events."""
+    run = result.get("evaluation_run", {})
+    status = run.get("status", "")
+    events = result.get("events", [])
+    if not status.startswith("completed") or len(events) == 0:
+        return
+    # Compute stable breach identity
+    if target_check_id is not None:
+        entity_id = str(target_check_id)
+    else:
+        import hashlib
+        breached = sorted(set(
+            str(e.get("check_id", "")) for e in events if e.get("check_id")
+        ))
+        entity_id = hashlib.sha256("|".join(breached).encode()).hexdigest()[:16]
+    try:
+        from apps.api.database import SessionLocal
+        from apps.api.services.notification_service import dispatch_notification
+        ns = SessionLocal()
+        try:
+            dispatch_notification(
+                ns, source="guardian", event_type="threshold_breach",
+                severity="warning", household_id=household_id,
+                entity_id=entity_id,
+            )
+        except Exception:
+            ns.rollback()
+        finally:
+            ns.close()
+    except Exception:
+        pass  # notification infrastructure unavailable — logged at WARNING in production
 
 
 def _evaluate_core(

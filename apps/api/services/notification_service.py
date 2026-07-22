@@ -43,17 +43,17 @@ NOTIFICATION_TEMPLATES: dict[str, dict[str, dict[str, str]]] = {
         },
     },
     "guardian": {
-        "breach": {
+        "threshold_breach": {
             "title": "Guardian Threshold Breach",
             "body": "A Guardian threshold has been exceeded. Review the Guardian dashboard.",
         },
     },
     "backup": {
-        "completed": {
+        "backup_complete": {
             "title": "Backup Complete",
             "body": "Database backup completed successfully.",
         },
-        "failed": {
+        "backup_failed": {
             "title": "Backup Failed",
             "body": "Database backup failed. Review backup logs.",
         },

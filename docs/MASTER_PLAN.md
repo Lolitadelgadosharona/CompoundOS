@@ -63,8 +63,10 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   - Proposal: docs/sprints/SPRINT_008_PROPOSAL.md
   - Open Questions: docs/sprints/SPRINT_008_OPEN_QUESTIONS.md (8/8 resolved)
   - Technical Design: docs/sprints/SPRINT_008_TECHNICAL_DESIGN.md (Owner Approved, 2026-07-22)
-  - Implementation: NOT AUTHORIZED
-  - Slices A/B/C: NOT AUTHORIZED (require individual Owner authorization)
+  - Implementation: Slice A Authorized (Guardian + Backup notification source wiring)
+  - Slice A: In Progress (Guardian + Backup wiring)
+  - Slice B: NOT AUTHORIZED (Committee + Automation wiring)
+  - Slice C: NOT AUTHORIZED (Daily schedules + UI)
 
 ## Backlog
 

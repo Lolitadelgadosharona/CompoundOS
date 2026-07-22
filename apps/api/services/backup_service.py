@@ -91,6 +91,7 @@ def run_backup(
         record = _create_record(dest_dir, "failed", error_detail=err)
         session.add(record)
         session.commit()
+        _maybe_notify_backup(record)
         return record
 
     record = _create_record(dest_dir, "requested")
@@ -122,6 +123,7 @@ def run_backup(
         record.completed_at = datetime.now(timezone.utc)
         record.error_detail = None
         session.commit()
+        _maybe_notify_backup(record)
         return record
 
     except Exception as e:
@@ -129,7 +131,51 @@ def run_backup(
         record.completed_at = datetime.now(timezone.utc)
         record.error_detail = _sanitize_error(str(e))
         session.commit()
+        _maybe_notify_backup(record)
         return record
+
+
+def _maybe_notify_backup(record) -> None:
+    """Dispatch Backup notification after record is committed."""
+    event_type = "backup_complete" if record.status == "completed" else "backup_failed"
+    severity = "info" if record.status == "completed" else "warning"
+    try:
+        from uuid import UUID
+
+        from apps.api.database import SessionLocal
+        from apps.api.services.notification_service import dispatch_notification
+        household_id = _resolve_household_id()
+        if household_id is None:
+            return
+        ns = SessionLocal()
+        try:
+            dispatch_notification(
+                ns, source="backup", event_type=event_type,
+                severity=severity, household_id=UUID(household_id),
+                entity_id=str(record.id),
+            )
+        except Exception:
+            ns.rollback()
+        finally:
+            ns.close()
+    except Exception:
+        pass
+
+
+def _resolve_household_id() -> str | None:
+    """Resolve the singleton household ID for backup notifications."""
+    try:
+        from sqlalchemy import text
+
+        from apps.api.database import SessionLocal
+        s = SessionLocal()
+        try:
+            row = s.execute(text("SELECT id FROM household_profiles LIMIT 1")).fetchone()
+            return str(row[0]) if row else None
+        finally:
+            s.close()
+    except Exception:
+        return None
 
 
 def verify_backup(path: str, age_recipient: str) -> str | None:

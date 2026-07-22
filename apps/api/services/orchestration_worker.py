@@ -176,16 +176,19 @@ class OrchestrationWorker:
         for item in due:
             if self._shutdown_flag.is_set():
                 break
+            guardian_result = None
             try:
                 with self._session_factory() as session:
-                    self._execute_scheduled(session, item)
+                    guardian_result = self._execute_scheduled(session, item)
                     session.commit()
                 claimed += 1
+                # Dispatch Guardian notification after business commit
+                self._maybe_notify_guardian_worker(guardian_result, item)
             except Exception:
                 logger.exception("Failed schedule %s", item["schedule_id"])
         return claimed
 
-    def _execute_scheduled(self, session: Session, schedule_info: dict) -> None:
+    def _execute_scheduled(self, session: Session, schedule_info: dict) -> dict | None:
         job_type = schedule_info["job_type"]
         job_params = schedule_info["job_params"]
         household_id = schedule_info["household_id"]
@@ -274,6 +277,47 @@ class OrchestrationWorker:
             fencing_token=lease["fencing_token"],
             clock=self._clock,
         )
+
+        # Return Guardian evaluation result for notification
+        if job_type.startswith("guardian."):
+            return result
+        return None
+
+    # ── Guardian notification (worker path) ──
+
+    @staticmethod
+    def _maybe_notify_guardian_worker(guardian_result: dict | None, item: dict) -> None:
+        """Dispatch Guardian notification from worker after business commit."""
+        if guardian_result is None:
+            return
+        run = guardian_result.get("evaluation_run", {})
+        status = run.get("status", "")
+        events = guardian_result.get("events", [])
+        if not status.startswith("completed") or len(events) == 0:
+            return
+        import hashlib
+        from uuid import UUID
+        household_id = UUID(item["household_id"])
+        breached = sorted(set(
+            str(e.get("check_id", "")) for e in events if e.get("check_id")
+        ))
+        entity_id = hashlib.sha256("|".join(breached).encode()).hexdigest()[:16]
+        try:
+            from apps.api.database import SessionLocal
+            from apps.api.services.notification_service import dispatch_notification
+            ns = SessionLocal()
+            try:
+                dispatch_notification(
+                    ns, source="guardian", event_type="threshold_breach",
+                    severity="warning", household_id=household_id,
+                    entity_id=entity_id,
+                )
+            except Exception:
+                ns.rollback()
+            finally:
+                ns.close()
+        except Exception:
+            pass
 
     # ── Graceful shutdown ──
 
