@@ -6,12 +6,14 @@ Real PostgreSQL, real production entry points, real assertions.
 
 import logging
 from datetime import date
+from decimal import Decimal
 from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from apps.api.services.guardian import confirm_guardian_check, create_guardian_check
 from apps.api.services.notification_service import (
     NOTIFICATION_TEMPLATES,
     list_events,
@@ -50,21 +52,19 @@ class TestEventTypeTemplates:
 
 class TestGuardianHTTPNotification:
 
-    # ── evaluate_all ────────────────────────────────────────────────────
-
     def test_evaluate_all_breach_dispatches_notification(
         self, db_session: Session,
     ) -> None:
-        """HTTP evaluate_all with real breach → notification event created."""
-        hid = _setup_household(db_session)
-        _setup_policy(db_session, hid)
+        """HTTP evaluate_all with real drift breach → notification created."""
+        hid = _hid(db_session)
+        _create_policy(db_session, hid)
+        _create_portfolio(db_session, hid, "100000")
+        _create_drift_check(db_session, hid, threshold=3.0)
         _enable_guardian_backup(db_session)
-        _setup_drift_check(db_session, hid)
-        _setup_portfolio_holdings_breach(db_session, hid)
 
         from apps.api.services.guardian import evaluate_all_checks
         before = len(list_events(db_session))
-        result = evaluate_all_checks(db_session, household_id=hid, as_of_date=date.today())
+        result = evaluate_all_checks(db_session, household_id=hid, as_of_date=date(2026, 7, 17))
         after = len(list_events(db_session))
 
         assert result["evaluation_run"]["status"].startswith("completed")
@@ -74,50 +74,47 @@ class TestGuardianHTTPNotification:
     def test_evaluate_all_zero_events_no_dispatch(
         self, db_session: Session,
     ) -> None:
-        """HTTP evaluate_all with no breach → zero notification events."""
-        hid = _setup_household(db_session)
-        _setup_policy(db_session, hid)
+        """HTTP evaluate_all with policy but no checks → zero notification events."""
+        hid = _hid(db_session)
+        _create_policy(db_session, hid)
+        _create_portfolio(db_session, hid, "100000")
         _enable_guardian_backup(db_session)
-        # No drift check → no breach
 
         from apps.api.services.guardian import evaluate_all_checks
         before = len(list_events(db_session))
-        evaluate_all_checks(db_session, household_id=hid, as_of_date=date.today())
+        evaluate_all_checks(db_session, household_id=hid, as_of_date=date(2026, 7, 17))
         after = len(list_events(db_session))
         assert after == before
 
     def test_disabled_preferences_no_dispatch(
         self, db_session: Session,
     ) -> None:
-        """Preferences disabled → no notification events."""
-        hid = _setup_household(db_session)
-        _setup_policy(db_session, hid)
-        _setup_drift_check(db_session, hid)
-        _setup_portfolio_holdings_breach(db_session, hid)
-        # Never call _enable_guardian_backup — defaults to disabled
+        """Preferences disabled → no notification events from Guardian."""
+        hid = _hid(db_session)
+        _create_policy(db_session, hid)
+        _create_portfolio(db_session, hid, "100000")
+        _create_drift_check(db_session, hid, threshold=3.0)
 
         from apps.api.services.guardian import evaluate_all_checks
         before = len(list_events(db_session))
-        evaluate_all_checks(db_session, household_id=hid, as_of_date=date.today())
+        evaluate_all_checks(db_session, household_id=hid, as_of_date=date(2026, 7, 17))
         after = len(list_events(db_session))
         assert after == before
-
-    # ── evaluate_one ────────────────────────────────────────────────────
 
     def test_evaluate_one_breach_dispatches(
         self, db_session: Session,
     ) -> None:
-        """HTTP evaluate_one with real check_id → notification with correct entity_id."""
-        hid = _setup_household(db_session)
-        _setup_policy(db_session, hid)
+        """HTTP evaluate_one with real check_id → notification dispatched."""
+        hid = _hid(db_session)
+        _create_policy(db_session, hid)
+        _create_portfolio(db_session, hid, "100000")
+        check_id = _create_drift_check(db_session, hid, threshold=3.0)
         _enable_guardian_backup(db_session)
-        check_id = _setup_drift_check(db_session, hid)
-        _setup_portfolio_holdings_breach(db_session, hid)
 
         from apps.api.services.guardian import evaluate_one_check
         before = len(list_events(db_session))
         result = evaluate_one_check(
-            db_session, check_id=check_id, household_id=hid, as_of_date=date.today(),
+            db_session, check_id=check_id, household_id=hid, as_of_date=date(2026, 7, 17),
         )
         after = len(list_events(db_session))
 
@@ -146,7 +143,7 @@ class TestGuardianDedupIdentity:
         from apps.api.services.guardian import _maybe_notify_guardian
         before = len(list_events(db_session))
         _maybe_notify_guardian(
-            {"evaluation_run": {"status": "skipped_no_policy", "id": str(uuid4())},
+            {"evaluation_run": {"status": "skipped", "id": str(uuid4())},
              "events": [{"check_id": str(uuid4())}]},
             uuid4(), target_check_id=None,
         )
@@ -154,7 +151,7 @@ class TestGuardianDedupIdentity:
 
     def test_helper_dispatches_with_events(self, db_session: Session) -> None:
         _enable_guardian_backup(db_session)
-        hid = _setup_household(db_session)
+        hid = _hid(db_session)
         from apps.api.services.guardian import _maybe_notify_guardian
         before = len(list_events(db_session))
         _maybe_notify_guardian(
@@ -231,7 +228,7 @@ class TestBackupNotification:
         _maybe_notify_backup(record_id=str(uuid4()), status="running")
 
     def test_household_lookup_with_household(self, db_session: Session) -> None:
-        _setup_household(db_session)
+        _hid(db_session)
         from apps.api.services.backup_service import _resolve_household_id
         h = _resolve_household_id()
         assert h is not None
@@ -245,7 +242,7 @@ class TestBackupNotification:
 class TestTransactionIsolation:
     def test_guardian_dispatches_in_dedicated_session(self, db_session: Session) -> None:
         _enable_guardian_backup(db_session)
-        hid = _setup_household(db_session)
+        hid = _hid(db_session)
         from apps.api.services.guardian import _maybe_notify_guardian
         before = len(list_events(db_session))
         _maybe_notify_guardian(
@@ -254,63 +251,86 @@ class TestTransactionIsolation:
             hid, target_check_id=uuid4(),
         )
         after = len(list_events(db_session))
-        # Notification created in dedicated session; visible to this session via committed row
         assert after > before
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# Test infrastructure helpers
+# Proven helpers — from test_guardian_api.py
 # ══════════════════════════════════════════════════════════════════════════
 
 
-def _setup_household(session: Session) -> UUID:
+def _hid(session: Session) -> UUID:
     row = session.execute(text("SELECT id FROM household_profiles LIMIT 1")).fetchone()
     if row:
         return row[0]
     hid = uuid4()
     session.execute(text(
-        "INSERT INTO household_profiles (id, household_name, base_currency,"
-        " singleton_key, investment_horizon, liquidity_needs, risk_statement, notes)"
-        " VALUES (:id, 'Test', 'USD', TRUE, '', '', '', '')"
+        "INSERT INTO household_profiles (id, singleton_key, household_name, base_currency,"
+        " investment_horizon, liquidity_needs, risk_statement, notes)"
+        " VALUES (:id, TRUE, 'Test', 'USD', 'LT', '', '', '')"
     ), {"id": hid})
     session.commit()
     return hid
 
 
-def _setup_policy(session: Session, hid: UUID) -> None:
+def _create_policy(session: Session, hid: UUID) -> UUID:
+    pid = uuid4()
+    pvid = uuid4()
+    session.execute(text("INSERT INTO investment_policies (id, household_id) VALUES (:id, :hid)"),
+                    {"id": pid, "hid": hid})
     session.execute(text(
-        "INSERT INTO investment_policies (id, household_id, policy_name, status,"
-        " snapshot_id, version, created_at)"
-        " VALUES (:id, :hid, 'Default', 'published', :sid, 1, NOW())"
-    ), {"id": uuid4(), "hid": hid, "sid": uuid4()})
-    session.commit()
-
-
-def _setup_drift_check(session: Session, hid: UUID) -> UUID:
-    cid = uuid4()
+        "INSERT INTO investment_policy_versions"
+        " (id, policy_id, version_number, status, published_at,"
+        " objectives, time_horizon, liquidity, diversification,"
+        " contribution_policy, rebalancing_policy, prohibited_assets,"
+        " leverage_policy, decision_process, notes)"
+        " VALUES (:id, :pid, 1, 'published', NOW(),"
+        " 'o','h','','','','','','','','')"
+    ), {"id": pvid, "pid": pid})
     session.execute(text(
-        "INSERT INTO guardian_checks (id, household_id, check_type, check_name,"
-        " threshold_pct, status, evaluation_schedule, check_config, created_at, updated_at)"
-        " VALUES (:id, :hid, 'drift', 'Drift Check', 20.0, 'confirmed',"
-        " 'manual', :cfg, NOW(), NOW())"
-    ), {"id": cid, "hid": hid, "cfg": '{"asset_class":"equity"}'})
+        "INSERT INTO investment_policy_version_allocations"
+        " (id, version_id, asset_class_name, normalized_asset_class_name,"
+        " target_percentage, sort_order)"
+        " VALUES (:id, :vid, 'Global Equity', 'global equity', 60.00, 0)"
+    ), {"id": uuid4(), "vid": pvid})
     session.commit()
-    return cid
+    return pid
 
 
-def _setup_portfolio_holdings_breach(session: Session, hid: UUID) -> None:
+def _create_portfolio(session: Session, hid: UUID, equity_val: str = "0") -> UUID:
+    pid = uuid4()
     sid = uuid4()
+    session.execute(text("INSERT INTO portfolios (id, household_id, status) VALUES (:id, :hid, 'active')"),
+                    {"id": pid, "hid": hid})
     session.execute(text(
-        "INSERT INTO portfolio_snapshots (id, household_id, status, snapshot_type,"
-        " as_of_date, created_at)"
-        " VALUES (:id, :hid, 'confirmed', 'full', CURRENT_DATE, NOW())"
-    ), {"id": sid, "hid": hid})
-    session.execute(text(
-        "INSERT INTO holdings (id, snapshot_id, asset_class, ticker, shares,"
-        " current_price, market_value, weight_pct)"
-        " VALUES (:id, :sid, 'equity', 'AAPL', 1000, 150.0, 150000, 80.0)"
-    ), {"id": uuid4(), "sid": sid})
+        "INSERT INTO portfolio_snapshots"
+        " (id, portfolio_id, version_number, status, valuation_date)"
+        " VALUES (:id, :pid, 1, 'current', '2026-06-01')"
+    ), {"id": sid, "pid": pid})
+    if Decimal(equity_val) > 0:
+        session.execute(text(
+            "INSERT INTO portfolio_snapshot_holdings"
+            " (id, snapshot_id, asset_name, asset_category, quantity,"
+            " unit_price, total_value, valuation_date, sort_order)"
+            " VALUES (:id, :sid, 'VTI', 'Global Equity', '100', :price, :tv, '2026-06-01', 0)"
+        ), {"id": uuid4(), "sid": sid, "price": equity_val, "tv": equity_val})
     session.commit()
+    return sid
+
+
+def _create_drift_check(session: Session, hid: UUID, threshold: float = 20.0) -> UUID:
+    cc = create_guardian_check(
+        session, household_id=hid, name="Drift Check", check_type="drift",
+        threshold_value=Decimal(str(threshold)),
+    )
+    session.execute(text(
+        "INSERT INTO guardian_check_drafts (id, check_id, drift_threshold_pct,"
+        " evaluation_schedule, check_type, created_at, updated_at)"
+        " VALUES (:id, :cid, :th, 'manual', 'drift', NOW(), NOW())"
+    ), {"id": uuid4(), "cid": cc["id"], "th": threshold})
+    session.commit()
+    confirm_guardian_check(session, check_id=cc["id"], expected_revision=1)
+    return cc["id"]
 
 
 def _enable_guardian_backup(session: Session) -> None:
