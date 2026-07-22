@@ -293,6 +293,11 @@ def _create_policy(session: Session, hid: UUID) -> UUID:
         " target_percentage, sort_order)"
         " VALUES (:id, :vid, 'Global Equity', 'global equity', 60.00, 0)"
     ), {"id": uuid4(), "vid": pvid})
+    # Seal after allocations inserted
+    session.execute(
+        text("UPDATE investment_policy_versions SET sealed_at = NOW() WHERE id = :id"),
+        {"id": pvid},
+    )
     session.commit()
     return pid
 
