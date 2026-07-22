@@ -242,6 +242,16 @@ class OrchestrationWorker:
             fencing_token=lease["fencing_token"],
         )
 
+        # Guardian jobs: child already finalized run/attempt/lease in fenced tx.
+        # The result is the raw Guardian evaluation dict with evaluation_run + events.
+        # Parent must not re-finalize — child owns the single atomic commit.
+        is_guardian = job_type.startswith("guardian.")
+        if is_guardian and "evaluation_run" in result:
+            # Child committed — finalize/complete/release already done.
+            # Return result for notification dispatch after parent commit.
+            return result
+
+        # Non-Guardian jobs: parent must finalize
         is_timeout = result.get("status") == "terminated"
 
         finalize_status = "aborted" if is_timeout else (
@@ -278,16 +288,13 @@ class OrchestrationWorker:
             clock=self._clock,
         )
 
-        # Return Guardian evaluation result for notification
-        if job_type.startswith("guardian."):
-            return result
         return None
 
     # ── Guardian notification (worker path) ──
 
     @staticmethod
     def _maybe_notify_guardian_worker(guardian_result: dict | None, item: dict) -> None:
-        """Dispatch Guardian notification from worker after business commit."""
+        """Dispatch Guardian notification from worker after child's business commit."""
         if guardian_result is None:
             return
         run = guardian_result.get("evaluation_run", {})
@@ -301,6 +308,8 @@ class OrchestrationWorker:
         breached = sorted(set(
             str(e.get("check_id", "")) for e in events if e.get("check_id")
         ))
+        if not breached:
+            return
         entity_id = hashlib.sha256("|".join(breached).encode()).hexdigest()[:16]
         try:
             from apps.api.database import SessionLocal
@@ -314,10 +323,11 @@ class OrchestrationWorker:
                 )
             except Exception:
                 ns.rollback()
+                logger.warning("Guardian notification dispatch failed for run", exc_info=True)
             finally:
                 ns.close()
         except Exception:
-            pass
+            logger.warning("Guardian notification session unavailable", exc_info=True)
 
     # ── Graceful shutdown ──
 

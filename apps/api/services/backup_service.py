@@ -136,7 +136,11 @@ def run_backup(
 
 
 def _maybe_notify_backup(record) -> None:
-    """Dispatch Backup notification after record is committed."""
+    """Dispatch Backup notification after record is committed. Terminal statuses only."""
+    import logging
+    _log = logging.getLogger(__name__)
+    if record.status not in ("completed", "failed"):
+        return
     event_type = "backup_complete" if record.status == "completed" else "backup_failed"
     severity = "info" if record.status == "completed" else "warning"
     try:
@@ -146,6 +150,7 @@ def _maybe_notify_backup(record) -> None:
         from apps.api.services.notification_service import dispatch_notification
         household_id = _resolve_household_id()
         if household_id is None:
+            _log.warning("Backup notification skipped — no household found")
             return
         ns = SessionLocal()
         try:
@@ -156,10 +161,14 @@ def _maybe_notify_backup(record) -> None:
             )
         except Exception:
             ns.rollback()
+            _log.warning(
+                "Backup notification dispatch failed for record %s",
+                record.id, exc_info=True,
+            )
         finally:
             ns.close()
     except Exception:
-        pass
+        _log.warning("Backup notification session unavailable", exc_info=True)
 
 
 def _resolve_household_id() -> str | None:

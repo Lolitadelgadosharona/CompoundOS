@@ -416,6 +416,8 @@ def _maybe_notify_guardian(
     target_check_id: UUID | None = None,
 ) -> None:
     """Dispatch Guardian notification if evaluation produced new breach events."""
+    import logging
+    logger = logging.getLogger(__name__)
     run = result.get("evaluation_run", {})
     status = run.get("status", "")
     events = result.get("events", [])
@@ -429,6 +431,8 @@ def _maybe_notify_guardian(
         breached = sorted(set(
             str(e.get("check_id", "")) for e in events if e.get("check_id")
         ))
+        if not breached:
+            return
         entity_id = hashlib.sha256("|".join(breached).encode()).hexdigest()[:16]
     try:
         from apps.api.database import SessionLocal
@@ -442,10 +446,11 @@ def _maybe_notify_guardian(
             )
         except Exception:
             ns.rollback()
+            logger.warning("Guardian notification dispatch failed", exc_info=True)
         finally:
             ns.close()
     except Exception:
-        pass  # notification infrastructure unavailable — logged at WARNING in production
+        logger.warning("Guardian notification session unavailable", exc_info=True)
 
 
 def _evaluate_core(
