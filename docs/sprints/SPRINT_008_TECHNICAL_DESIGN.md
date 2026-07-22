@@ -1,8 +1,10 @@
 # Sprint 008 — Technical Design
 
-> **STATUS: TECHNICAL DESIGN — OWNER APPROVED (2026-07-22)**
+> **STATUS: TECHNICAL DESIGN — OWNER APPROVED (2026-07-22, corrected 2026-07-22)**
 >
 > Approved baseline HEAD: cbbadbb958b9881ad9fe02358afd28fed8a043a5
+>
+> **Manual-trigger correction (2026-07-22):** Manual-trigger Guardian runs (schedule_id=NULL) are NOT claimed by the worker. The worker only claims due schedules via claim_due_schedules(). This path is removed from Slice A scope and recorded as future backlog. See §3.1.
 >
 > IMPLEMENTATION NOT AUTHORIZED
 > ALL SLICES NOT AUTHORIZED (require individual Owner authorization)
@@ -85,15 +87,16 @@ finally:
 
 ### 3.1 Guardian — All Evaluation Paths
 
-Guardian has three execution paths:
+Guardian has two execution paths that reach the worker:
 
 | Path | Entry Point | Session Owner |
 |------|------------|---------------|
 | HTTP manual | `evaluate_all_checks()` / `evaluate_one_check()` (guardian.py:381/395) | HTTP router → service |
 | Worker scheduled | `_run_job_in_child()` → `evaluate_core()` (orchestration_executor.py:124) | Worker child process → parent |
-| Worker manual trigger | Same as worker scheduled | Same |
 
-**Design**: Notification dispatch must happen in the PARENT worker process for scheduled/manual-trigger, and in the HTTP service layer for HTTP evaluations. The trigger condition is identical: after business commit, if evaluation produced new Guardian events > 0.
+**Design**: Notification dispatch must happen in the PARENT worker process for scheduled evaluations, and in the HTTP service layer for HTTP evaluations. The trigger condition is identical: after business commit, if evaluation produced new Guardian events > 0.
+
+**Manual-trigger runs (NOT in Slice A)**: Manual-trigger Guardian runs are created via `manual_trigger_run()` (orchestration.py:252) with `schedule_id=NULL` and `triggered_by="manual"`. The worker (`OrchestrationWorker._claim_and_execute()`) only claims due schedules via `claim_due_schedules()` — manual runs with NULL schedule_id are never claimed. Manual-trigger run claim/execution is a future backlog item requiring independent Technical Design and Owner authorization. It is NOT part of Sprint 008 Slice A, B, or C.
 
 **Worker path** (orchestration_executor.py:116-195):
 1. Child process runs `evaluate_core()` inside `with session.begin()` at line 116
@@ -321,11 +324,12 @@ Migration 0017 does NOT modify:
 
 ### Slice A — Guardian + Backup Source Wiring (R2)
 
-**Scope**: Notification dispatch after Guardian evaluation (HTTP + worker paths) and after Backup completion (all paths including preflight failure).
+**Scope**: Notification dispatch after Guardian evaluation (HTTP manual + worker scheduled) and after Backup completion (all paths including preflight failure).
 
 **Guardian design**:
 - HTTP path: after `session.commit()` at guardian.py:391/407, if events > 0, dedicated notification session dispatches `threshold_breach` warning
-- Worker path: child returns result → parent inspects events → if events > 0, dedicated session dispatches
+- Worker scheduled path: child runs evaluate_core → parent receives result → after child committed, dispatches `threshold_breach` warning via `_maybe_notify_guardian_worker()`
+- Manual-trigger Guardian runs: NOT in Slice A scope (see §3.1)
 
 **Backup design**:
 - After `session.commit()` at backup_service.py:94/124/131, dedicated notification session dispatches based on record.status
@@ -423,3 +427,4 @@ Migration 0017 does NOT modify:
 - No automatic schedule or notification enabling
 - No new credentials or external services
 - No `notification.*` job type (recursive protection)
+- No manual-trigger run claim/execution (future backlog — requires independent Technical Design)
