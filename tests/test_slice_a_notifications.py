@@ -90,8 +90,12 @@ class TestGuardianHTTPNotification:
         self, db_session: Session,
     ) -> None:
         """_maybe_notify_guardian with disabled preferences creates no events."""
-        # Explicitly disable preferences to override any state from other tests
         update_preferences(db_session, enabled=False)
+        # Verify preferences are actually disabled
+        from apps.api.services.notification_service import get_preferences
+        prefs = get_preferences(db_session)
+        assert prefs.enabled is False, "preferences must be disabled for this test"
+
         from apps.api.services.guardian import _maybe_notify_guardian
         before = len(list_events(db_session))
         _maybe_notify_guardian(
@@ -99,7 +103,8 @@ class TestGuardianHTTPNotification:
              "events": [{"check_id": str(uuid4()), "event_type": "threshold_breach"}]},
             uuid4(), target_check_id=uuid4(),
         )
-        assert len(list_events(db_session)) == before
+        after = len(list_events(db_session))
+        assert after == before, f"expected 0 new events, got {after - before}"
 
     def test_evaluate_one_breach_dispatches(
         self, db_session: Session,
