@@ -10,8 +10,9 @@
 - Sprint 007: Personal V1 Hardening + Notification — Done
 
 ## Phase 2 — Future
-- Sprint 008: Planning resolved (8/8 Owner Decisions). Technical Design drafted (Owner Approval Required). Implementation NOT AUTHORIZED.
+- Sprint 008: Technical Design Owner Approved. Implementation NOT AUTHORIZED.
   - Direction: Notification Source Wiring + Daily Operations
+  - Slices A/B/C require individual Owner authorization
   - See docs/sprints/SPRINT_008_TECHNICAL_DESIGN.md
 - Daily dashboard + portfolio valuation: candidate (not committed)
 - Quality hardening + Docker verification: candidate (not committed)
@@ -21,7 +22,7 @@
 - Cloud backup: deferred to V2
 
 ## Current Status
-- Sprint 008: Technical Design Owner Approval Required; no Slice authorized
+- Sprint 008: Tech Design approved; Slice implementation not authorized
 - Migration head: 0016_notification_integrity
 - PG 552 / non-PG 134+2 / frontend 251 test baseline
-- Next: Owner approves Technical Design → Slice authorization
+- Next: Owner authorizes Slice A, B, or C individually

@@ -1,11 +1,13 @@
 # Sprint 008 — Technical Design
 
-> **STATUS: TECHNICAL DESIGN — OWNER APPROVAL REQUIRED**
+> **STATUS: TECHNICAL DESIGN — OWNER APPROVED (2026-07-22)**
+>
+> Approved baseline HEAD: cbbadbb958b9881ad9fe02358afd28fed8a043a5
 >
 > IMPLEMENTATION NOT AUTHORIZED
-> ALL SLICES NOT AUTHORIZED (require individual Owner authorization post-gate)
+> ALL SLICES NOT AUTHORIZED (require individual Owner authorization)
 >
-> TD-8-1: **Owner Resolved** — Option A with schedule-local timezone definition (2026-07-22)
+> TD-8-1: **Owner Resolved** — Option A with schedule-local timezone definition
 
 ---
 
