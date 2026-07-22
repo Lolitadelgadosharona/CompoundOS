@@ -1571,7 +1571,7 @@ class NotificationEvent(Base):
             name="ck_notification_events_severity",
         ),
         CheckConstraint(
-            "delivery_status IN ('pending', 'delivered', 'suppressed', 'failed')",
+            "delivery_status IN ('pending', 'delivered', 'suppressed', 'failed', 'unavailable')",
             name="ck_notification_events_delivery_status",
         ),
     )
@@ -1596,4 +1596,7 @@ class NotificationPreferences(Base):
     quiet_hours_start: Mapped[Any] = mapped_column(Time(timezone=False), nullable=False)
     quiet_hours_end: Mapped[Any] = mapped_column(Time(timezone=False), nullable=False)
     timezone: Mapped[str] = mapped_column(String(64), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    enabled_sources: Mapped[Any] = mapped_column(JSONB, nullable=False, default=list)
+    enabled_severities: Mapped[Any] = mapped_column(JSONB, nullable=False, default=list)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

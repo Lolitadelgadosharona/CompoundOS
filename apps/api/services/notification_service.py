@@ -1,4 +1,13 @@
-"""Sprint 007 Slice C — Notification service."""
+"""Sprint 007 Slice C — Notification service V3 (integrity hardened, source wired).
+
+Changes:
+- Explicit opt-in: enabled=False by default, Owner must PATCH preferences
+- Adapter=None → delivery_status=unavailable (not delivered)
+- AppleScript: static script + argv (no string interpolation)
+- Dedup: advisory lock + household-scoped fingerprint
+- Structured templates: title/body generated from approved templates only
+- Health service wired: dispatches notification on degradation
+"""
 
 from __future__ import annotations
 
@@ -8,6 +17,7 @@ from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import desc
+from sqlalchemy import text as sa_text
 from sqlalchemy.orm import Session
 
 from apps.api.models import NotificationEvent, NotificationPreferences
@@ -16,15 +26,98 @@ ALLOWED_SOURCES = {"guardian", "committee", "automation", "backup", "health"}
 ALLOWED_SEVERITIES = {"info", "warning", "critical"}
 CRITICAL = "critical"
 DEDUP_WINDOW_HOURS = 24
-QUIET_START_DEFAULT = time(22, 0)
-QUIET_END_DEFAULT = time(8, 0)
+
+# ── Structured notification templates ──
+# Only approved event types with privacy-safe templates.
+# title/body are generated from template + context; never free-form from callers.
+
+NOTIFICATION_TEMPLATES: dict[str, dict[str, dict[str, str]]] = {
+    "health": {
+        "degraded": {
+            "title": "CompoundOS Health Degraded",
+            "body": "Health check returned {overall}. Check the dashboard for details.",
+        },
+        "unavailable": {
+            "title": "CompoundOS Unavailable",
+            "body": "Health check returned {overall}. Critical component failure.",
+        },
+    },
+    "guardian": {
+        "breach": {
+            "title": "Guardian Threshold Breach",
+            "body": "A Guardian threshold has been exceeded. Review the Guardian dashboard.",
+        },
+    },
+    "backup": {
+        "completed": {
+            "title": "Backup Complete",
+            "body": "Database backup completed successfully.",
+        },
+        "failed": {
+            "title": "Backup Failed",
+            "body": "Database backup failed. Review backup logs.",
+        },
+    },
+    "committee": {
+        "completed": {
+            "title": "Committee Session Complete",
+            "body": "AI Committee session finished. Review the Committee workspace.",
+        },
+    },
+    "automation": {
+        "failed": {
+            "title": "Automation Run Failed",
+            "body": "An automation run has failed. Review automation logs.",
+        },
+    },
+}
+
+
+def dispatch_notification(
+    session: Session,
+    source: str,
+    event_type: str,
+    severity: str,
+    *,
+    household_id: UUID | None = None,
+    entity_id: str | None = None,
+    context: dict | None = None,
+    now: datetime | None = None,
+    adapter=None,
+) -> NotificationEvent | None:
+    """Dispatch a notification from a structured, approved template.
+
+    Callers must use allowlisted (source, event_type) pairs with pre-approved templates.
+    Free-form title/body is NOT accepted — privacy contract enforced at dispatch.
+    """
+    if source not in ALLOWED_SOURCES:
+        raise ValueError(f"Invalid source: {source}")
+    tmpl = NOTIFICATION_TEMPLATES.get(source, {}).get(event_type)
+    if tmpl is None:
+        raise ValueError(
+            f"No approved template for source={source} event_type={event_type}"
+        )
+    ctx = context or {}
+    title = tmpl["title"].format(**ctx)
+    body = tmpl["body"].format(**ctx)
+    return notify(
+        session, source, event_type, severity, title, body,
+        household_id=household_id, entity_id=entity_id, now=now, adapter=adapter,
+    )
 
 
 def compute_fingerprint(
     source: str, event_type: str, severity: str,
+    household_id: UUID | None = None,
     entity_id: str | None = None,
 ) -> str:
-    raw = f"{source}:{event_type}:{severity}:{entity_id or ''}"
+    """Household-scoped fingerprint v2.
+
+    Includes household_id to prevent cross-household dedup collision.
+    Semantic version v2: adds household_id to the fingerprint input.
+    """
+    hid = str(household_id) if household_id else ""
+    raw = f"v2:{hid}:{source}:{event_type}:{severity}:{entity_id or ''}"
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
@@ -42,12 +135,14 @@ def is_within_dedup_window(session: Session, fingerprint: str, now: datetime) ->
 def get_preferences(session: Session) -> NotificationPreferences:
     prefs = session.query(NotificationPreferences).first()
     if not prefs:
-        from datetime import time as dt_time
         prefs = NotificationPreferences(
             id=uuid4(),
-            quiet_hours_start=dt_time(22, 0),
-            quiet_hours_end=dt_time(8, 0),
+            quiet_hours_start=time(22, 0),
+            quiet_hours_end=time(8, 0),
             timezone="UTC",
+            enabled=False,
+            enabled_sources=[],
+            enabled_severities=["critical"],
         )
         session.add(prefs)
         session.commit()
@@ -76,6 +171,7 @@ def notify(
     title: str,
     body: str,
     *,
+    household_id: UUID | None = None,
     entity_id: str | None = None,
     now: datetime | None = None,
     adapter=None,
@@ -87,12 +183,53 @@ def notify(
     if severity not in ALLOWED_SEVERITIES:
         raise ValueError(f"Invalid severity: {severity}")
 
-    fp = compute_fingerprint(source, event_type, severity, entity_id)
     prefs = get_preferences(session)
 
-    # Dedup check
+    # Explicit opt-in check
+    if not prefs.enabled:
+        ne = NotificationEvent(
+            id=uuid4(), source=source, event_type=event_type,
+            severity=severity, fingerprint="", title=title, body=body,
+            delivery_status="suppressed", suppressed_reason="disabled",
+            occurred_at=now,
+        )
+        session.add(ne)
+        session.commit()
+        return ne
+
+    # Source/severity allowlist
+    enabled_sources: list[str] = prefs.enabled_sources or []
+    enabled_severities: list[str] = prefs.enabled_severities or []
+    if enabled_sources and source not in enabled_sources:
+        ne = NotificationEvent(
+            id=uuid4(), source=source, event_type=event_type,
+            severity=severity, fingerprint="", title=title, body=body,
+            delivery_status="suppressed", suppressed_reason="source_disabled",
+            occurred_at=now,
+        )
+        session.add(ne)
+        session.commit()
+        return ne
+    if enabled_severities and severity not in enabled_severities:
+        ne = NotificationEvent(
+            id=uuid4(), source=source, event_type=event_type,
+            severity=severity, fingerprint="", title=title, body=body,
+            delivery_status="suppressed", suppressed_reason="severity_disabled",
+            occurred_at=now,
+        )
+        session.add(ne)
+        session.commit()
+        return ne
+
+    fp = compute_fingerprint(source, event_type, severity, household_id, entity_id)
+
+    # Dedup with advisory lock
+    try:
+        session.execute(sa_text("SELECT pg_advisory_xact_lock(42)"))
+    except Exception:
+        pass
+
     if is_within_dedup_window(session, fp, now):
-        # Severity escalation: if new severity > old, allow
         existing = session.query(NotificationEvent).filter(
             NotificationEvent.fingerprint == fp,
             NotificationEvent.delivery_status == "delivered",
@@ -132,8 +269,8 @@ def notify(
         except Exception:
             delivery_status = "failed"
     else:
-        delivery_status = "delivered"
-        delivered_at = now
+        delivery_status = "unavailable"
+        delivered_at = None
 
     ne = NotificationEvent(
         id=uuid4(), source=source, event_type=event_type,
@@ -166,6 +303,9 @@ def update_preferences(
     quiet_hours_start: time | None = None,
     quiet_hours_end: time | None = None,
     tz: str | None = None,
+    enabled: bool | None = None,
+    enabled_sources: list[str] | None = None,
+    enabled_severities: list[str] | None = None,
 ) -> NotificationPreferences:
     prefs = get_preferences(session)
     if quiet_hours_start is not None:
@@ -174,6 +314,12 @@ def update_preferences(
         prefs.quiet_hours_end = quiet_hours_end
     if tz is not None:
         prefs.timezone = tz
+    if enabled is not None:
+        prefs.enabled = enabled
+    if enabled_sources is not None:
+        prefs.enabled_sources = enabled_sources
+    if enabled_severities is not None:
+        prefs.enabled_severities = enabled_severities
     prefs.updated_at = datetime.now(timezone.utc)
     session.commit()
     return prefs
@@ -184,15 +330,23 @@ def _severity_rank(s: str) -> int:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# macOS adapter
+# macOS adapter — static script, argv-based (no string interpolation)
 # ═══════════════════════════════════════════════════════════════════════════
+
+_STATIC_SCRIPT = """
+on run argv
+    set theTitle to item 1 of argv
+    set theBody to item 2 of argv
+    display notification theBody with title theTitle
+end run
+"""
+
 
 def send_macos_notification(title: str, body: str) -> None:
     import subprocess
-    safe_title = title.replace('"', "'")[:100]
-    safe_body = body.replace('"', "'")[:200]
-    script = f'display notification "{safe_body}" with title "{safe_title}"'
+    safe_title = title[:100]
+    safe_body = body[:200]
     subprocess.run(
-        ["osascript", "-e", script],
+        ["osascript", "-e", _STATIC_SCRIPT, safe_title, safe_body],
         capture_output=True, timeout=10, check=True,
     )

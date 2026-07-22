@@ -1,4 +1,4 @@
-"""Sprint 007 Slice C — Notification API router."""
+"""Sprint 007 Slice C — Notification API router V2 (integrity hardened)."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ def get_events(
     session: Session = Depends(get_session),
 ) -> list[NotificationEventResponse]:
     events = list_events(session, limit=limit, offset=offset)
-    return [NotificationEventResponse.model_validate(e) for e in events]
+    return [NotificationEventResponse.from_event(e) for e in events]
 
 
 @router.post("/events/{event_id}/acknowledge", status_code=204)
@@ -53,6 +53,9 @@ def get_prefs(
         quiet_hours_start=str(prefs.quiet_hours_start),
         quiet_hours_end=str(prefs.quiet_hours_end),
         timezone=prefs.timezone,
+        enabled=prefs.enabled,
+        enabled_sources=prefs.enabled_sources or [],
+        enabled_severities=prefs.enabled_severities or [],
         updated_at=prefs.updated_at,
     )
 
@@ -69,11 +72,17 @@ def patch_prefs(
         quiet_hours_start=start,
         quiet_hours_end=end,
         tz=payload.timezone,
+        enabled=payload.enabled,
+        enabled_sources=payload.enabled_sources,
+        enabled_severities=payload.enabled_severities,
     )
     return PreferencesResponse(
         id=prefs.id,
         quiet_hours_start=str(prefs.quiet_hours_start),
         quiet_hours_end=str(prefs.quiet_hours_end),
         timezone=prefs.timezone,
+        enabled=prefs.enabled,
+        enabled_sources=prefs.enabled_sources or [],
+        enabled_severities=prefs.enabled_severities or [],
         updated_at=prefs.updated_at,
     )
