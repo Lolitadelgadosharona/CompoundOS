@@ -333,10 +333,10 @@ def _create_drift_check(session: Session, hid: UUID, threshold: float = 20.0) ->
         "INSERT INTO guardian_check_drafts (id, check_id, drift_threshold_pct,"
         " evaluation_schedule, check_type, created_at, updated_at)"
         " VALUES (:id, :cid, :th, 'manual', 'drift', NOW(), NOW())"
-    ), {"id": uuid4(), "cid": cc["id"], "th": threshold})
+    ), {"id": uuid4(), "cid": cc["identity"]["id"], "th": threshold})
     session.commit()
-    confirm_guardian_check(session, check_id=cc["id"], expected_revision=1)
-    return cc["id"]
+    confirm_guardian_check(session, check_id=cc["identity"]["id"], expected_revision=1)
+    return cc["identity"]["id"]
 
 
 def _enable_guardian_backup(session: Session) -> None:
