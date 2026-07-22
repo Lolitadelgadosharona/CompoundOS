@@ -327,6 +327,7 @@ def _create_drift_check(session: Session, hid: UUID, threshold: float = 20.0) ->
     cc = create_guardian_check(
         session, household_id=hid, name="Drift Check", check_type="drift",
         threshold_value=Decimal(str(threshold)),
+        target_category="Global Equity", target_holding_category="Equity",
     )
     session.execute(text(
         "INSERT INTO guardian_check_drafts (id, check_id, drift_threshold_pct,"
