@@ -6,8 +6,11 @@
 >
 > **Manual-trigger correction (2026-07-22):** Manual-trigger Guardian runs (schedule_id=NULL) are NOT claimed by the worker. The worker only claims due schedules via claim_due_schedules(). This path is removed from Slice A scope and recorded as future backlog. See §3.1.
 >
-> IMPLEMENTATION NOT AUTHORIZED
-> ALL SLICES NOT AUTHORIZED (require individual Owner authorization)
+> IMPLEMENTATION STATUS:
+> - Technical Design: OWNER APPROVED (2026-07-22, corrected 2026-07-22)
+> - Slice A: Implementation Authorized / In Progress (Draft PR #69)
+> - Slice B: NOT AUTHORIZED
+> - Slice C: NOT AUTHORIZED
 >
 > TD-8-1: **Owner Resolved** — Option A with schedule-local timezone definition
 
@@ -87,7 +90,7 @@ finally:
 
 ### 3.1 Guardian — All Evaluation Paths
 
-Guardian has two execution paths that reach the worker:
+Guardian has two execution paths in Slice A:
 
 | Path | Entry Point | Session Owner |
 |------|------------|---------------|
