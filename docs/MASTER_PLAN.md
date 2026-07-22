@@ -46,12 +46,18 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   - Slice C — Committee Frontend: Done (PR #54, /committee workspace)
   - 15 Owner Decisions all resolved and implemented
   - 491 PG / 136 non-PG / 242 frontend test baseline
-- Sprint 007: Technical Design Gate — Owner Decided (15/15 resolved)
-  - Technical Design / Open Questions: docs revision complete, PR pending
-  - Slice A (Backup, Export, Recovery): Not Authorized / Not Started
-  - Slice B (Health Dashboard, Credential UX): Not Authorized / Not Started
-  - Slice C (Lightweight Notification): Not Authorized / Not Started
-  - All slices require separate explicit Owner authorization post-design-gate
+- Sprint 007: Personal V1 Hardening + Notification — Done ✓
+  - Technical Design Gate: Done (15/15 Owner Decisions resolved)
+  - Slice A — Backup, Export & Recovery: Done (PR #60 base, PR #61 lint, PR #62 integrity, PR #63 review)
+  - Slice B — Health Dashboard, Credential UX: Done (PR #60, #61, #62, #63)
+  - Slice C — Lightweight Local Notification: Done (PR #64 foundation, PR #65 integrity corrective)
+  - Migration 0014 (health_integrity), 0015 (notification_foundation), 0016 (notification_integrity)
+  - Notification: explicit opt-in (disabled by default), 4 API routes, structured templates, household-scoped dedup, macOS AppleScript argv adapter, body privacy preview
+  - Health service wired as notification source (DEGRADED/UNAVAILABLE → dispatch)
+  - Guardian/committee/automation/backup notification sources defined but not yet wired
+  - PG 552 / non-PG 134+2 / frontend 251 test baseline
+  - Squash merge: 031ebdaed7a287d70287bacc5a55e62ff825ac2f
+  - Main CI run 29886582098: 3/3 success
 
 ## Backlog
 

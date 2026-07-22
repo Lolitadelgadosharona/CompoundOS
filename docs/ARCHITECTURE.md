@@ -461,3 +461,73 @@ GET /evidence/{session_id}, POST /outcomes
 
 TypeScript API client, session management, privacy preview with Owner checkbox,
 7 perspective report display, outcome recording with append-only history.
+
+## Sprint 007 — Notification Architecture
+
+### Persistence
+
+- `notification_events`: source, event_type, severity, fingerprint (SHA256 v2),
+  title, body, delivery_status, suppressed_reason, delivered_at, acknowledged_at,
+  occurred_at. CHECK constraints on source, severity, delivery_status.
+- `notification_preferences`: quiet_hours_start, quiet_hours_end, timezone,
+  enabled (FALSE default), enabled_sources (JSONB), enabled_severities (JSONB).
+  UNIQUE INDEX ((1)) singleton enforcement.
+- Migration head: 0016_notification_integrity.
+
+### Explicit Opt-in
+
+- Notifications are **disabled by default**. Owner must PATCH preferences with
+  `enabled=true` to activate.
+- `enabled_sources` and `enabled_severities` control which sources and severities
+  can produce deliveries.
+- Disabled/not-configured/no-adapter states return HEALTHY (no impact on overall health).
+
+### Delivery Pipeline
+
+- `notify()`: full pipeline — source/severity validation, explicit opt-in check,
+  source/severity allowlist, dedup (advisory lock + fingerprint v2 window),
+  quiet hours, delivery attempt.
+- `dispatch_notification()`: structured entry point. Only approved (source, event_type)
+  pairs from NOTIFICATION_TEMPLATES dict. Generates title/body from template +
+  context. No free-form text from callers.
+- Delivery statuses: `pending`, `delivered`, `unavailable` (no adapter),
+  `failed` (adapter exception), `suppressed` (disabled/dedup/quiet_hours/source_disabled).
+
+### AppleScript Adapter (macOS only)
+
+- Static `on run argv` AppleScript with `shell=False` subprocess.run.
+- Title and body passed as argv items; never interpolated into source code.
+- Timeout 10 seconds. Truncation: title 100 chars, body 200 chars.
+
+### Health Integration
+
+- `check_notification()`: **read-only** — SELECT only, no DB writes, no side effects.
+  Returns UNKNOWN for session=None; HEALTHY for disabled/no-adapter/no-events/OK;
+  DEGRADED for enabled + adapter_available + delivery failure.
+- `run_all_checks()`: dispatches via `dispatch_notification()` when overall is
+  DEGRADED or UNAVAILABLE. Fire-and-forget — notification failure cannot break
+  health response. No recursive dispatch loop.
+- `notification` in DEGRADING set; DEGRADED status degrades overall health.
+
+### API Privacy
+
+- `NotificationEventResponse` exposes `preview` (first 100 chars of body).
+  Full body stored in DB for audit only, never in API response.
+- Error messages use allowlisted reason codes; no credentials, paths, or traces.
+
+### Source Integration
+
+- **Wired:** health (DEGRADED/UNAVAILABLE → dispatch_notification via run_all_checks).
+- **Templates defined, not yet wired:** guardian, committee, automation, backup.
+
+### Dedup and Concurrency
+
+- Household-scoped fingerprint v2: `SHA256(v2:{household_id}:{source}:{event_type}:{severity}:{entity_id})`.
+- PostgreSQL advisory transaction lock (`pg_advisory_xact_lock(42)`) for serialization.
+- 24-hour dedup window with severity escalation bypass.
+
+### Security
+
+- Sharp 0.35.3 via npm overrides (resolves 4 libvips CVEs).
+- No credential, DSN, path, or raw exception in any notification payload or API response.
+- No investment rule changes, no Guardian threshold changes, no auto-trading.

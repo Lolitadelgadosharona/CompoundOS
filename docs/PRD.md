@@ -4,8 +4,9 @@
 
 Approved behavior includes Slice 1 Household, Slice 2B/C Policy, Slice 3B/C
 Decision Journal, Slice C Portfolio, Guardian (Sprint 004), Automation (Sprint 005),
-and AI Investment Committee (Sprint 006).  Sprints 001–006 are Done.
-Sprint 007 is Not Authorized.
+AI Investment Committee (Sprint 006), and Backup/Health/Notification (Sprint 007).
+Sprints 001–007 are Done.
+Sprint 008 is Not Authorized.
 
 ## Summary
 
@@ -211,12 +212,23 @@ Preserved commitments:
 - Owner confirmation required for all mutations
 - Future read-only data integrations (broker, bank) when authorized
 
-### Explicit Non-Goals (Sprint 005)
+### Sprint 007 — Notification Behavior
 
-- Notifications (email/SMS/push) — deferred to future sprint
+- Notifications are **disabled by default**. Owner must explicitly enable via PATCH /preferences.
+- `enabled_sources` and `enabled_severities` control which event types can produce deliveries.
+- macOS Notification Center delivery via static AppleScript (argv-based, no string interpolation).
+- Health service wired: overall DEGRADED/UNAVAILABLE triggers notification dispatch (fire-and-forget).
+- Disabled, not-configured, and no-adapter states do NOT degrade overall health.
+- Notification body is privacy-safe (template-generated); API returns 100-char preview only.
+- No financial data in any notification payload. No investment advice.
+
+### Explicit Non-Goals (Sprint 007)
+
+- External notifications (email, SMS, push) — deferred to V2
+- Guardian/committee/automation/backup notification source wiring — not yet authorized
 - Multiple Workers or Worker orchestration
 - Cron expression support (daily-only)
 - Automatic Guardian schedule creation
 - Worker start/stop/restart from browser
-- AI/LLM integration
+- AI/LLM integration beyond Sprint 006 Committee
 - Market data or trading

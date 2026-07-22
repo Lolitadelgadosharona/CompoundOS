@@ -1,10 +1,16 @@
 # Sprint 007 — Technical Design Gate
 
-> **STATUS: OWNER DECIDED — 15/15 Resolved (2026-07-20). Implementation Not Authorized.**
+> **STATUS: IMPLEMENTED — Done (2026-07-22)**
 >
-> All 15 Owner Decisions are resolved.  This document reflects those decisions.
-> Sprint 007 implementation is NOT AUTHORIZED.  Each Slice requires separate
-> explicit Owner authorization after the Technical Design Gate merges.
+> All 15 Owner Decisions resolved and implemented.
+> Slice A (Backup/Export/Recovery): PR #60–#63. Done.
+> Slice B (Health Dashboard/Credential): PR #60–#63. Done.
+> Slice C (Lightweight Notification): PR #64, #65. Done.
+> Migration head: 0016_notification_integrity.
+> Squash merge: 031ebdaed7a287d70287bacc5a55e62ff825ac2f.
+> Main CI run 29886582098: 3/3 success.
+> PG 552 / non-PG 134+2 / frontend 251 test baseline.
+> Sprint 008: Not Authorized.
 
 ---
 

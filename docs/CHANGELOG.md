@@ -1,5 +1,56 @@
 # Changelog
 
+## Sprint 007 — Personal V1 Hardening + Notification — Done (2026-07-22)
+
+### Technical Design Gate (PR #50 follow-up)
+- 15 Owner Decisions resolved: Personal V1 hardening, selective local notification
+- Backup/export/health/notification scope defined; external services deferred to V2
+
+### Slice A — Backup, Export & Recovery (PR #60, #61, #62, #63)
+- PostgreSQL backup: pg_dump → age streaming, SHA256 integrity, manifest per backup
+- Export service: JSON + CSV for all Owner-facing entities, 24h auto-delete
+- Retention: 7 daily + 4 weekly + 12 monthly, last-healthy guard
+- Restore verification to _test database only; launchd opt-in CLI
+- Cloud-sync detection and blocking; age encryption fail-closed
+
+### Slice B — Health Dashboard & Credential UX (PR #60–#63)
+- 10 component health checks: database, migration head, backup, restore, worker, leases, guardian, credential, launchd, notification
+- 5-state model: healthy/degraded/unavailable/stale/unknown
+- Mutation gate: fail-closed middleware on DB/schema failure
+- Worker heartbeat table (not MAX(started_at)); restore freshness via timestamp
+- Backup artifact file existence check; 3 health endpoints (/live, /ready, /full)
+
+### Slice C — Lightweight Notification (PR #64, #65)
+- Migration 0015 (notification_foundation) + 0016 (notification_integrity)
+- Notification events with source/severity/fingerprint/delivery_status CHECK constraints
+- Notification preferences: quiet_hours, timezone, enabled, enabled_sources, enabled_severities
+- Explicit opt-in: enabled=FALSE default; Owner must PATCH preferences to enable
+- 4 API routes: GET /events, POST /events/{id}/acknowledge, GET/PATCH /preferences
+- Household-scoped fingerprint v2: SHA256(v2:{household_id}:{source}:{event_type}:{severity}:{entity_id})
+- PostgreSQL advisory-lock dedup (pg_advisory_xact_lock) with 24h window + severity escalation
+- Quiet hours 22:00–08:00 default with critical bypass; IANA timezone support
+- macOS AppleScript adapter: static "on run argv" script, subprocess.run shell=False, timeout=10
+- Delivery truth: adapter unavailable → "unavailable", adapter failure → "failed", success → "delivered"
+- API body privacy: preview (100 chars) in response, full body in DB only
+- Structured notification templates: only approved (source, event_type) pairs
+- Health service wired: run_all_checks dispatches on DEGRADED/UNAVAILABLE (fire-and-forget)
+- Notification health: enabled+failure on macOS → DEGRADED (degrades overall); disabled/no-adapter → HEALTHY (no impact)
+- Preferences singleton: UNIQUE INDEX ((1)) on notification_preferences
+- Sharp 0.34.5 → 0.35.3 override (CVE-2026-33327, CVE-2026-33328, CVE-2026-35590, CVE-2026-35591)
+- Guardian/committee/automation/backup notification sources: templates defined, not yet wired
+
+### PR #65 Integrity Corrective
+- Independent review: 13 findings (2 BLOCKER, 4 HIGH, 4 MEDIUM, 3 LOW) → all resolved
+- Re-review: 0 BLOCKER / 0 HIGH / 0 MEDIUM / 0 LOW
+- Squash merge: 031ebdaed7a287d70287bacc5a55e62ff825ac2f
+- Main CI run 29886582098: 3/3 success
+
+### Final Test Baseline
+- 552 PostgreSQL tests (COMPOUNDOS_REQUIRE_POSTGRES_TESTS=1, 0 failed, 0 skipped)
+- 134 non-PostgreSQL tests, 2 expected skipped
+- 251 frontend tests (Vitest, 14 test files)
+- ESLint --max-warnings=0, TypeScript --noEmit, Ruff clean, npm audit 0 vulnerabilities
+
 ## Sprint 006 — AI Investment Committee Foundation — Done (2026-07-20)
 
 ### Technical Design Gate (PR #50)
