@@ -251,9 +251,9 @@ def compute_idempotency_key(job_type, job_params, scheduled_date, *, schedule_id
     return hashlib.sha256(payload.encode()).hexdigest()
 ```
 
-**Duplicate key handling — ON CONFLICT design**:
+**Duplicate key handling — ON CONFLICT (only approved approach)**:
 
-PostgreSQL IntegrityError aborts the current transaction. Catching IntegrityError and continuing is not possible. Design uses `INSERT ... ON CONFLICT (idempotency_key) DO NOTHING RETURNING id` within the same outer transaction that locks the schedule:
+PostgreSQL IntegrityError aborts the current transaction. Catching IntegrityError and continuing is not possible. The only approved design is `INSERT ... ON CONFLICT (idempotency_key) DO NOTHING RETURNING id` within the same outer transaction that locks the schedule.
 
 ```sql
 -- Within the schedule processing transaction:
@@ -270,14 +270,14 @@ RETURNING id
 - Any database error rolls back the entire transaction. Schedule remains due, allowing safe retry.
 - Concurrent workers are protected by: schedule claim/row lock, `uq_runs_idempotency_key` UNIQUE constraint, and lease/fencing.
 
-**Alternative — savepoint**: If ORM limitations prevent `ON CONFLICT ... RETURNING`, use `session.begin_nested()` (SAVEPOINT). Duplicate IntegrityError rolls back only to savepoint. Outer transaction continues to advance `next_run_at` and commit. Implementation chooses one approach based on ORM compatibility.
-
 **Test plan**:
 - Duplicate insert does not leave failed transaction
 - Duplicate run: `next_run_at` still advances
 - Run creation or `next_run_at` advance failure → full rollback, schedule remains due
 - Two concurrent workers claiming same schedule → exactly one scheduled run
 - After rollback, schedule can be safely re-claimed
+
+**Rejected alternative**: SAVEPOINT (`session.begin_nested()`) was evaluated but rejected. If ON CONFLICT is found infeasible during implementation (e.g., ORM limitation), stop and return to Technical Design Gate — do not silently switch to SAVEPOINT.
 
 **Schedule_id inclusion evidence**: `runs.schedule_id` column exists (FK to schedules, nullable). Worker already has access to `schedule_id` when creating runs.
 
@@ -301,9 +301,17 @@ RETURNING id
 | ALLOWED_JOB_TYPES expansion | No (Slice C application code) | Python constant, no schema change |
 
 Migration 0017 scope:
-- `CREATE OR REPLACE FUNCTION fn_job_type_allowlist()` adding `'backup.daily'` to the existing list
-- Does NOT modify Python functions, constants, or application logic
-- Downgrade restores original allowlist with only `guardian.evaluate_all` and `guardian.evaluate_one`
+
+Database function to replace (from migration 0008, lines 48-58):
+- `public.fn_job_definition_allowlist() RETURNS trigger LANGUAGE plpgsql`
+- Trigger: `trg_job_definition_allowlist` BEFORE INSERT OR UPDATE ON job_definitions
+- Current allowlist: `'guardian.evaluate_all', 'guardian.evaluate_one'`
+
+Migration 0017 uses `CREATE OR REPLACE FUNCTION public.fn_job_definition_allowlist()` (same function — the trigger will automatically call the new version). Upgrade adds `'backup.daily'` to the allowlist. Downgrade restores original allowlist.
+
+Migration 0017 does NOT modify:
+- Python functions, constants, `compute_idempotency_key()`, or `ALLOWED_JOB_TYPES`
+- Those are Slice C application code — no schema change required
 
 ---
 
