@@ -84,7 +84,9 @@ def run_backup(
     try:
         db_size = get_db_size_bytes(db_url)
     except Exception:
-        pass
+        import logging
+        logging.getLogger(__name__).warning("Could not determine DB size", exc_info=True)
+        db_size = 0
 
     err = check_destination(dest_dir, db_size)
     if err:

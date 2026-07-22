@@ -242,23 +242,23 @@ class OrchestrationWorker:
             fencing_token=lease["fencing_token"],
         )
 
-        # Guardian jobs: child already finalized run/attempt/lease in fenced tx.
-        # The result is the raw Guardian evaluation dict with evaluation_run + events.
-        # Parent must not re-finalize — child owns the single atomic commit.
         is_guardian = job_type.startswith("guardian.")
+
+        # Determine final status from the result
         if is_guardian and "evaluation_run" in result:
-            # Child committed — finalize/complete/release already done.
-            # Return result for notification dispatch after parent commit.
-            return result
+            eval_status = result.get("evaluation_run", {}).get("status", "")
+            finalize_status = (
+                "completed" if eval_status.startswith(("completed", "skipped"))
+                else "failed"
+            )
+            is_timeout = False
+        else:
+            is_timeout = result.get("status") == "terminated"
+            finalize_status = "aborted" if is_timeout else (
+                "completed" if result.get("status") == "completed" else "failed"
+            )
 
-        # Non-Guardian jobs: parent must finalize
-        is_timeout = result.get("status") == "terminated"
-
-        finalize_status = "aborted" if is_timeout else (
-            "completed" if result.get("status") == "completed" else "failed"
-        )
-
-        # Finalize run (token-gated)
+        # Finalize run (token-gated) — parent owns this for all job types
         fr = finalize_run(
             session,
             run_id=run_id,
@@ -273,11 +273,11 @@ class OrchestrationWorker:
             complete_attempt(session, aid, "failed",
                              error_message="Lease expired during execution",
                              clock=self._clock)
-            return
+            return None
 
         attempt_status = "succeeded" if finalize_status == "completed" else "failed"
         complete_attempt(session, aid, attempt_status,
-                         error_message=result.get("error"),
+                         error_message=result.get("error") if not is_guardian else None,
                          clock=self._clock)
 
         release_lease(
@@ -288,10 +288,10 @@ class OrchestrationWorker:
             clock=self._clock,
         )
 
+        # Return Guardian result for notification dispatch after parent commit
+        if is_guardian and finalize_status == "completed" and "evaluation_run" in result:
+            return result
         return None
-
-    # ── Guardian notification (worker path) ──
-
     @staticmethod
     def _maybe_notify_guardian_worker(guardian_result: dict | None, item: dict) -> None:
         """Dispatch Guardian notification from worker after child's business commit."""
