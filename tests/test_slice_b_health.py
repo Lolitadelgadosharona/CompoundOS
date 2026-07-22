@@ -121,15 +121,16 @@ class TestNotificationCheck:
         assert c.status == HEALTHY  # disabled → no impact
         assert compute_overall([c]) == HEALTHY
 
-    def test_enabled_failure_degrades_overall(self, db_session: Session) -> None:
+    def test_enabled_failure_degrades_overall_macos(self, db_session: Session) -> None:
+        """On macOS (adapter available), a failed delivery degrades overall."""
+        import sys
+
         from apps.api.services.notification_service import update_preferences
         update_preferences(db_session, enabled=True,
                            enabled_sources=["health"],
                            enabled_severities=["critical"])
-        # Insert a failed event manually
-        from uuid import uuid4
         db_session.execute(
-            __import__("sqlalchemy").text(
+            text(
                 "INSERT INTO notification_events (id, source, event_type, severity,"
                 " fingerprint, title, body, delivery_status, occurred_at)"
                 " VALUES (:id, 'health', 'test', 'critical', '',"
@@ -138,10 +139,35 @@ class TestNotificationCheck:
             {"id": uuid4(), "now": NOW},
         )
         db_session.commit()
+        old_platform = sys.platform
+        try:
+            sys.platform = "darwin"
+            c = check_notification(db_session, NOW)
+            assert c.status == DEGRADED
+            assert compute_overall([c]) == DEGRADED
+        finally:
+            sys.platform = old_platform
+
+    def test_enabled_no_adapter_no_impact(self, db_session: Session) -> None:
+        """Without macOS adapter, notifications have no impact on overall health."""
+        from apps.api.services.notification_service import update_preferences
+        update_preferences(db_session, enabled=True,
+                           enabled_sources=["health"],
+                           enabled_severities=["critical"])
+        db_session.execute(
+            text(
+                "INSERT INTO notification_events (id, source, event_type, severity,"
+                " fingerprint, title, body, delivery_status, occurred_at)"
+                " VALUES (:id, 'health', 'test', 'critical', '',"
+                " 'T', 'B', 'failed', :now)"
+            ),
+            {"id": uuid4(), "now": NOW},
+        )
+        db_session.commit()
+        # On Linux CI, adapter is unavailable
         c = check_notification(db_session, NOW)
-        # On Linux CI, adapter is unavailable → HEALTHY
-        # But with a 'failed' event, it should still see the failed status
-        assert c.status in (DEGRADED, HEALTHY)  # HEALTHY if no adapter, DEGRADED if macOS
+        assert c.status == HEALTHY
+        assert compute_overall([c]) == HEALTHY
 
     def test_health_check_does_not_send_notification(self, db_session: Session) -> None:
         from apps.api.services.notification_service import list_events, update_preferences
