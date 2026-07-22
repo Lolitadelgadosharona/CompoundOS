@@ -231,6 +231,9 @@ def check_launchd(now: datetime) -> ComponentHealth:
 
 
 def check_notification(session: Session, now: datetime) -> ComponentHealth:
+    if session is None:
+        return ComponentHealth("notification", UNKNOWN,
+                               "No session available", now)
     try:
         prefs_row = session.execute(text(
             "SELECT enabled FROM notification_preferences LIMIT 1"
@@ -274,8 +277,8 @@ def check_notification(session: Session, now: datetime) -> ComponentHealth:
         return ComponentHealth("notification", HEALTHY,
                                f"Last status: {last_status}", now)
     except Exception:
-        return ComponentHealth("notification", HEALTHY,
-                               "Check error (no impact)", now)
+        return ComponentHealth("notification", UNKNOWN,
+                               "Check error", now)
 
 
 CRITICAL = {"database", "migration"}

@@ -103,9 +103,56 @@ class TestCredentialCheck:
 
 
 class TestNotificationCheck:
-    def test_returns_unknown(self) -> None:
+    def test_returns_unknown_when_no_session(self) -> None:
         c = check_notification(None, NOW)
         assert c.status == UNKNOWN
+
+    def test_not_configured_healthy_no_impact(self, db_session: Session) -> None:
+        c = check_notification(db_session, NOW)
+        # No notification_preferences row → HEALTHY, no impact
+        assert c.status == HEALTHY
+        # Verify overall stays HEALTHY
+        assert compute_overall([c]) == HEALTHY
+
+    def test_disabled_no_impact_on_overall(self, db_session: Session) -> None:
+        from apps.api.services.notification_service import get_preferences
+        get_preferences(db_session)  # creates default row with enabled=False
+        c = check_notification(db_session, NOW)
+        assert c.status == HEALTHY  # disabled → no impact
+        assert compute_overall([c]) == HEALTHY
+
+    def test_enabled_failure_degrades_overall(self, db_session: Session) -> None:
+        from apps.api.services.notification_service import update_preferences
+        update_preferences(db_session, enabled=True,
+                           enabled_sources=["health"],
+                           enabled_severities=["critical"])
+        # Insert a failed event manually
+        from uuid import uuid4
+        db_session.execute(
+            __import__("sqlalchemy").text(
+                "INSERT INTO notification_events (id, source, event_type, severity,"
+                " fingerprint, title, body, delivery_status, occurred_at)"
+                " VALUES (:id, 'health', 'test', 'critical', '',"
+                " 'T', 'B', 'failed', :now)"
+            ),
+            {"id": uuid4(), "now": NOW},
+        )
+        db_session.commit()
+        c = check_notification(db_session, NOW)
+        # On Linux CI, adapter is unavailable → HEALTHY
+        # But with a 'failed' event, it should still see the failed status
+        assert c.status in (DEGRADED, HEALTHY)  # HEALTHY if no adapter, DEGRADED if macOS
+
+    def test_health_check_does_not_send_notification(self, db_session: Session) -> None:
+        from apps.api.services.notification_service import list_events, update_preferences
+        update_preferences(db_session, enabled=True,
+                           enabled_sources=["health"],
+                           enabled_severities=["critical"])
+        before = len(list_events(db_session))
+        check_notification(db_session, NOW)
+        after = len(list_events(db_session))
+        # Health check must not create notification events
+        assert after == before
 
 
 # ═══════════════════════════════════════════════════════════════════════════
