@@ -10,7 +10,7 @@
 - Sprint 007: Personal V1 Hardening + Notification — Done
 
 ## Phase 2 — Future
-- Sprint 008: Not approved
+- Sprint 008: Not Authorized
 - Guardian notification source wiring: candidate (not committed)
 - Committee/automation/backup notification source wiring: candidate (not committed)
 - External notifications (email, SMS, push): deferred to V2
