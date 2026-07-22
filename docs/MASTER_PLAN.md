@@ -58,11 +58,13 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   - PG 552 / non-PG 134+2 / frontend 251 test baseline
   - Closeout PR #66: squash merge 2f4f12569ae702fcbcc9a0bb01b199d68fe26327
   - Main CI run 29888368096: 3/3 success
-- Sprint 008: Planning/Proposal — Authorized (planning only)
+- Sprint 008: Planning — Owner Decided (8/8 resolved, 2026-07-22)
+  - Direction: Notification Source Wiring + Daily Operations (Candidate A)
   - Proposal: docs/sprints/SPRINT_008_PROPOSAL.md
-  - Open Questions: docs/sprints/SPRINT_008_OPEN_QUESTIONS.md (8 Owner Decisions pending)
+  - Open Questions: docs/sprints/SPRINT_008_OPEN_QUESTIONS.md (8/8 resolved)
+  - Technical Design Gate: PENDING
   - Implementation: NOT AUTHORIZED
-  - Each Slice requires separate explicit Owner authorization after Owner Decision resolution
+  - Slices A/B/C: NOT AUTHORIZED (require Technical Design Gate + individual authorization)
 
 ## Backlog
 

@@ -1,9 +1,9 @@
 # Sprint 008 — Open Questions
 
-> **STATUS: ALL OPEN — OWNER DECISIONS REQUIRED**
+> **STATUS: ALL 8 RESOLVED — OWNER DECIDED (2026-07-22)**
 >
-> Each question blocks implementation until resolved.
-> No question is pre-resolved. All answers require explicit Owner approval.
+> All questions resolved. Implementation is NOT AUTHORIZED.
+> Each Slice requires separate Owner authorization after Technical Design Gate.
 
 ---
 
@@ -18,11 +18,9 @@
 | C | Quality & Stability — Hardening, Docker, Backlog Cleanup |
 | D | Combined A+B (reduced scope) — source wiring + simple dashboard, defer valuation |
 
-**Recommended**: Option A — Notification Source Wiring + Daily Operations.
-
-**Rationale**: Lowest risk, highest ROI on Sprint 007 investment. No new schema. No external dependencies. Directly addresses the #1 gap: 4 of 5 notification sources are silent.
-
-**Blocked if unresolved**: All implementation. Sprint direction is the root decision.
+> **RESOLVED: Option A — Notification Source Wiring + Daily Operations (2026-07-22)**
+>
+> Rationale: Lowest risk, highest ROI on Sprint 007 investment. Notification templates already exist for all 5 sources. Wire-up makes Sprint 007 deliver value for 5 sources instead of 1.
 
 ---
 
@@ -32,15 +30,13 @@
 
 | Option | Description |
 |--------|-------------|
-| A | Include daily Guardian evaluation schedule (default disabled) and daily backup schedule (default disabled) |
-| B | Defer daily schedules to a future sprint; Sprint 008 only wires notification sources |
+| A | Include daily Guardian evaluation schedule and daily backup schedule (default disabled) |
+| B | Defer daily schedules; Sprint 008 only wires notification sources |
 | C | Include backup schedule only; defer Guardian schedule |
 
-**Recommended**: Option A — include both schedules, default disabled.
-
-**Rationale**: Notification source wiring without automation means notifications only fire on manual triggers. Daily schedules make the wired sources actually produce events. Default-disabled preserves explicit opt-in.
-
-**Blocked if unresolved**: Backend scope in Slice B.
+> **RESOLVED: Option A — Include both, default disabled (2026-07-22)**
+>
+> Rationale: Source wiring without automation means notifications only fire on manual triggers. Daily schedules make wired sources produce real events. Default-disabled preserves explicit opt-in. Owner must explicitly set execution_time, timezone, and enable.
 
 ---
 
@@ -52,115 +48,118 @@
 |--------|-------------|
 | A | Wire all 4 pending sources: guardian, committee, automation, backup |
 | B | Wire guardian + backup only; defer committee + automation |
-| C | Wire guardian only (highest-value first); defer others |
+| C | Wire guardian only; defer others |
 | D | Wire all 4 + add any Owner-requested additional sources |
 
-**Recommended**: Option A — wire all 4 pending sources.
-
-**Rationale**: Templates exist for all 4. The dispatch pipeline is tested. Wire-up is mechanical — each source adds a `dispatch_notification()` call at a well-defined completion/failure point. Partial wiring creates an inconsistent experience.
-
-**Blocked if unresolved**: Which service files to modify.
+> **RESOLVED: Option A — Wire all 4 pending sources (2026-07-22)**
+>
+> Rationale: Templates exist for all 4. Dispatch pipeline is tested. Wire-up is mechanical — each source adds a `dispatch_notification()` call at a well-defined point. Wiring a source ≠ default notification; existing enabled_sources/enabled_severities still gate actual delivery.
 
 ---
 
 ## OD-8-4: Severity Assignments
 
-**Question**: What severity should each wired source use for its primary notification?
+**Question**: What severity should each wired source use?
 
-| Source | Event | Candidate Severities |
-|--------|-------|---------------------|
-| guardian | threshold_breach | warning / critical |
-| committee | session_complete | info |
-| automation | run_failed | warning / critical |
-| backup | backup_complete | info |
-| backup | backup_failed | warning / critical |
+| Source | Event | Options |
+|--------|-------|---------|
+| guardian | threshold_breach | info / **warning** / critical |
+| committee | session_complete | **info** / warning |
+| automation | run_failed | info / **warning** / critical |
+| backup | backup_complete | **info** / warning |
+| backup | backup_failed | info / **warning** / critical |
 
-**Recommended**: guardian=warning, committee=info, automation=warning, backup_complete=info, backup_failed=warning.
-
-**Rationale**: Critical should be reserved for health degradation (already wired). Guardian breach is warning (actionable, not system-down). Committee completion is informational.
-
-**Blocked if unresolved**: Template severity values in NOTIFICATION_TEMPLATES.
+> **RESOLVED (2026-07-22):**
+> - guardian threshold_breach: **warning**
+> - committee session_complete: **info**
+> - automation run_failed: **warning**
+> - backup completed: **info**
+> - backup failed: **warning**
+>
+> Rationale: Critical reserved for health degradation (already wired). Guardian breach is warning (actionable, not system-down). Committee completion is informational. No new critical mappings added. Guardian thresholds and breach criteria unchanged.
 
 ---
 
 ## OD-8-5: Committee Notification Scope
 
-**Question**: The AI Committee is currently manual-only (no auto-trigger, no auto-run). Should committee notification wiring wait until the committee can run automatically, or wire now for manual sessions?
+**Question**: Wire committee notification now (manual sessions) or defer until committee has automatic runs?
 
 | Option | Description |
 |--------|-------------|
 | A | Wire now — dispatch on manual session completion. Useful when Owner manually runs committee and wants notification when done |
-| B | Defer until Committee has scheduled/automatic runs. Manual sessions don't need notifications |
+| B | Defer until Committee has scheduled/automatic runs |
 
-**Recommended**: Option A — wire now for manual sessions.
-
-**Rationale**: Even manual sessions can take minutes (LLM call). A notification when complete lets the Owner do other work. No additional infrastructure needed.
-
-**Blocked if unresolved**: Whether to include committee in Slice B.
+> **RESOLVED: Option A — Wire now for manual sessions (2026-07-22)**
+>
+> Rationale: Even manual sessions can take minutes (LLM call). A notification when complete lets the Owner do other work. No additional infrastructure needed. No automatic committee runs or investment decisions.
 
 ---
 
 ## OD-8-6: Transaction Boundary Strategy
 
-**Question**: Guardian evaluation and backup both run inside transactions. If notification dispatch fails, what should happen?
+**Question**: What happens if notification dispatch fails inside a business transaction?
 
 | Option | Description |
 |--------|-------------|
-| A | Fire-and-forget: always dispatch after the business transaction commits. Notification failure never rolls back the business operation |
-| B | Same-transaction: dispatch inside the business transaction. Notification failure rolls back both |
-| C | Two-phase: commit business first, then dispatch in separate transaction. If dispatch fails, log but don't roll back |
+| A | Fire-and-forget: dispatch after business commit. Notification failure never rolls back business |
+| B | Same-transaction: dispatch inside business transaction. Notification failure rolls back both |
+| C | Two-phase: business commits first, then independent notification transaction. Notification failure never rolls back business. Dispatch result persisted per Sprint 007 delivery truth. |
 
-**Recommended**: Option A — fire-and-forget after business transaction commit.
-
-**Rationale**: This is the pattern already used by run_all_checks (health dispatch). Notification is an ancillary concern — backup data and Guardian evaluations must not be lost because osascript wasn't available.
-
-**Blocked if unresolved**: Implementation pattern for each source.
+> **RESOLVED: Option C — Independent post-commit notification transaction (2026-07-22)**
+>
+> Specification:
+> 1. Business operation completes and commits in its own transaction.
+> 2. After business commit, a separate notification transaction calls `dispatch_notification()`.
+> 3. Notification failure must not roll back Guardian, Committee, Automation, or Backup results.
+> 4. Dispatch result is persisted (delivered/unavailable/failed/suppressed) per Sprint 007 delivery truth.
+> 5. No untracked background tasks.
+>
+> Reference: `run_all_checks()` in Sprint 007 demonstrates this isolation boundary — health components evaluated, overall status computed, then notification dispatched. Health response is independent of notification success.
 
 ---
 
 ## OD-8-7: Dashboard Inclusion
 
-**Question**: Should Sprint 008 include any dashboard/aggregation work alongside source wiring?
+**Question**: Should Sprint 008 include any dashboard/aggregation work?
 
 | Option | Description |
 |--------|-------------|
-| A | No dashboard work. Pure source wiring sprint |
-| B | Minimal: add a "System Status" card to the existing /notifications page — shows last Guardian evaluation, last backup, health summary |
-| C | Full /dashboard page with portfolio summary, Guardian status, health, notifications |
+| A | No dashboard work. Pure source wiring + schedules |
+| B | Minimal status card on /notifications page |
+| C | Full /dashboard page |
 
-**Recommended**: Option A — no dashboard work. Keep Sprint 008 focused on source wiring.
-
-**Rationale**: Dashboard is independently valuable but adds scope (new endpoints, new frontend page). Can be its own sprint. Source wiring alone significantly improves daily usability via notifications.
-
-**Blocked if unresolved**: Frontend scope in Slice C.
+> **RESOLVED: Option A — No dashboard (2026-07-22)**
+>
+> Rationale: Keep Sprint 008 focused. Dashboard is independently valuable but adds scope (new endpoints, new frontend page). Source wiring alone significantly improves daily usability via notifications.
 
 ---
 
-## OD-8-8: Sprint 008 Decomposition
+## OD-8-8: Sprint Decomposition
 
-**Question**: How should Sprint 008 be decomposed into slices?
+**Question**: How should Sprint 008 be decomposed?
 
 | Option | Description |
 |--------|-------------|
-| A | Standard 3-slice: A (DB+migration if needed + Guardian+Backup wiring), B (Committee+Automation wiring + schedules), C (Frontend) |
-| B | 2-slice: A (all backend wiring + schedules), B (Frontend) |
-| C | Single slice: all source wiring + minimal frontend in one PR |
+| A | Three slices: A (Guardian+Backup wiring), B (Committee+Automation wiring), C (Daily schedules + UI) |
+| B | Two slices: A (all backend wiring + schedules), B (Frontend) |
+| C | Single slice: all in one PR |
 
-**Recommended**: Option B — 2 slices (backend then frontend).
-
-**Rationale**: No migration expected. Backend work is mechanical wire-up across 4 services + schedule creation. Frontend is minimal (schedule enable/disable UI). 3 slices would over-decompose.
-
-**Blocked if unresolved**: Branch and PR structure.
+> **RESOLVED: Option A — Three slices (2026-07-22)**
+>
+> - Slice A (R2): Guardian + Backup source wiring
+> - Slice B (R2): Committee + Automation source wiring
+> - Slice C (R1): Daily schedules + schedule UI in /automation workspace
+>
+> Each slice requires separate explicit Owner authorization.
+> Implementation NOT AUTHORIZED until Technical Design Gate approved.
 
 ---
 
 ## Implementation Boundary
 
-All 8 Owner Decisions must be resolved before any implementation begins.
+All 8 Owner Decisions resolved (2026-07-22).
 
-After resolution:
-1. Update SPRINT_008_PROPOSAL.md with resolved decisions
-2. Create detailed Technical Design for the chosen direction
-3. Each Slice requires separate explicit Owner authorization
+Next: Technical Design Gate.
 
 Sprint 008 implementation: NOT AUTHORIZED.
+No Slice is authorized until Technical Design Gate is approved and individual Slice authorization is granted.
