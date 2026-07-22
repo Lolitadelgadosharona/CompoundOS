@@ -125,8 +125,8 @@ def run_backup(
         record.status = "completed"
         record.completed_at = datetime.now(timezone.utc)
         record.error_detail = None
-        session.commit()
         bid = str(record.id)
+        session.commit()
         _maybe_notify_backup(record_id=bid, status="completed")
         return record
 
@@ -134,8 +134,8 @@ def run_backup(
         record.status = "failed"
         record.completed_at = datetime.now(timezone.utc)
         record.error_detail = _sanitize_error(str(e))
-        session.commit()
         bid = str(record.id)
+        session.commit()
         _maybe_notify_backup(record_id=bid, status="failed")
         return record
 
