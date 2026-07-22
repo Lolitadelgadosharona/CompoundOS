@@ -62,7 +62,7 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   - Direction: Notification Source Wiring + Daily Operations (Candidate A)
   - Proposal: docs/sprints/SPRINT_008_PROPOSAL.md
   - Open Questions: docs/sprints/SPRINT_008_OPEN_QUESTIONS.md (8/8 resolved)
-  - Technical Design: docs/sprints/SPRINT_008_TECHNICAL_DESIGN.md (Owner Approval Required)
+  - Technical Design: docs/sprints/SPRINT_008_TECHNICAL_DESIGN.md (Owner Approval Required; TD-8-1 resolved)
   - Implementation: NOT AUTHORIZED
   - Slices A/B/C: NOT AUTHORIZED (require Technical Design Gate approval + individual authorization)
 

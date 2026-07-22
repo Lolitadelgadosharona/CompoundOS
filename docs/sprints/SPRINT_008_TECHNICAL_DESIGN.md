@@ -4,6 +4,8 @@
 >
 > IMPLEMENTATION NOT AUTHORIZED
 > ALL SLICES NOT AUTHORIZED (require individual Owner authorization post-gate)
+>
+> TD-8-1: **Owner Resolved** — Option A with schedule-local timezone definition (2026-07-22)
 
 ---
 
@@ -13,252 +15,270 @@
 |------|-------|
 | Main HEAD | 9d5faebea4a3538b838b071d23340deb57fa5b35 |
 | Planning PR | #67 (MERGED, 2026-07-22) |
-| Direction | Candidate A — Notification Source Wiring + Daily Operations |
-| Owner Decisions | 8/8 resolved |
+| Owner Decisions | 8/8 resolved + TD-8-1 resolved |
 | Migration head | 0016_notification_integrity |
 | PG 552 / non-PG 134+2 / frontend 251 |
 
 ---
 
-## 2. Source Code Analysis — Exact Trigger Points
+## 2. Transaction Ownership — Corrected Design
 
-### 2.1 Guardian
+### 2.1 Actual Code Evidence
 
-**File**: `apps/api/services/guardian.py`
+`notification_service.py` — `notify()` owns its transaction:
+- Line 148: `session.commit()` (disabled path)
+- Line 197: `session.commit()` (source_disabled)
+- Line 211: `session.commit()` (severity_disabled)
+- Line 245: `session.commit()` (dedup suppressed)
+- Line 258: `session.commit()` (quiet_hours suppressed)
+- Line 282: `session.commit()` (delivery complete)
+- Line 298: `session.commit()` (acknowledge)
 
-`evaluate_all_checks()` (line 381):
+`get_preferences()` at line 61: `session.commit()`.
+
+`dispatch_notification()` → calls `notify()` which internally commits.
+
+### 2.2 Conflict
+
+Wrapping `dispatch_notification()` with `session.begin()` conflicts because `notify()` internally calls `session.commit()`. The context manager would see a closed transaction and raise on exit.
+
+### 2.3 Design: Dedicated Notification Session
+
+All four sources shall use this pattern:
+
 ```python
-def evaluate_all_checks(session, *, household_id, as_of_date) -> dict:
-    result = _evaluate_core(session, household_id=household_id, as_of_date=as_of_date)
-    session.commit()        # ← line 391: business commit
-    return result
+from apps.api.database import SessionLocal
+
+# After business transaction committed with business_session.commit()
+
+notification_session = SessionLocal()
+try:
+    dispatch_notification(
+        notification_session,
+        source=..., event_type=..., severity=...,
+        household_id=..., entity_id=..., context=...,
+    )
+    # dispatch_notification → notify() internally commits notification_session
+except Exception:
+    notification_session.rollback()
+    # Log safely — no business data
+finally:
+    notification_session.close()
 ```
 
-`evaluate_one_check()` (line 395): same pattern, commit at line 407.
+**Properties**:
+- Business session and notification session are independent
+- `dispatch_notification()` owns the notification transaction — calls `session.commit()` internally
+- Notification failure → rollback + close; business result unaffected
+- Adapter failure → delivery_status="failed" persisted in notification transaction
+- No `session.begin()` wrapper around dispatch — dispatch owns its commit
+- No background tasks. No async fire-and-forget.
+- `SessionLocal` creates a new engine-bound session from the same pool as the application
 
-**Notification trigger point**: AFTER `session.commit()` (line 391/407). The result dict contains `{"evaluation_run": {..., "status": "completed"}, "events": [...]}`. If `len(events) > 0`, threshold breach events were persisted. Guardian events use the `guardian_events` table with `event_type` column.
-
-**Dedup identity**: `sha256("v2:{household_id}:guardian:threshold_breach:warning:")`. Guardian evaluates-on-demand; repeated same-day evaluations with same breach findings should dedup within 24h window.
-
-**Non-trigger**: session=None (router error), check not found (CheckNotFoundError), evaluation status not "completed".
-
-### 2.2 Committee
-
-**File**: `apps/api/services/committee_orchestration.py`
-
-Session completion at line 220-225:
-```python
-report = _persist_report(...)
-committee_session.status = "completed"
-session.commit()          # ← line 225: business commit
-```
-
-**Notification trigger point**: AFTER `session.commit()` at line 225. The method `run_session()` orchestrates: evidence → privacy preview check → provider call → validate → persist report → set completed → commit.
-
-**Dedup identity**: `sha256("v2:{household_id}:committee:session_complete:info:{session_id}")`. Each session has a unique UUID; same session cannot complete twice.
-
-**Non-trigger**: session status != "completed", session failed (_fail_session at line 346), privacy preview not confirmed.
-
-### 2.3 Backup
-
-**File**: `apps/api/services/backup_service.py`
-
-Success path (line 120-125):
-```python
-record.status = "completed"
-record.completed_at = datetime.now(timezone.utc)
-session.commit()          # ← line 124: business commit
-return record
-```
-
-Failure path (line 127-132):
-```python
-record.status = "failed"
-record.completed_at = datetime.now(timezone.utc)
-session.commit()          # ← line 131: business commit
-return record
-```
-
-**Notification trigger points**: AFTER `session.commit()` at line 124 (success) or 131 (failure). The record's `status` field carries the outcome.
-
-**Dedup identity**:
-- Success: `sha256("v2:{household_id}:backup:backup_complete:info:{record_id}")`
-- Failure: `sha256("v2:{household_id}:backup:backup_failed:warning:{record_id}")`
-
-**Non-trigger**: pre-flight failures (line 91-94), backup not started.
-
-### 2.4 Automation
-
-**File**: `apps/api/services/orchestration_executor.py`
-
-`RealJobExecutor.execute()` (line 225): spawns child process, monitors via `result_queue`. On failure returns `{"status": "failed", ...}`. The worker (`orchestration_worker.py`) receives this, marks the run attempt failed, and commits.
-
-`FakeJobExecutor.execute()` (line 295): returns `{"status": "failed", ...}` for simulated failures.
-
-**Notification trigger point**: In the worker, after the run attempt status is updated to "failed" and the transaction committed. The worker processes results from the executor and persists them.
-
-**Dedup identity**: `sha256("v2:{household_id}:automation:run_failed:warning:{run_id}:{attempt_number}")`. Includes attempt number to distinguish retries.
-
-**Recursive protection**: The notification dispatch itself must never be scheduled as an automation job. The `run_failed` notification dispatches for automation jobs only — never for notification-system jobs. No `notification.*` job type exists or will be created.
-
-**Non-trigger**: run succeeded, run is pending/running, run retried (new attempt — dedup may apply), lease lost (not a run failure).
+**Compatibility**: This pattern does not require refactoring `notify()` or `get_preferences()`. Existing health dispatch (`run_all_checks`) uses the health session directly — no change needed there since health owns that session lifecycle.
 
 ---
 
-## 3. Notification Transaction Design
+## 3. Source Trigger Points — Complete Path Coverage
 
-### 3.1 Pattern (All Sources)
+### 3.1 Guardian — All Evaluation Paths
 
-```
-┌─────────────────────────────────────────┐
-│ 1. Business operation                    │
-│    - Guardian: _evaluate_core()          │
-│    - Committee: _persist_report()        │
-│    - Backup: _do_dump_and_encrypt()      │
-│    - Automation: child process result    │
-│                                          │
-│ 2. session.commit() ← business tx ends   │
-├─────────────────────────────────────────┤
-│ 3. Independent notification transaction  │
-│    with session.begin():                 │
-│      dispatch_notification(             │
-│        session, source, event_type,      │
-│        severity, household_id=...,      │
-│        entity_id=..., context=...        │
-│      )                                   │
-│    - dispatch call commit/rollback       │
-│    - Any exception caught and logged    │
-│    - Business result unaffected          │
-└─────────────────────────────────────────┘
-```
+Guardian has three execution paths:
 
-### 3.2 Error Handling
+| Path | Entry Point | Session Owner |
+|------|------------|---------------|
+| HTTP manual | `evaluate_all_checks()` / `evaluate_one_check()` (guardian.py:381/395) | HTTP router → service |
+| Worker scheduled | `_run_job_in_child()` → `evaluate_core()` (orchestration_executor.py:124) | Worker child process → parent |
+| Worker manual trigger | Same as worker scheduled | Same |
 
-| Scenario | Behavior |
-|----------|----------|
-| dispatch_notification succeeds | notification event persisted; delivery_status per adapter result |
-| dispatch_notification raises | caught, logged; business operation already committed |
-| adapter unavailable | delivery_status="unavailable"; no macOS notification |
-| adapter fails | delivery_status="failed"; no rollback |
-| preferences disabled | suppressed_reason="disabled"; event persisted |
-| dedup hit | suppressed_reason="dedup"; event persisted |
-| quiet hours | suppressed_reason="quiet_hours"; event persisted |
+**Design**: Notification dispatch must happen in the PARENT worker process for scheduled/manual-trigger, and in the HTTP service layer for HTTP evaluations. The trigger condition is identical: after business commit, if evaluation produced new Guardian events > 0.
 
-### 3.3 No Background Tasks
+**Worker path** (orchestration_executor.py:116-195):
+1. Child process runs `evaluate_core()` inside `with session.begin()` at line 116
+2. Guardian events persisted in that transaction
+3. Lease validated, attempt/run status set, lease released
+4. `session.begin()` commits atomically at line 195 scope exit
+5. **After commit**: worker parent process receives result via `result_queue`
+6. Worker inspects result: if `evaluation_run.status` starts with "completed" and `len(events) > 0`
+7. Worker creates dedicated notification session and dispatches
 
-Every notification dispatch is a synchronous call with a real session and explicit commit/rollback. No `asyncio.create_task`, no `threading.Thread`, no unobserved fire-and-forget.
+**HTTP path** (guardian.py:381-408):
+1. `evaluate_all_checks()` / `evaluate_one_check()` call `_evaluate_core()`
+2. `session.commit()` at line 391/407
+3. **After commit**: if result has `events` list with `len > 0`
+4. Router creates dedicated notification session and dispatches
 
-The existing `run_all_checks()` in Sprint 007 serves as the reference implementation:
-- Health components evaluated, overall computed
-- After result assembled, `dispatch_notification()` called with session
-- Exception caught, logged, health response unaffected
+**Key invariant**: Both paths only dispatch when:
+- Evaluation actually completed (not skipped/fenced/errored)
+- New Guardian events were created (len > 0)
+- Guardian events are the `guardian_events` table rows with `event_type` column
 
-### 3.4 Logging
+**Household_id resolution**: `_evaluate_core()` receives `household_id` as parameter. Worker passes it from job_definition. Result dict returns evaluation_run with events. Worker has access to `household_id` from job definition.
 
-Each source logs dispatch outcome at INFO level:
-- Success: `"Notification dispatched: {source}/{event_type}/{severity}"`
-- Suppressed: `"Notification suppressed: {reason}"`
-- Error: `"Notification dispatch error: {exc}"`  (never includes business data)
+### 3.2 Committee — Manual Session Completion
 
----
+**File**: `committee_orchestration.py:220-225`
 
-## 4. Event Mapping
+Session completion sets `status="completed"` and calls `session.commit()` at line 225.
 
-| Source | event_type | severity | Trigger |
-|--------|-----------|----------|---------|
-| guardian | threshold_breach | warning | evaluate_all/one completes with events > 0 |
-| committee | session_complete | info | run_session completes successfully |
-| automation | run_failed | warning | run attempt status becomes "failed" |
-| backup | backup_complete | info | run_backup returns status="completed" |
-| backup | backup_failed | warning | run_backup returns status="failed" |
+**Trigger**: After commit, if `committee_session.status == "completed"`, create dedicated notification session and dispatch.
 
-No critical mappings. No new event types. Per OD-8-4.
+**Non-trigger**: session failed (_fail_session at line 346), privacy preview not confirmed, session still running.
 
----
+### 3.3 Backup — All Completion Paths (Corrected)
 
-## 5. Dedup Design
+**File**: `backup_service.py:76-132`
 
-Each notification dispatch uses `compute_fingerprint()` (Sprint 007, v2):
+All paths that create a committed `BackupRecord` trigger notification:
 
-```
-v2:{household_id}:{source}:{event_type}:{severity}:{entity_id}
-```
+| Path | Line | status | event_type |
+|------|------|--------|-----------|
+| Destination preflight failure | 91-94 | "failed" | backup_failed |
+| Encryption/dump success | 120-125 | "completed" | backup_complete |
+| Exception during pipeline | 127-132 | "failed" | backup_failed |
 
-| Source | entity_id | Notes |
-|--------|-----------|-------|
-| guardian | (none) | Global scope; same breach on same day deduped |
-| committee | session_id | Each session is unique; no accidental cross-session dedup |
-| automation | run_id:attempt | Each attempt is unique; retries not deduped against original |
-| backup | record_id | Each backup run is unique |
+Every path calls `session.commit()` before returning. Trigger after commit with the record's status.
 
-24h dedup window with advisory lock (`pg_advisory_xact_lock(42)`). Severity escalation bypass preserved from Sprint 007.
+**Household_id resolution**: `BackupRecord` currently has no `household_id` column. The singleton Household model means there is exactly one household. Design: query `SELECT id FROM household_profiles LIMIT 1` in the notification dispatch block. If no household exists, log warning and skip notification (should not happen in operational state).
+
+### 3.4 Automation — Final Run Failure Only (Corrected)
+
+**File**: `orchestration_executor.py:178-187`
+
+The run status is set to "failed" at line 182-187 only when the evaluation result indicates failure. This happens once per run, inside the final commit window.
+
+**Trigger**: Worker parent process, after the child completes, if `run_status == "failed"`:
+1. Worker marks run completed/failed and commits
+2. Worker creates dedicated notification session
+3. Worker dispatches `run_failed` notification
+
+**Non-trigger**:
+- Intermediate attempt retries (run still pending)
+- Lease lost / fenced (run not marked failed — transaction rolled back)
+- Run succeeded
+- Stale fencing token
+
+**Entity_id**: `run_id` only (not `run_id:attempt`). Each run can only reach "failed" once. No need for attempt_number in dedup identity.
+
+**Recursive protection**: Notification dispatch is synchronous in worker process. No `notification.*` job type exists. `ALLOWED_JOB_TYPES` contains only guardian types. Notification failure does not create automation runs.
 
 ---
 
-## 6. Automation Recursive Protection
+## 4. Event Type Reconciliation
 
-Automation runs `guardian.evaluate_all` or `guardian.evaluate_one`. If guardian evaluation fails (e.g., no household), the run is marked "failed" — this triggers `run_failed` notification.
+| Approved Name | Current Template Key | Implementation Action |
+|--------------|---------------------|----------------------|
+| guardian/threshold_breach | guardian/breach | Rename key to `threshold_breach` in NOTIFICATION_TEMPLATES |
+| committee/session_complete | committee/completed | Rename key to `session_complete` |
+| automation/run_failed | automation/failed | Rename key to `run_failed` |
+| backup/backup_complete | backup/completed | Rename key to `backup_complete` |
+| backup/backup_failed | backup/failed | Rename key to `backup_failed` |
 
-**No recursive loop**: the notification dispatch is a synchronous call to `dispatch_notification()` with source="automation". It creates a notification_event row but does NOT create a new automation run. There is no `notification.*` job type. The automation worker only executes job_types in the allowed list.
-
-**Worker notification dispatch**: The worker (orchestration_worker.py) processes `_run_job_in_child()` → receives result → marks attempt failed → commits → then dispatches notification. This is in the worker process, outside the child process lifecycle.
+`notification_events.event_type` has no database CHECK constraint — renaming requires no migration. Implementation updates `NOTIFICATION_TEMPLATES` dict keys and all `dispatch_notification()` call sites. No aliases retained.
 
 ---
 
-## 7. Schedule Technical Design
+## 5. Dedup Identity Design
 
-### 7.1 Guardian Daily Evaluation Schedule
+### 5.1 Guardian — Corrected
 
-- **job_type**: `guardian.evaluate_all` (already in DB trigger allowlist and service `ALLOWED_JOB_TYPES`)
-- **job_params**: `{}` (no parameters — guardian.evaluate_all accepts none per orchestration_scheduling.py line 56)
-- **Schedule model**: daily, execution_time, timezone per Sprint 005
-- **Default**: disabled
-- **Owner action**: create schedule, set time/timezone, enable
+**Problem**: Previous design used empty entity_id, causing all guardian breaches in the same household to share one fingerprint.
 
-### 7.2 Backup Daily Schedule
+**Design**: Use stable breach identity derived from check_ids:
 
-- **job_type**: `backup.daily` (NEW — requires migration and allowlist expansion)
-- **job_params**: `{"dest_dir": "...", "age_recipient": "..."}` (backup destination and encryption key required)
-- **Schedule model**: daily, execution_time, timezone per Sprint 005
-- **Default**: disabled
-- **Owner action**: create schedule with params, set time/timezone, enable
+- `evaluate_one`: entity_id = `check_id` of the evaluated check
+- `evaluate_all`: entity_id = sorted concatenation of check_ids that produced new events, hashed
 
-### 7.3 Migration Impact for backup.daily
-
-Database trigger (migration 0008, line 53):
-```sql
-IF NEW.job_type NOT IN ('guardian.evaluate_all', 'guardian.evaluate_one') THEN
-    RAISE EXCEPTION ... 'orchestration_job_type_not_allowed'
-```
-
-Service allowlist (`orchestration_scheduling.py` line 28):
 ```python
-ALLOWED_JOB_TYPES = frozenset({"guardian.evaluate_all", "guardian.evaluate_one"})
+# evaluate_all: aggregate identity
+breached_check_ids = sorted(set(e["check_id"] for e in result["events"]))
+entity_id = hashlib.sha256("|".join(breached_check_ids).encode()).hexdigest()[:16]
 ```
 
-Both require expansion. Migration approach: `CREATE OR REPLACE FUNCTION` (established pattern per Pitfall #70-#71). New migration 0017 with:
-- `CREATE OR REPLACE FUNCTION fn_job_type_allowlist()` expanding to include `'backup.daily'`
+**Dedup semantics**: Same check producing breach on same day → suppressed. Different checks producing breaches → separate fingerprints, both delivered. This correctly prevents cross-check dedup while allowing same-check dedup.
+
+**Relationship to Guardian ON CONFLICT**: Guardian uses `ON CONFLICT DO NOTHING` with partial unique indexes (uq_events_drift, uq_events_staleness). The database already prevents duplicate events for the same check. Notification dedup is a separate layer — same Guardian check evaluated twice in 24h produces the same database event (DO NOTHING) and then the same notification fingerprint (dedup suppressed).
+
+### 5.2 Other Sources
+
+| Source | entity_id | Rationale |
+|--------|-----------|-----------|
+| committee | session_id | Each session is a unique UUID |
+| automation | run_id | Run can only reach failed once |
+| backup | record_id | Each backup record is a unique UUID |
+
+---
+
+## 6. Schedule Design
+
+### 6.1 TD-8-1 — Resolved (Owner Decision)
+
+**Missed-run semantics**:
+- Schedule re-enabled BEFORE execution_time on the same day: wait until the scheduled time
+- Schedule re-enabled AFTER execution_time on the same day: if no run exists for this schedule's local date, immediately enter due state (catch-up)
+- Worker/service restored after execution_time: same catch-up semantics
+- "Today" is determined by the schedule's configured IANA timezone, NOT `UTC now.date()`
+- DST gap: execute at next valid local time
+- DST overlap: execute once at first occurrence
+- One scheduled run per schedule per local date (enforced by idempotency)
+
+### 6.2 Corrected Idempotency Design
+
+**Current code** (orchestration_scheduling.py:171-182):
+```python
+def compute_idempotency_key(job_type, job_params, scheduled_date):
+    payload = f"{job_type}{params_str}||{scheduled_date.isoformat()}"
+    return hashlib.sha256(payload.encode()).hexdigest()
+```
+
+**Problems**:
+1. `scheduled_date` from `now.date()` (UTC) — not schedule's local date
+2. No `schedule_id` — different schedules with same job_type+params+date collide
+3. No `household_id` — cross-household collision possible (theoretical in single-tenant)
+
+**Database evidence**: `uq_runs_idempotency_key` (UNIQUE constraint, migration 0008 line 178). Duplicate insert raises IntegrityError.
+
+**Design (for Slice C)**:
+- Existing idempotency keys remain compatible (same formula)
+- Worker resolves schedule's local date from schedule timezone BEFORE computing key
+- Schedule_id included in key to prevent cross-schedule collision
+- Migration 0017 updates `compute_idempotency_key()` to accept optional `schedule_id`
+
+```python
+def compute_idempotency_key(job_type, job_params, scheduled_date, *, schedule_id=None):
+    sid = f"||sid={schedule_id}" if schedule_id else ""
+    payload = f"{job_type}{params_str}{sid}||{scheduled_date.isoformat()}"
+    return hashlib.sha256(payload.encode()).hexdigest()
+```
+
+**Duplicate key handling**:
+- IntegrityError on duplicate idempotency_key → worker MUST still advance `next_run_at` (otherwise schedule gets stuck in due state)
+- Worker: catch IntegrityError → advance next_run_at → commit → continue
+- This is a pre-existing Sprint 005 concern, not new to Sprint 008. Slice C must verify this behavior.
+
+**Schedule_id inclusion evidence**: `runs.schedule_id` column exists (FK to schedules, nullable). Worker already has access to `schedule_id` when creating runs.
+
+**Owner Question**: Should manually triggered Guardian runs count as "today's daily run" for schedule dedup? If yes, the schedule's idempotency key for that date would collide with a manual run, preventing the scheduled run. Recommended: keep separate — manual runs use different triggered_by value and don't affect schedule idempotency. No new Owner Question needed — this is consistent with Sprint 005 manual trigger design.
+
+---
+
+## 7. Migration Conclusion
+
+| Item | Needs Migration? | Evidence |
+|------|-----------------|----------|
+| Guardian wiring (all paths) | No | notification_events CHECK allows all sources |
+| Committee wiring | No | Same |
+| Automation wiring | No | Same |
+| Backup wiring | No | Same |
+| Guardian daily schedule | No | guardian.evaluate_all in trigger + allowlist |
+| Backup daily schedule | **Yes — 0017** | backup.daily not in trigger (0008:53) or ALLOWED_JOB_TYPES |
+| Schedule idempotency upgrade | No (service logic only) | uq_runs_idempotency_key already exists; schedule_id column exists |
+| Event type renaming | No | event_type has no CHECK constraint |
+
+Migration 0017:
+- `CREATE OR REPLACE FUNCTION fn_job_type_allowlist()` adding `'backup.daily'`
 - Update `ALLOWED_JOB_TYPES` in orchestration_scheduling.py
-- Downgrade path restores original allowlist
-
-**Conclusion**: Migration needed for backup.daily. Guardian daily requires no migration.
-
-### 7.4 Missed-Run Semantics (Owner Decision Required)
-
-| Scenario | Options |
-|----------|---------|
-| Schedule disabled, then re-enabled same day | A: Run immediately if past execution_time. B: Wait until next day. C: Run only if within catch-up window. |
-| Worker/service down at execution_time | A: Run when worker restarts (catch-up). B: Skip and wait for next schedule. C: Run if within grace period. |
-| Same-day re-run (manual trigger + scheduled) | Dedup via idempotency key (Sprint 005: SHA256(job_type\|params\|date)). Only one run per day per schedule. |
-
-**Recommendation**: Option A for both — run immediately if past execution_time and not yet run today. Uses existing Sprint 005 idempotency: same job_type+params+date → one run. See Technical Design Owner Question TD-8-1.
-
-### 7.5 DST and Timezone
-
-- Existing Sprint 005 IANA timezone support applies
-- DST gap: if execution_time falls in skipped hour, run at next valid time
-- DST overlap: run at first occurrence (standard time)
-- next_run_at recomputed after each run using schedule's timezone
+- Downgrade restores original allowlist
 
 ---
 
@@ -266,67 +286,42 @@ Both require expansion. Migration approach: `CREATE OR REPLACE FUNCTION` (establ
 
 ### Slice A — Guardian + Backup Source Wiring (R2)
 
-**Scope**:
-- Guardian: after evaluate_all/one commit → if events > 0 → dispatch notification in independent tx
-- Backup: after run_backup commit → dispatch notification (info for completed, warning for failed) in independent tx
-- Contract tests per source
-- Transaction boundary verification
+**Scope**: Notification dispatch after Guardian evaluation (HTTP + worker paths) and after Backup completion (all paths including preflight failure).
 
-**Non-scope**:
-- No schedule creation or modification
-- No Committee or Automation wiring
-- No migration
+**Guardian design**:
+- HTTP path: after `session.commit()` at guardian.py:391/407, if events > 0, dedicated notification session dispatches `threshold_breach` warning
+- Worker path: child returns result → parent inspects events → if events > 0, dedicated session dispatches
 
-**Modified modules**: `guardian.py` (evaluate_all_checks, evaluate_one_check), `backup_service.py` (run_backup), `test_guardian.py`, `test_backup.py`
+**Backup design**:
+- After `session.commit()` at backup_service.py:94/124/131, dedicated notification session dispatches based on record.status
 
-**DB impact**: none (notification_events already supports all sources)
-
-**Risk**: Low. Both sources have clear commit points. Templates exist.
+**Non-scope**: No schedule creation. No migration. No Committee/Automation.
 
 ### Slice B — Committee + Automation Source Wiring (R2)
 
-**Scope**:
-- Committee: after session completed commit → dispatch notification in independent tx
-- Automation: after run attempt marked failed and committed → dispatch notification in independent tx
-- Recursive protection verification
-- Contract tests per source
+**Committee**: After session completed commit, dedicated notification session dispatches `session_complete` info.
 
-**Non-scope**:
-- No schedule creation
-- No Committee auto-run
-- No migration
+**Automation**: Worker parent process, after run failed committed, dedicated notification session dispatches `run_failed` warning.
 
-**Modified modules**: `committee_orchestration.py` (run_session), `orchestration_executor.py` or `orchestration_worker.py` (run failure handling), test files
-
-**DB impact**: none
-
-**Risk**: Medium. Automation worker runs in separate process; notification dispatch must happen in worker context after run persistence. Recursive protection must be verified.
+**Non-scope**: No schedule creation. No migration. No Guardian/Backup.
 
 ### Slice C — Daily Schedules + Schedule UI (R1)
 
-**Scope**:
-- Migration 0017: expand job_type allowlist for backup.daily
-- Guardian daily evaluation schedule (default disabled)
-- Backup daily schedule (default disabled)
-- Schedule UI: enable/disable, time/timezone in /automation workspace
-- Schedule API: create guardian and backup schedules
-- Contract tests
+**Migration 0017**: job_type allowlist expansion.
 
-**Non-scope**:
-- No auto-enable
-- No auto-selection of execution_time or timezone
+**Guardian daily schedule**: job_type `guardian.evaluate_all`, default disabled.
 
-**Modified modules**: `orchestration_scheduling.py` (ALLOWED_JOB_TYPES), `orchestration_worker.py` (backup executor), migration, router, frontend
+**Backup daily schedule**: job_type `backup.daily`, default disabled.
 
-**DB impact**: migration 0017 (CREATE OR REPLACE FUNCTION + allowlist expansion)
+**Schedule UI**: enable/disable + time/timezone in /automation workspace.
 
-**Risk**: Medium. Migration is additive. Backup job params require destination_dir and age_recipient — Owner must provide these.
+**Non-scope**: No auto-enable. No auto-selection of time/timezone.
 
-### Inter-Slice Dependencies
+### Inter-Slice Independence
 
-- Slice A: no dependency on B or C
-- Slice B: no dependency on A or C
-- Slice C: no dependency on A or B (but notification value increases when both are wired)
+- Slice A: no dependency on B or C. Works with HTTP and existing worker.
+- Slice B: no dependency on A or C.
+- Slice C: no dependency on A or B (but notification value increases when wired).
 
 ---
 
@@ -334,89 +329,53 @@ Both require expansion. Migration approach: `CREATE OR REPLACE FUNCTION` (establ
 
 ### Slice A Tests
 
-| Category | Test Cases |
-|----------|-----------|
-| Guardian success | evaluate_all with breach → dispatch → delivery_status delivered |
-| Guardian no breach | evaluate_all with 0 events → no dispatch call |
-| Guardian disabled | evaluate_all with prefs disabled → suppressed/disabled |
-| Guardian source disabled | evaluate_all with guardian not in enabled_sources → suppressed |
-| Guardian adapter unavailable | dispatch with no adapter → delivery_status unavailable |
-| Guardian tx isolation | notification failure after guardian commit → guardian result unaffected |
-| Backup success | run_backup completed → dispatch info → delivery_status delivered |
-| Backup failure | run_backup failed → dispatch warning → delivery_status delivered |
-| Backup disabled | prefs disabled → suppressed/disabled |
-| Backup tx isolation | notification failure after backup commit → backup record unaffected |
-| Dedup | same guardian breach twice in 24h → second suppressed |
+| Test | Path |
+|------|------|
+| Guardian HTTP evaluate_all with breach → dispatch delivered | HTTP |
+| Guardian HTTP evaluate_one with breach → dispatch delivered | HTTP |
+| Guardian evaluate_all with 0 events → no dispatch | HTTP |
+| Guardian worker scheduled with breach → dispatch delivered | Worker |
+| Guardian disabled prefs → suppressed | Both |
+| Guardian source disabled → suppressed | Both |
+| Guardian different checks produce different fingerprints | Dedup |
+| Guardian same check same day → dedup suppressed | Dedup |
+| Backup completed → dispatch backup_complete info | Backup |
+| Backup preflight failure → dispatch backup_failed warning | Backup |
+| Backup pipeline failure → dispatch backup_failed warning | Backup |
+| Backup disabled → suppressed | Backup |
+| Notification tx failure after business commit → business unaffected | Isolation |
 
 ### Slice B Tests
 
-| Category | Test Cases |
-|-----------|-----------|
-| Committee success | run_session completed → dispatch info |
-| Committee not completed | session failed → no dispatch |
-| Committee disabled | prefs disabled → suppressed |
-| Automation failed | run attempt failed → dispatch warning |
-| Automation succeeded | run succeeded → no dispatch |
-| Automation retry | same run+attempt → dedup protection |
-| Automation recursion | notification dispatch does not create automation run |
-| Tx isolation | notification failure after committee/automation commit → business unaffected |
+| Test | Path |
+|------|------|
+| Committee session completed → dispatch session_complete info | Committee |
+| Committee session failed → no dispatch | Committee |
+| Automation run failed (final) → dispatch run_failed warning | Automation |
+| Automation run succeeded → no dispatch | Automation |
+| Automation attempt retry while pending → no dispatch | Automation |
+| Automation notification does not create automation run | Recursion |
+| Notification tx failure after business commit → business unaffected | Isolation |
 
 ### Slice C Tests
 
-| Category | Test Cases |
-|-----------|-----------|
-| Migration | 0017 upgrade/downgrade/re-upgrade cycle |
-| Schedule create | guardian daily + backup daily created disabled |
-| Schedule enable | Owner PATCH enable → schedule active |
-| Schedule default | created disabled → no auto-enable |
-| Schedule execution | guardian.evaluate_all triggered on schedule |
-| Idempotency | same schedule+date → one run |
-| Missed-run | disabled→re-enabled same day → runs once (per TD-8-1) |
-| DST | gap/overlap handling |
-| job_type allowlist | backup.daily accepted after migration |
-| API contract | schedule CRUD works for new job_types |
-| UI | schedule enable/disable in /automation |
+| Test | Path |
+|------|------|
+| Migration 0017 upgrade/downgrade/re-upgrade | Migration |
+| Guardian daily schedule created disabled | Schedule |
+| Backup daily schedule created disabled | Schedule |
+| Schedule re-enabled before execution_time → wait | TD-8-1 |
+| Schedule re-enabled after execution_time → catch-up (if not run today) | TD-8-1 |
+| Schedule local date uses IANA timezone, not UTC | TD-8-1 |
+| DST gap → next valid time | TD-8-1 |
+| DST overlap → execute once | TD-8-1 |
+| Duplicate idempotency key → next_run_at advances | Idempotency |
+| backup.daily accepted after migration | Migration |
+| UI: schedule enable/disable in /automation | Frontend |
 
 ---
 
-## 10. Technical Design Owner Question
-
-### TD-8-1: Missed-Run Semantics
-
-**Question**: When a disabled daily schedule is re-enabled on the same day (past its execution_time), what should happen?
-
-| Option | Description |
-|--------|-------------|
-| A | Run immediately if not yet run today. Idempotency key prevents duplicates. |
-| B | Skip today. Wait until next scheduled time. |
-| C | Run only if within a configurable catch-up window (e.g., 30 min after execution_time). |
-
-**Recommended**: Option A — Run immediately if not yet run today.
-
-**Rationale**: Matches Sprint 005 idempotency model. Same-day re-enable is a deliberate Owner action — the Owner expects the schedule to execute. Idempotency key (SHA256(job_type\|params\|date)) prevents duplicate runs. No new configuration needed.
-
-**Impact**: Implementation in Slice C schedule activation logic. Next_run_at computed as: if today and execution_time has passed and no run exists for today → run now.
-
-**Blocked if unresolved**: Slice C schedule activation behavior.
-
----
-
-## 11. Migration Summary
-
-| Item | Needs Migration? | Evidence |
-|------|-----------------|----------|
-| Guardian notification wiring | No | notification_events CHECK allows all sources |
-| Committee notification wiring | No | notification_events CHECK allows all sources |
-| Automation notification wiring | No | notification_events CHECK allows all sources |
-| Backup notification wiring | No | notification_events CHECK allows all sources |
-| Guardian daily schedule | No | guardian.evaluate_all in DB trigger + service allowlist |
-| Backup daily schedule | **Yes — 0017** | backup.daily NOT in trigger (0008 line 53) or ALLOWED_JOB_TYPES (orchestration_scheduling.py line 28) |
-
-Migration 0017 approach: `CREATE OR REPLACE FUNCTION fn_job_type_allowlist()` expanding to `('guardian.evaluate_all', 'guardian.evaluate_one', 'backup.daily')`. Update `ALLOWED_JOB_TYPES` in service layer. Downgrade restores original allowlist.
-
----
-
-## 12. Non-Goals
+## 10. Non-Goals
 
 - No external notifications (email, SMS, push) → V2
 - No Market Data integration → V2
@@ -428,3 +387,4 @@ Migration 0017 approach: `CREATE OR REPLACE FUNCTION fn_job_type_allowlist()` ex
 - No automatic trading
 - No automatic schedule or notification enabling
 - No new credentials or external services
+- No `notification.*` job type (recursive protection)
