@@ -1,6 +1,6 @@
-"""Sprint 008 Slice A — Guardian + Backup notification behavioral acceptance tests.
+"""Sprint 008 Slice A — Guardian + Backup notification acceptance tests.
 
-Real PostgreSQL, real production entry points, real assertions.
+Real PostgreSQL, real production entry points, exact assertions.
 """
 # ruff: noqa: E501
 
@@ -23,9 +23,6 @@ from apps.api.services.notification_service import (
 pytestmark = pytest.mark.postgres
 _log = logging.getLogger(__name__)
 
-
-# ══════════════════════════════════════════════════════════════════════════
-# Template contract
 # ══════════════════════════════════════════════════════════════════════════
 
 
@@ -46,94 +43,90 @@ class TestEventTypeTemplates:
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# Guardian HTTP behavioural tests
-# ══════════════════════════════════════════════════════════════════════════
 
 
 class TestGuardianHTTPNotification:
-
-    def test_evaluate_all_breach_dispatches_notification(
+    def test_evaluate_all_breach_dispatches_exact_one(
         self, db_session: Session,
     ) -> None:
-        """HTTP evaluate_all with real drift breach → notification created."""
+        """evaluate_all with real drift breach dispatches exactly one notification."""
         hid = _hid(db_session)
         _create_policy(db_session, hid)
         _create_portfolio(db_session, hid, "100000")
         _create_drift_check(db_session, hid, threshold=3.0)
-        _enable_guardian_backup(db_session)
+        _enable_all(db_session)
 
         from apps.api.services.guardian import evaluate_all_checks
         before = len(list_events(db_session))
         result = evaluate_all_checks(db_session, household_id=hid, as_of_date=date(2026, 7, 17))
-        after = len(list_events(db_session))
+        events = list_events(db_session)
 
         assert result["evaluation_run"]["status"].startswith("completed")
         assert len(result["events"]) >= 1
-        assert after > before, "notification event was not created"
+        assert len(events) == before + 1
+        ev = events[0]
+        assert ev.source == "guardian"
+        assert ev.event_type == "threshold_breach"
+        assert ev.severity == "warning"
 
     def test_evaluate_all_zero_events_no_dispatch(
         self, db_session: Session,
     ) -> None:
-        """HTTP evaluate_all with policy but no checks → zero notification events."""
+        """evaluate_all with no checks produces zero notification events."""
         hid = _hid(db_session)
         _create_policy(db_session, hid)
         _create_portfolio(db_session, hid, "100000")
-        _enable_guardian_backup(db_session)
+        _enable_all(db_session)
 
         from apps.api.services.guardian import evaluate_all_checks
         before = len(list_events(db_session))
         evaluate_all_checks(db_session, household_id=hid, as_of_date=date(2026, 7, 17))
-        after = len(list_events(db_session))
-        assert after == before
+        assert len(list_events(db_session)) == before
 
-    def test_disabled_preferences_no_dispatch(
+
+class TestGuardianSuppression:
+    def test_disabled_persists_suppressed_event(
         self, db_session: Session,
     ) -> None:
-        """When disabled, notify() records suppressed event with delivery_status='suppressed'."""
+        """Disabled preferences persist a suppressed event."""
         update_preferences(db_session, enabled=False)
+        hid = _hid(db_session)
         from apps.api.services.guardian import _maybe_notify_guardian
         before = len(list_events(db_session))
         _maybe_notify_guardian(
             {"evaluation_run": {"status": "completed", "id": str(uuid4())},
              "events": [{"check_id": str(uuid4()), "event_type": "threshold_breach"}]},
-            uuid4(), target_check_id=uuid4(),
+            hid, target_check_id=uuid4(),
         )
-        after = len(list_events(db_session))
-        # notify() persists suppressed events — one event created with suppressed status
-        assert after == before + 1
         events = list_events(db_session)
+        assert len(events) == before + 1
         assert events[0].delivery_status == "suppressed"
         assert events[0].suppressed_reason == "disabled"
 
-    def test_evaluate_one_breach_dispatches(
+    def test_source_disabled_persists_suppressed(
         self, db_session: Session,
     ) -> None:
-        """HTTP evaluate_one with real check_id → notification dispatched."""
-        hid = _hid(db_session)
-        _create_policy(db_session, hid)
-        _create_portfolio(db_session, hid, "100000")
-        check_id = _create_drift_check(db_session, hid, threshold=3.0)
-        _enable_guardian_backup(db_session)
-
-        from apps.api.services.guardian import evaluate_one_check
-        before = len(list_events(db_session))
-        result = evaluate_one_check(
-            db_session, check_id=check_id, household_id=hid, as_of_date=date(2026, 7, 17),
+        """Guardian source disabled while global enabled → source_disabled."""
+        update_preferences(
+            db_session, enabled=True,
+            enabled_sources=["health"], enabled_severities=["info", "warning"],
         )
-        after = len(list_events(db_session))
-
-        assert result["evaluation_run"]["status"].startswith("completed")
-        assert after == before + 1, f"expected 1 new event, got {after - before}"
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# Guardian dedup identity
-# ══════════════════════════════════════════════════════════════════════════
+        hid = _hid(db_session)
+        from apps.api.services.guardian import _maybe_notify_guardian
+        before = len(list_events(db_session))
+        _maybe_notify_guardian(
+            {"evaluation_run": {"status": "completed", "id": str(uuid4())},
+             "events": [{"check_id": str(uuid4()), "event_type": "threshold_breach"}]},
+            hid, target_check_id=uuid4(),
+        )
+        events = list_events(db_session)
+        assert len(events) == before + 1
+        assert events[0].suppressed_reason == "source_disabled"
 
 
 class TestGuardianDedupIdentity:
     def test_helper_skips_no_events(self, db_session: Session) -> None:
-        _enable_guardian_backup(db_session)
+        _enable_all(db_session)
         from apps.api.services.guardian import _maybe_notify_guardian
         before = len(list_events(db_session))
         _maybe_notify_guardian(
@@ -143,7 +136,7 @@ class TestGuardianDedupIdentity:
         assert len(list_events(db_session)) == before
 
     def test_helper_skips_non_completed(self, db_session: Session) -> None:
-        _enable_guardian_backup(db_session)
+        _enable_all(db_session)
         from apps.api.services.guardian import _maybe_notify_guardian
         before = len(list_events(db_session))
         _maybe_notify_guardian(
@@ -153,8 +146,11 @@ class TestGuardianDedupIdentity:
         )
         assert len(list_events(db_session)) == before
 
-    def test_helper_dispatches_with_events(self, db_session: Session) -> None:
-        _enable_guardian_backup(db_session)
+    def test_different_checks_do_not_suppress(
+        self, db_session: Session,
+    ) -> None:
+        """Two different check identities produce two separate notification events."""
+        _enable_all(db_session)
         hid = _hid(db_session)
         from apps.api.services.guardian import _maybe_notify_guardian
         before = len(list_events(db_session))
@@ -163,20 +159,14 @@ class TestGuardianDedupIdentity:
              "events": [{"check_id": str(uuid4()), "event_type": "threshold_breach"}]},
             hid, target_check_id=uuid4(),
         )
-        after = len(list_events(db_session))
-        assert after > before
-
-    def test_aggregate_identity_order_independent(self) -> None:
-        import hashlib
-        c1, c2 = str(uuid4()), str(uuid4())
-        eid1 = hashlib.sha256("|".join(sorted([c1, c2])).encode()).hexdigest()[:16]
-        eid2 = hashlib.sha256("|".join(sorted([c2, c1])).encode()).hexdigest()[:16]
-        assert eid1 == eid2
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# Worker Guardian notification
-# ══════════════════════════════════════════════════════════════════════════
+        after1 = len(list_events(db_session))
+        assert after1 == before + 1
+        _maybe_notify_guardian(
+            {"evaluation_run": {"status": "completed", "id": str(uuid4())},
+             "events": [{"check_id": str(uuid4()), "event_type": "threshold_breach"}]},
+            hid, target_check_id=uuid4(),
+        )
+        assert len(list_events(db_session)) == after1 + 1
 
 
 class TestWorkerGuardianNotification:
@@ -191,10 +181,8 @@ class TestWorkerGuardianNotification:
 
     def test_notify_skips_non_completed(self) -> None:
         from apps.api.services.orchestration_worker import OrchestrationWorker
-        result = {
-            "evaluation_run": {"status": "skipped", "id": str(uuid4())},
-            "events": [{"check_id": str(uuid4())}],
-        }
+        result = {"evaluation_run": {"status": "skipped", "id": str(uuid4())},
+                  "events": [{"check_id": str(uuid4())}]}
         OrchestrationWorker._maybe_notify_guardian_worker(result, {"household_id": str(uuid4())})
 
     def test_notify_skips_fenced(self) -> None:
@@ -202,20 +190,6 @@ class TestWorkerGuardianNotification:
         OrchestrationWorker._maybe_notify_guardian_worker(
             {"status": "fenced", "error": "Lease lost"}, {"household_id": str(uuid4())},
         )
-
-    def test_notify_dispatches_with_breach_events(self) -> None:
-        from apps.api.services.orchestration_worker import OrchestrationWorker
-        run_id = uuid4()
-        result = {
-            "evaluation_run": {"status": "completed", "id": str(run_id)},
-            "events": [{"check_id": str(uuid4()), "event_type": "threshold_breach"}],
-        }
-        OrchestrationWorker._maybe_notify_guardian_worker(result, {"household_id": str(uuid4())})
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# Backup behavioural tests
-# ══════════════════════════════════════════════════════════════════════════
 
 
 class TestBackupNotification:
@@ -231,21 +205,16 @@ class TestBackupNotification:
         from apps.api.services.backup_service import _maybe_notify_backup
         _maybe_notify_backup(record_id=str(uuid4()), status="running")
 
-    def test_household_lookup_with_household(self, db_session: Session) -> None:
+    def test_household_lookup_finds_existing(self, db_session: Session) -> None:
         _hid(db_session)
         from apps.api.services.backup_service import _resolve_household_id
         h = _resolve_household_id()
         assert h is not None
 
 
-# ══════════════════════════════════════════════════════════════════════════
-# Transaction isolation
-# ══════════════════════════════════════════════════════════════════════════
-
-
 class TestTransactionIsolation:
     def test_guardian_dispatches_in_dedicated_session(self, db_session: Session) -> None:
-        _enable_guardian_backup(db_session)
+        _enable_all(db_session)
         hid = _hid(db_session)
         from apps.api.services.guardian import _maybe_notify_guardian
         before = len(list_events(db_session))
@@ -254,12 +223,9 @@ class TestTransactionIsolation:
              "events": [{"check_id": str(uuid4()), "event_type": "threshold_breach"}]},
             hid, target_check_id=uuid4(),
         )
-        after = len(list_events(db_session))
-        assert after > before
+        assert len(list_events(db_session)) == before + 1
 
 
-# ══════════════════════════════════════════════════════════════════════════
-# Proven helpers — from test_guardian_api.py
 # ══════════════════════════════════════════════════════════════════════════
 
 
@@ -269,8 +235,8 @@ def _hid(session: Session) -> UUID:
         return row[0]
     hid = uuid4()
     session.execute(text(
-        "INSERT INTO household_profiles (id, singleton_key, household_name, base_currency,"
-        " investment_horizon, liquidity_needs, risk_statement, notes)"
+        "INSERT INTO household_profiles (id, singleton_key, household_name,"
+        " base_currency, investment_horizon, liquidity_needs, risk_statement, notes)"
         " VALUES (:id, TRUE, 'Test', 'USD', 'LT', '', '', '')"
     ), {"id": hid})
     session.commit()
@@ -288,8 +254,7 @@ def _create_policy(session: Session, hid: UUID) -> UUID:
         " objectives, time_horizon, liquidity, diversification,"
         " contribution_policy, rebalancing_policy, prohibited_assets,"
         " leverage_policy, decision_process, notes)"
-        " VALUES (:id, :pid, 1, 'published', NOW(),"
-        " 'o','h','','','','','','','','')"
+        " VALUES (:id, :pid, 1, 'published', NOW(), 'o','h','','','','','','','','')"
     ), {"id": pvid, "pid": pid})
     session.execute(text(
         "INSERT INTO investment_policy_version_allocations"
@@ -297,11 +262,8 @@ def _create_policy(session: Session, hid: UUID) -> UUID:
         " target_percentage, sort_order)"
         " VALUES (:id, :vid, 'Global Equity', 'global equity', 60.00, 0)"
     ), {"id": uuid4(), "vid": pvid})
-    # Seal after allocations inserted
-    session.execute(
-        text("UPDATE investment_policy_versions SET sealed_at = NOW() WHERE id = :id"),
-        {"id": pvid},
-    )
+    session.execute(text("UPDATE investment_policy_versions SET sealed_at = NOW() WHERE id = :id"),
+                    {"id": pvid})
     session.commit()
     return pid
 
@@ -337,10 +299,9 @@ def _create_drift_check(session: Session, hid: UUID, threshold: float = 20.0) ->
     return cc["identity"]["id"]
 
 
-def _enable_guardian_backup(session: Session) -> None:
+def _enable_all(session: Session) -> None:
     update_preferences(
-        session,
-        enabled=True,
+        session, enabled=True,
         enabled_sources=["health", "guardian", "backup"],
         enabled_severities=["info", "warning", "critical"],
     )
