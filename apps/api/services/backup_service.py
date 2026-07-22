@@ -92,8 +92,9 @@ def run_backup(
     if err:
         record = _create_record(dest_dir, "failed", error_detail=err)
         session.add(record)
+        bid = str(record.id)
         session.commit()
-        _maybe_notify_backup(record_id=str(record.id), status="failed")
+        _maybe_notify_backup(record_id=bid, status="failed")
         return record
 
     record = _create_record(dest_dir, "requested")

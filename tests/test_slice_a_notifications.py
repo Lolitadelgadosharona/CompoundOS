@@ -123,7 +123,7 @@ class TestGuardianHTTPNotification:
         after = len(list_events(db_session))
 
         assert result["evaluation_run"]["status"].startswith("completed")
-        assert after >= before
+        assert after == before + 1, f"expected 1 new event, got {after - before}"
 
 
 # ══════════════════════════════════════════════════════════════════════════
