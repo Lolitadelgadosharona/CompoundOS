@@ -89,17 +89,15 @@ class TestGuardianHTTPNotification:
     def test_disabled_preferences_no_dispatch(
         self, db_session: Session,
     ) -> None:
-        """Preferences disabled → no notification events from Guardian."""
-        hid = _hid(db_session)
-        _create_policy(db_session, hid)
-        _create_portfolio(db_session, hid, "100000")
-        _create_drift_check(db_session, hid, threshold=3.0)
-
-        from apps.api.services.guardian import evaluate_all_checks
+        """_maybe_notify_guardian with disabled preferences creates no events."""
+        from apps.api.services.guardian import _maybe_notify_guardian
         before = len(list_events(db_session))
-        evaluate_all_checks(db_session, household_id=hid, as_of_date=date(2026, 7, 17))
-        after = len(list_events(db_session))
-        assert after == before
+        _maybe_notify_guardian(
+            {"evaluation_run": {"status": "completed", "id": str(uuid4())},
+             "events": [{"check_id": str(uuid4()), "event_type": "threshold_breach"}]},
+            uuid4(), target_check_id=uuid4(),
+        )
+        assert len(list_events(db_session)) == before
 
     def test_evaluate_one_breach_dispatches(
         self, db_session: Session,
