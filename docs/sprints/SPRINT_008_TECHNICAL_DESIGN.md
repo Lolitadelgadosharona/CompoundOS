@@ -242,7 +242,7 @@ def compute_idempotency_key(job_type, job_params, scheduled_date):
 - Existing idempotency keys remain compatible (same formula)
 - Worker resolves schedule's local date from schedule timezone BEFORE computing key
 - Schedule_id included in key to prevent cross-schedule collision
-- Migration 0017 updates `compute_idempotency_key()` to accept optional `schedule_id`
+- `compute_idempotency_key()` modified to accept optional `schedule_id` — this is Slice C application code, not migration
 
 ```python
 def compute_idempotency_key(job_type, job_params, scheduled_date, *, schedule_id=None):
@@ -251,10 +251,33 @@ def compute_idempotency_key(job_type, job_params, scheduled_date, *, schedule_id
     return hashlib.sha256(payload.encode()).hexdigest()
 ```
 
-**Duplicate key handling**:
-- IntegrityError on duplicate idempotency_key → worker MUST still advance `next_run_at` (otherwise schedule gets stuck in due state)
-- Worker: catch IntegrityError → advance next_run_at → commit → continue
-- This is a pre-existing Sprint 005 concern, not new to Sprint 008. Slice C must verify this behavior.
+**Duplicate key handling — ON CONFLICT design**:
+
+PostgreSQL IntegrityError aborts the current transaction. Catching IntegrityError and continuing is not possible. Design uses `INSERT ... ON CONFLICT (idempotency_key) DO NOTHING RETURNING id` within the same outer transaction that locks the schedule:
+
+```sql
+-- Within the schedule processing transaction:
+INSERT INTO runs (id, schedule_id, job_definition_id, idempotency_key,
+                  status, triggered_by, scheduled_at, created_at)
+VALUES (:id, :sid, :jid, :ikey, 'pending', 'schedule', :now, :now)
+ON CONFLICT (idempotency_key) DO NOTHING
+RETURNING id
+```
+
+- If `RETURNING id` returns a row: run was created. Advance `next_run_at`. Commit.
+- If `RETURNING id` returns no row: a run for this schedule+date already exists. Do not create a second run. Still advance `next_run_at`. Commit.
+- Run creation (or duplicate confirmation) and `next_run_at` advance are atomic — both in same transaction.
+- Any database error rolls back the entire transaction. Schedule remains due, allowing safe retry.
+- Concurrent workers are protected by: schedule claim/row lock, `uq_runs_idempotency_key` UNIQUE constraint, and lease/fencing.
+
+**Alternative — savepoint**: If ORM limitations prevent `ON CONFLICT ... RETURNING`, use `session.begin_nested()` (SAVEPOINT). Duplicate IntegrityError rolls back only to savepoint. Outer transaction continues to advance `next_run_at` and commit. Implementation chooses one approach based on ORM compatibility.
+
+**Test plan**:
+- Duplicate insert does not leave failed transaction
+- Duplicate run: `next_run_at` still advances
+- Run creation or `next_run_at` advance failure → full rollback, schedule remains due
+- Two concurrent workers claiming same schedule → exactly one scheduled run
+- After rollback, schedule can be safely re-claimed
 
 **Schedule_id inclusion evidence**: `runs.schedule_id` column exists (FK to schedules, nullable). Worker already has access to `schedule_id` when creating runs.
 
@@ -270,15 +293,17 @@ def compute_idempotency_key(job_type, job_params, scheduled_date, *, schedule_id
 | Committee wiring | No | Same |
 | Automation wiring | No | Same |
 | Backup wiring | No | Same |
-| Guardian daily schedule | No | guardian.evaluate_all in trigger + allowlist |
+| Guardian daily schedule | No | guardian.evaluate_all in DB trigger + service allowlist |
 | Backup daily schedule | **Yes — 0017** | backup.daily not in trigger (0008:53) or ALLOWED_JOB_TYPES |
-| Schedule idempotency upgrade | No (service logic only) | uq_runs_idempotency_key already exists; schedule_id column exists |
+| Schedule idempotency (schedule_id, local date) | No (Slice C application code) | uq_runs_idempotency_key exists; schedule_id column exists |
 | Event type renaming | No | event_type has no CHECK constraint |
+| compute_idempotency_key() change | No (Slice C application code) | Python function, no schema change |
+| ALLOWED_JOB_TYPES expansion | No (Slice C application code) | Python constant, no schema change |
 
-Migration 0017:
-- `CREATE OR REPLACE FUNCTION fn_job_type_allowlist()` adding `'backup.daily'`
-- Update `ALLOWED_JOB_TYPES` in orchestration_scheduling.py
-- Downgrade restores original allowlist
+Migration 0017 scope:
+- `CREATE OR REPLACE FUNCTION fn_job_type_allowlist()` adding `'backup.daily'` to the existing list
+- Does NOT modify Python functions, constants, or application logic
+- Downgrade restores original allowlist with only `guardian.evaluate_all` and `guardian.evaluate_one`
 
 ---
 
