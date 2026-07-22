@@ -443,6 +443,7 @@ def _maybe_notify_guardian(
                 ns, source="guardian", event_type="threshold_breach",
                 severity="warning", household_id=household_id,
                 entity_id=entity_id,
+                context={"evaluation_run_id": str(run.get("id", ""))},
             )
         except Exception:
             ns.rollback()
