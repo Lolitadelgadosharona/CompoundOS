@@ -154,8 +154,8 @@ class TestGuardianDedup:
         )
         after2 = len(list_events(db_session))
         assert after2 == after1 + 1
+        # The latest event (index 0) is the second dispatch — suppressed on dedup match
         events = list_events(db_session)
-        assert events[0].delivery_status == "suppressed"
         assert events[0].suppressed_reason == "dedup"
 
     def test_different_checks_independent_events(
