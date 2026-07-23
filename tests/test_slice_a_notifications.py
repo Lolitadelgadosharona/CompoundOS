@@ -1,11 +1,10 @@
 """Sprint 008 Slice A — Guardian + Backup notification acceptance tests.
 
-Real PostgreSQL, real production entry points, exact persisted-outcome assertions.
+Real PostgreSQL, real production entry points, exact assertions.
 """
 # ruff: noqa: E501
 
-import logging
-from datetime import date
+from datetime import date, time
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -16,22 +15,20 @@ from sqlalchemy.orm import Session
 from apps.api.services.guardian import confirm_guardian_check, create_guardian_check
 from apps.api.services.notification_service import (
     NOTIFICATION_TEMPLATES,
+    get_preferences,
     list_events,
     update_preferences,
 )
 
 pytestmark = pytest.mark.postgres
-_log = logging.getLogger(__name__)
-
-# ═══════════════════════════════════════════════════
 
 
 class TestEventTypeTemplates:
-    def test_guardian_uses_threshold_breach(self) -> None:
+    def test_guardian_threshold_breach_key(self) -> None:
         assert "threshold_breach" in NOTIFICATION_TEMPLATES["guardian"]
         assert "breach" not in NOTIFICATION_TEMPLATES["guardian"]
 
-    def test_backup_uses_approved_names(self) -> None:
+    def test_backup_approved_keys(self) -> None:
         assert "backup_complete" in NOTIFICATION_TEMPLATES["backup"]
         assert "backup_failed" in NOTIFICATION_TEMPLATES["backup"]
         assert "completed" not in NOTIFICATION_TEMPLATES["backup"]
@@ -42,14 +39,10 @@ class TestEventTypeTemplates:
         assert "failed" in NOTIFICATION_TEMPLATES["automation"]
 
 
-# ═══════════════════════════════════════════
-
-
 class TestGuardianHTTPNotification:
-    def test_evaluate_all_breach_exact_outcome(
+    def test_evaluate_all_breach_exact_one_event(
         self, db_session: Session,
     ) -> None:
-        """evaluate_all with real drift breach → exactly 1 event with exact fields."""
         hid = _hid(db_session)
         _create_policy(db_session, hid)
         _create_portfolio(db_session, hid, "100000")
@@ -68,10 +61,9 @@ class TestGuardianHTTPNotification:
         assert ev.event_type == "threshold_breach"
         assert ev.severity == "warning"
 
-    def test_evaluate_one_exact_outcome(
+    def test_evaluate_one_breach_exact_one_event(
         self, db_session: Session,
     ) -> None:
-        """evaluate_one with real check → 1 event, entity_id = check_id."""
         hid = _hid(db_session)
         _create_policy(db_session, hid)
         _create_portfolio(db_session, hid, "100000")
@@ -88,10 +80,7 @@ class TestGuardianHTTPNotification:
         assert result["evaluation_run"]["status"].startswith("completed")
         assert len(events) == before + 1
 
-    def test_evaluate_all_zero_events_no_dispatch(
-        self, db_session: Session,
-    ) -> None:
-        """evaluate_all with no checks → zero events dispatched."""
+    def test_zero_events_no_dispatch(self, db_session: Session) -> None:
         hid = _hid(db_session)
         _create_policy(db_session, hid)
         _create_portfolio(db_session, hid, "100000")
@@ -103,13 +92,8 @@ class TestGuardianHTTPNotification:
         assert len(list_events(db_session)) == before
 
 
-# ═══════════════════════════════════════════
-
-
 class TestGuardianSuppression:
-    def test_disabled_persists_suppressed(
-        self, db_session: Session,
-    ) -> None:
+    def test_disabled_suppressed(self, db_session: Session) -> None:
         update_preferences(db_session, enabled=False)
         hid = _hid(db_session)
         from apps.api.services.guardian import _maybe_notify_guardian
@@ -124,9 +108,7 @@ class TestGuardianSuppression:
         assert events[0].delivery_status == "suppressed"
         assert events[0].suppressed_reason == "disabled"
 
-    def test_source_disabled_persists_suppressed(
-        self, db_session: Session,
-    ) -> None:
+    def test_source_disabled_suppressed(self, db_session: Session) -> None:
         update_preferences(db_session, enabled=True, enabled_sources=["health"],
                            enabled_severities=["info", "warning"])
         hid = _hid(db_session)
@@ -142,15 +124,18 @@ class TestGuardianSuppression:
         assert events[0].suppressed_reason == "source_disabled"
 
 
-# ═══════════════════════════════════════════
-
-
 class TestGuardianDedup:
-    def test_same_identity_second_is_suppressed_dedup(
+    def test_same_identity_dedup_suppressed(
         self, db_session: Session,
     ) -> None:
-        """Same check_id dispatched twice → first delivered, second dedup-suppressed."""
+        """Same check_id twice → second is dedup-suppressed. Quiet hours disabled."""
         _enable_all(db_session)
+        # Set quiet hours to a window far from now so quiet_hours don't interfere
+        prefs = get_preferences(db_session)
+        prefs.quiet_hours_start = time(0, 0)
+        prefs.quiet_hours_end = time(0, 1)
+        db_session.commit()
+
         hid = _hid(db_session)
         check_id = uuid4()
         from apps.api.services.guardian import _maybe_notify_guardian
@@ -169,9 +154,11 @@ class TestGuardianDedup:
         )
         after2 = len(list_events(db_session))
         assert after2 == after1 + 1
-        # Second dispatch produces a suppressed event (reason may be dedup or quiet_hours)
+        events = list_events(db_session)
+        assert events[0].delivery_status == "suppressed"
+        assert events[0].suppressed_reason == "dedup"
 
-    def test_different_checks_independent(
+    def test_different_checks_independent_events(
         self, db_session: Session,
     ) -> None:
         _enable_all(db_session)
@@ -193,45 +180,39 @@ class TestGuardianDedup:
         assert len(list_events(db_session)) == after1 + 1
 
 
-# ═══════════════════════════════════════════
-
-
 class TestWorkerGuardianNotification:
-    def test_notify_skips_none(self) -> None:
+    def test_skips_none_result(self) -> None:
         from apps.api.services.orchestration_worker import OrchestrationWorker
         OrchestrationWorker._maybe_notify_guardian_worker(None, {})
 
-    def test_notify_skips_empty_events(self) -> None:
+    def test_skips_empty_events(self) -> None:
         from apps.api.services.orchestration_worker import OrchestrationWorker
         result = {"evaluation_run": {"status": "completed", "id": str(uuid4())}, "events": []}
         OrchestrationWorker._maybe_notify_guardian_worker(result, {"household_id": str(uuid4())})
 
-    def test_notify_skips_non_completed(self) -> None:
+    def test_skips_non_completed(self) -> None:
         from apps.api.services.orchestration_worker import OrchestrationWorker
         result = {"evaluation_run": {"status": "skipped", "id": str(uuid4())},
                   "events": [{"check_id": str(uuid4())}]}
         OrchestrationWorker._maybe_notify_guardian_worker(result, {"household_id": str(uuid4())})
 
-    def test_notify_skips_fenced(self) -> None:
+    def test_skips_fenced(self) -> None:
         from apps.api.services.orchestration_worker import OrchestrationWorker
         OrchestrationWorker._maybe_notify_guardian_worker(
             {"status": "fenced", "error": "Lease lost"}, {"household_id": str(uuid4())},
         )
 
 
-# ═══════════════════════════════════════════
-
-
 class TestBackupNotification:
-    def test_notify_accepts_completed(self) -> None:
+    def test_accepts_completed(self) -> None:
         from apps.api.services.backup_service import _maybe_notify_backup
         _maybe_notify_backup(record_id=str(uuid4()), status="completed")
 
-    def test_notify_accepts_failed(self) -> None:
+    def test_accepts_failed(self) -> None:
         from apps.api.services.backup_service import _maybe_notify_backup
         _maybe_notify_backup(record_id=str(uuid4()), status="failed")
 
-    def test_notify_rejects_non_terminal(self) -> None:
+    def test_rejects_non_terminal(self) -> None:
         from apps.api.services.backup_service import _maybe_notify_backup
         _maybe_notify_backup(record_id=str(uuid4()), status="running")
 
@@ -241,11 +222,8 @@ class TestBackupNotification:
         assert _resolve_household_id() is not None
 
 
-# ═══════════════════════════════════════════
-
-
 class TestTransactionIsolation:
-    def test_guardian_uses_dedicated_session(self, db_session: Session) -> None:
+    def test_dedicated_session_dispatch(self, db_session: Session) -> None:
         _enable_all(db_session)
         hid = _hid(db_session)
         from apps.api.services.guardian import _maybe_notify_guardian
@@ -259,14 +237,10 @@ class TestTransactionIsolation:
 
 
 # ═══════════════════════════════════════════
-# Helpers
-# ═══════════════════════════════════════════
-
-
 def _hid(session: Session) -> UUID:
-    row = session.execute(text("SELECT id FROM household_profiles LIMIT 1")).fetchone()
-    if row:
-        return row[0]
+    r = session.execute(text("SELECT id FROM household_profiles LIMIT 1")).fetchone()
+    if r:
+        return r[0]
     hid = uuid4()
     session.execute(text(
         "INSERT INTO household_profiles (id, singleton_key, household_name,"
@@ -278,8 +252,7 @@ def _hid(session: Session) -> UUID:
 
 
 def _create_policy(session: Session, hid: UUID) -> UUID:
-    pid = uuid4()
-    pvid = uuid4()
+    pid, pvid = uuid4(), uuid4()
     session.execute(text("INSERT INTO investment_policies (id, household_id) VALUES (:id, :hid)"),
                     {"id": pid, "hid": hid})
     session.execute(text(
@@ -302,8 +275,7 @@ def _create_policy(session: Session, hid: UUID) -> UUID:
 
 
 def _create_portfolio(session: Session, hid: UUID, equity_val: str = "0") -> UUID:
-    pid = uuid4()
-    sid = uuid4()
+    pid, sid = uuid4(), uuid4()
     session.execute(text("INSERT INTO portfolios (id, household_id, status) VALUES (:id, :hid, 'active')"),
                     {"id": pid, "hid": hid})
     session.execute(text(
