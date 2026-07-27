@@ -128,9 +128,9 @@ class TestGuardianDedup:
     def test_same_identity_dedup_suppressed(
         self, db_session: Session,
     ) -> None:
-        """Same check_id twice → second is dedup-suppressed. Quiet hours disabled."""
+        """Same check_id dispatched twice → second event exists (dedup on macOS, unavailable on Linux)."""
         _enable_all(db_session)
-        # Set quiet hours to a window far from now so quiet_hours don't interfere
+        # Set quiet hours outside current time so dedup path is reached
         prefs = get_preferences(db_session)
         prefs.quiet_hours_start = time(0, 0)
         prefs.quiet_hours_end = time(0, 1)
@@ -152,9 +152,10 @@ class TestGuardianDedup:
              "events": [{"check_id": str(check_id), "event_type": "threshold_breach"}]},
             hid, target_check_id=check_id,
         )
-        after2 = len(list_events(db_session))
-        assert after2 == after1 + 1
-        # Second dispatch creates an event (suppressed if dedup matched, otherwise platform-dependent)
+        assert len(list_events(db_session)) == after1 + 1
+        # Dedup only suppresses if first event was delivered (macOS).
+        # On Linux, both get delivery_status='unavailable' — dedup correctly
+        # skips suppression because the first event was never actually delivered.
 
     def test_different_checks_independent_events(
         self, db_session: Session,
