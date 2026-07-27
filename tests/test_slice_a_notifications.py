@@ -128,55 +128,69 @@ class TestGuardianDedup:
     def test_same_identity_dedup_suppressed(
         self, db_session: Session,
     ) -> None:
-        """Same check_id dispatched twice → second event exists (dedup on macOS, unavailable on Linux)."""
+        """Same check_id dispatched twice with FakeAdapter → second dedup-suppressed."""
         _enable_all(db_session)
-        # Set quiet hours outside current time so dedup path is reached
         prefs = get_preferences(db_session)
         prefs.quiet_hours_start = time(0, 0)
         prefs.quiet_hours_end = time(0, 1)
         db_session.commit()
 
+        from tests.test_notifications import FakeAdapter
+
         hid = _hid(db_session)
         check_id = uuid4()
-        from apps.api.services.guardian import _maybe_notify_guardian
+        from apps.api.services.notification_service import dispatch_notification
         before = len(list_events(db_session))
-        _maybe_notify_guardian(
-            {"evaluation_run": {"status": "completed", "id": str(uuid4())},
-             "events": [{"check_id": str(check_id), "event_type": "threshold_breach"}]},
-            hid, target_check_id=check_id,
+        dispatch_notification(
+            db_session, source="guardian", event_type="threshold_breach",
+            severity="warning", household_id=hid, entity_id=str(check_id),
+            adapter=FakeAdapter(),
         )
         after1 = len(list_events(db_session))
         assert after1 == before + 1
-        _maybe_notify_guardian(
-            {"evaluation_run": {"status": "completed", "id": str(uuid4())},
-             "events": [{"check_id": str(check_id), "event_type": "threshold_breach"}]},
-            hid, target_check_id=check_id,
+        dispatch_notification(
+            db_session, source="guardian", event_type="threshold_breach",
+            severity="warning", household_id=hid, entity_id=str(check_id),
+            adapter=FakeAdapter(),
         )
-        assert len(list_events(db_session)) == after1 + 1
-        # Dedup only suppresses if first event was delivered (macOS).
-        # On Linux, both get delivery_status='unavailable' — dedup correctly
-        # skips suppression because the first event was never actually delivered.
+        after2 = len(list_events(db_session))
+        assert after2 == after1 + 1
+        events = list_events(db_session)
+        assert events[0].delivery_status == "suppressed"
+        assert events[0].suppressed_reason == "dedup"
 
-    def test_different_checks_independent_events(
+    def test_different_checks_different_fingerprints(
         self, db_session: Session,
     ) -> None:
+        """Different check_ids produce different fingerprints, neither suppressed."""
         _enable_all(db_session)
+        prefs = get_preferences(db_session)
+        prefs.quiet_hours_start = time(0, 0)
+        prefs.quiet_hours_end = time(0, 1)
+        db_session.commit()
+
+        from tests.test_notifications import FakeAdapter
+
         hid = _hid(db_session)
-        from apps.api.services.guardian import _maybe_notify_guardian
+        from apps.api.services.notification_service import dispatch_notification
         before = len(list_events(db_session))
-        _maybe_notify_guardian(
-            {"evaluation_run": {"status": "completed", "id": str(uuid4())},
-             "events": [{"check_id": str(uuid4()), "event_type": "threshold_breach"}]},
-            hid, target_check_id=uuid4(),
+        dispatch_notification(
+            db_session, source="guardian", event_type="threshold_breach",
+            severity="warning", household_id=hid, entity_id=str(uuid4()),
+            adapter=FakeAdapter(),
         )
         after1 = len(list_events(db_session))
         assert after1 == before + 1
-        _maybe_notify_guardian(
-            {"evaluation_run": {"status": "completed", "id": str(uuid4())},
-             "events": [{"check_id": str(uuid4()), "event_type": "threshold_breach"}]},
-            hid, target_check_id=uuid4(),
+        dispatch_notification(
+            db_session, source="guardian", event_type="threshold_breach",
+            severity="warning", household_id=hid, entity_id=str(uuid4()),
+            adapter=FakeAdapter(),
         )
-        assert len(list_events(db_session)) == after1 + 1
+        after2 = len(list_events(db_session))
+        assert after2 == after1 + 1
+        events = list_events(db_session)
+        assert events[0].suppressed_reason != "dedup"
+        assert events[1].suppressed_reason != "dedup"
 
 
 class TestWorkerGuardianNotification:

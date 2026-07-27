@@ -68,6 +68,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   - Slice B: NOT AUTHORIZED (Committee + Automation wiring)
   - Slice C: NOT AUTHORIZED (Daily schedules + UI)
 
+- **BLOCKER (frontend audit):** npm audit --omit=dev fails on Next.js/PostCSS high-severity vulnerabilities in CI. This is a repo-wide dependency issue, not Slice A. Requires a separate narrowly scoped security-maintenance PR to update minimum safe versions. Owner authorization required before modifying package.json/package-lock.json.
+
 ## Backlog
 
 - Complete Docker runtime verification in a Docker-enabled environment
