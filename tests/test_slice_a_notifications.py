@@ -156,8 +156,14 @@ class TestGuardianDedup:
         after2 = len(list_events(db_session))
         assert after2 == after1 + 1
         events = list_events(db_session)
+        # events[0] = newest (second dispatch) → dedup-suppressed
         assert events[0].delivery_status == "suppressed"
         assert events[0].suppressed_reason == "dedup"
+        # events[1] = oldest (first dispatch) → delivered, not suppressed
+        assert events[1].delivery_status == "delivered"
+        assert events[1].suppressed_reason is None
+        # Same entity_id → same fingerprint
+        assert events[0].fingerprint == events[1].fingerprint
 
     def test_different_checks_different_fingerprints(
         self, db_session: Session,
@@ -189,6 +195,12 @@ class TestGuardianDedup:
         after2 = len(list_events(db_session))
         assert after2 == after1 + 1
         events = list_events(db_session)
+        # Different entity_ids → different fingerprints
+        assert events[0].fingerprint != events[1].fingerprint
+        # Both delivered (not dedup-suppressed)
+        assert events[0].delivery_status == "delivered"
+        assert events[1].delivery_status == "delivered"
+        # Neither is dedup-suppressed
         assert events[0].suppressed_reason != "dedup"
         assert events[1].suppressed_reason != "dedup"
 
