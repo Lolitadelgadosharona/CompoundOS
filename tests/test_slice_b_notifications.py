@@ -220,11 +220,11 @@ class TestDedupForSliceB:
 # --- Helpers ---
 
 _VALID_OUTPUT = """{
-    "supporting_arguments": "The current allocation aligns with long-term objectives.",
-    "opposing_arguments": "Market volatility suggests reviewing position sizes.",
-    "risks": "Elevated market volatility and interest rate uncertainty.",
-    "policy_alignment": "The proposal is consistent with the stated investment policy.",
-    "minority_opinions": "One perspective favors more conservative positioning.",
+    "supporting_arguments": "The current allocation is consistent with stated objectives.",
+    "opposing_arguments": "Market conditions suggest reviewing exposures.",
+    "risks": "Elevated market uncertainty and interest rate sensitivity.",
+    "policy_alignment": "The proposal is consistent with the investment policy.",
+    "minority_opinions": "One perspective favors more conservative exposure levels.",
     "evidence_citations": [],
     "limitations": "Analysis is limited to available data as of valuation date.",
     "recommended_direction": "aligned_with_policy",
@@ -232,8 +232,10 @@ _VALID_OUTPUT = """{
         "long_term_compounding": "Compounding effects favor staying invested.",
         "index_passive_investing": "Passive index exposure reduces single-stock risk.",
         "macroeconomic_context": "Current rate environment warrants caution.",
-        "risk_capital_preservation": "Position sizing maintains adequate diversification.",
-        "devils_advocate": "Alternative: reduce equity exposure given macro headwinds."
+        "risk_capital_preservation": "Diversification maintains adequate protection.",
+        "devils_advocate": "Alternative: reduce equity exposure given macro headwinds.",
+        "policy_alignment_role": "Policy alignment assessment confirms consistency.",
+        "synthesis_chair": "Synthesis: maintain current approach with monitoring."
     }
 }"""
 
