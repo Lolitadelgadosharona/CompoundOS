@@ -139,15 +139,18 @@ class TestNotificationIsolation:
 # --- Helpers ---
 
 def _hid(session: Session) -> UUID:
-    from apps.api.models import HouseholdProfile
-    hp = session.query(HouseholdProfile).first()
-    if hp:
-        return hp.id
-    hp = HouseholdProfile(id=uuid4(), name="Test Household",
-                          base_currency="USD")
-    session.add(hp)
+    from sqlalchemy import text
+    r = session.execute(text("SELECT id FROM household_profiles LIMIT 1")).fetchone()
+    if r:
+        return r[0]
+    hid = uuid4()
+    session.execute(text(
+        "INSERT INTO household_profiles (id, singleton_key, household_name,"
+        " base_currency, investment_horizon, liquidity_needs, risk_statement, notes)"
+        " VALUES (:id, TRUE, 'Test', 'USD', 'LT', '', '', '')"
+    ), {"id": hid})
     session.commit()
-    return hp.id
+    return hid
 
 
 def _enable_all(session: Session) -> None:
