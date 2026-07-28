@@ -183,38 +183,67 @@ class TestExecuteScheduledReturnContract:
 
 
 class TestDedupForSliceB:
-    def test_same_committee_session_twice_suppressed(
+    def test_same_committee_session_twice_dedup_suppressed(
         self, db_session: Session,
     ) -> None:
-        """Same committee session dispatches once → second is dedup-suppressed."""
+        """Same entity_id dispatched twice → second is dedup-suppressed."""
         _enable_all(db_session)
+        from apps.api.services.notification_service import dispatch_notification
+        from tests.test_notifications import FakeAdapter
         hid = _hid(db_session)
-        cs = _create_queued_session(db_session, hid)
-        _run_to_completion(db_session, cs)
-        # Second dispatch with same session_id should be dedup-suppressed
-        from apps.api.services.committee_orchestration import (
-            _dispatch_committee_notification,
-        )
+        sid = str(uuid4())
         before = len(list_events(db_session))
-        _dispatch_committee_notification(cs)
+        dispatch_notification(
+            db_session, source="committee", event_type="session_complete",
+            severity="info", household_id=hid, entity_id=sid,
+            adapter=FakeAdapter(),
+        )
+        after1 = len(list_events(db_session))
+        assert after1 == before + 1
+        dispatch_notification(
+            db_session, source="committee", event_type="session_complete",
+            severity="info", household_id=hid, entity_id=sid,
+            adapter=FakeAdapter(),
+        )
+        after2 = len(list_events(db_session))
+        assert after2 == after1 + 1
         events = list_events(db_session)
-        assert len(events) == before + 1
-        ev = events[0]
-        assert ev.suppressed_reason == "dedup"
+        # events[0] = newest (second dispatch) → dedup-suppressed
+        assert events[0].suppressed_reason == "dedup"
+        # events[1] = oldest (first dispatch) → delivered
+        assert events[1].delivery_status == "delivered"
+        assert events[1].suppressed_reason is None
         assert events[0].fingerprint == events[1].fingerprint
 
     def test_different_sessions_different_fingerprints(
         self, db_session: Session,
     ) -> None:
-        """Different committee sessions produce different fingerprints."""
+        """Different entity_ids → different fingerprints."""
         _enable_all(db_session)
+        from apps.api.services.notification_service import dispatch_notification
+        from tests.test_notifications import FakeAdapter
         hid = _hid(db_session)
-        cs1 = _create_queued_session(db_session, hid)
-        _run_to_completion(db_session, cs1)
-        cs2 = _create_queued_session(db_session, hid)
-        _run_to_completion(db_session, cs2)
+        before = len(list_events(db_session))
+        dispatch_notification(
+            db_session, source="committee", event_type="session_complete",
+            severity="info", household_id=hid, entity_id=str(uuid4()),
+            adapter=FakeAdapter(),
+        )
+        after1 = len(list_events(db_session))
+        assert after1 == before + 1
+        dispatch_notification(
+            db_session, source="committee", event_type="session_complete",
+            severity="info", household_id=hid, entity_id=str(uuid4()),
+            adapter=FakeAdapter(),
+        )
+        after2 = len(list_events(db_session))
+        assert after2 == after1 + 1
         events = list_events(db_session)
         assert events[0].fingerprint != events[1].fingerprint
+        assert events[0].delivery_status == "delivered"
+        assert events[1].delivery_status == "delivered"
+        assert events[0].suppressed_reason != "dedup"
+        assert events[1].suppressed_reason != "dedup"
 
 
 # --- Helpers ---
