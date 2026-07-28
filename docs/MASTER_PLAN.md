@@ -54,8 +54,9 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   - Migration 0014 (health_integrity), 0015 (notification_foundation), 0016 (notification_integrity)
   - Notification: explicit opt-in (disabled by default), 4 API routes, structured templates, household-scoped dedup, macOS AppleScript argv adapter, body privacy preview
   - Health service wired as notification source (DEGRADED/UNAVAILABLE → dispatch)
-  - Guardian/committee/automation/backup notification sources defined but not yet wired
-  - PG 552 / non-PG 134+2 / frontend 251 test baseline
+  - Guardian and Backup notification sources wired (Sprint 008 Slice A)
+  - Committee/automation notification sources defined but not yet wired
+  - PG 571 / non-PG 134+2 / frontend 251 test baseline
   - Closeout PR #66: squash merge 2f4f12569ae702fcbcc9a0bb01b199d68fe26327
   - Main CI run 29888368096: 3/3 success
 - SM-001 (Security Maintenance): Done — PR #71 (30e9253) merged as
@@ -63,16 +64,21 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   next 16.2.10→16.2.12, eslint-config-next→16.2.12, postcss 8.5.10→8.5.18.
   npm audit --omit=dev: 0 vulnerabilities. Resolved 11 CVEs (9 Next.js +
   2 PostCSS).
-- Sprint 008: Planning — Owner Decided (8/8 resolved, 2026-07-22)
+- Sprint 008: In Progress — Slice A Done (2026-07-28); Slices B/C Not Started
   - Direction: Notification Source Wiring + Daily Operations (Candidate A)
   - Proposal: docs/sprints/SPRINT_008_PROPOSAL.md
   - Open Questions: docs/sprints/SPRINT_008_OPEN_QUESTIONS.md (8/8 resolved)
   - Technical Design: docs/sprints/SPRINT_008_TECHNICAL_DESIGN.md (Owner Approved, 2026-07-22)
-  - Implementation: Slice A Authorized (Guardian + Backup notification source wiring)
-  - Slice A: In Review (Draft PR #69; code-review anchor f160610)
+  - Slice A — Guardian + Backup Notification Source Wiring: **Done**
+    - PR #69 (0171a12) squash-merged as aa444aa9b602fbef2bd8a6608bc7847eea1fa10d
+    - Main CI 30322128439: 3/3 SUCCESS
+    - Review: 0 BLOCKER / 0 HIGH / 0 MEDIUM / 0 LOW
+    - Guardian: HTTP manual + worker scheduled notification dispatch
+    - Backup: all completion/failure paths dispatch
+    - Dedicated notification sessions per Technical Design
+    - Deterministic FakeAdapter dedup tests with explicit assertions
   - Slice B: NOT AUTHORIZED (Committee + Automation wiring)
   - Slice C: NOT AUTHORIZED (Daily schedules + UI)
-  - SM-001 (Security Maintenance): Done — PR #71 merged as 2adbf07 (2026-07-27). Upgraded next 16.2.10→16.2.12, postcss 8.5.10→8.5.18. npm audit --omit=dev: 0 vulnerabilities. Frontend audit BLOCKER resolved.
 
 ## Backlog
 
@@ -461,6 +467,12 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   Sprint 004 remains Not Authorized.
 - 2026-07-16: Slice 3B enters Review. Sprint 002 remains In Progress. Slice 3C
   remains Not Authorized and Not Started.
+- 2026-07-28: Sprint 008 Slice A closeout — PR #69 squash-merged into main as
+  aa444aa9b602fbef2bd8a6608bc7847eea1fa10d (main workflow 30322128439,
+  3/3 SUCCESS). Guardian and Backup notification source wiring is Done.
+  Review gate: 0 BLOCKER / 0 HIGH / 0 MEDIUM / 0 LOW. Slice B and Slice C
+  remain NOT AUTHORIZED. No investment-rule, Guardian-threshold, or trading
+  behavior changed.
 - 2026-07-16: Slice 3B review completed — APPROVE WITH NON-BLOCKING FOLLOW-UP.
   Review findings (M-1, L-1 through L-5) and CI test failures (Policy Version
   trigger interaction, autobegin transaction conflict, missing confirmation
