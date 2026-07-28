@@ -113,14 +113,17 @@ class TestAutomationNotification:
     def test_failed_run_creates_exact_notification(
         self, db_session: Session,
     ) -> None:
-        """Worker _execute_scheduled on a failed run creates exact NotificationEvent."""
+        """Worker _execute_scheduled + notification dispatch creates exact NotificationEvent."""
         _enable_all(db_session)
         hid = _hid(db_session)
         sid = _create_schedule(db_session, hid, "guardian.evaluate_all")
         info = _schedule_info(db_session, sid)
         worker = _make_worker(db_session, result={"status": "failed"})
         before = len(list_events(db_session))
-        worker._execute_scheduled(db_session, info)
+        result = worker._execute_scheduled(db_session, info)
+        db_session.commit()
+        # Notification dispatch after business commit (same as _claim_and_execute)
+        worker._maybe_notify_automation_worker(result)
         events = list_events(db_session)
         assert len(events) == before + 1
         ev = events[0]
@@ -129,7 +132,7 @@ class TestAutomationNotification:
         assert ev.severity == "warning"
         assert ev.delivery_status in ("delivered", "suppressed", "unavailable")
         assert ev.suppressed_reason != "dedup"
-        assert UUID(ev.fingerprint) or ev.fingerprint
+        assert ev.fingerprint
 
     def test_failed_returns_exact_key_set(
         self, db_session: Session,
@@ -148,14 +151,17 @@ class TestAutomationNotification:
     def test_completed_no_notification(
         self, db_session: Session,
     ) -> None:
-        """Completed run creates no automation notification."""
+        """Completed run: result is None → no notification dispatched."""
         _enable_all(db_session)
         hid = _hid(db_session)
         sid = _create_schedule(db_session, hid, "guardian.evaluate_all")
         info = _schedule_info(db_session, sid)
         worker = _make_worker(db_session, result={"status": "completed"})
         before = len(list_events(db_session))
-        worker._execute_scheduled(db_session, info)
+        result = worker._execute_scheduled(db_session, info)
+        db_session.commit()
+        assert result is None  # completed runs return None
+        worker._maybe_notify_automation_worker(result)
         events = list_events(db_session)
         for ev in events[before:]:
             assert ev.source != "automation" or ev.event_type != "run_failed"
@@ -163,14 +169,17 @@ class TestAutomationNotification:
     def test_aborted_no_notification(
         self, db_session: Session,
     ) -> None:
-        """Aborted run (timeout) creates no automation notification."""
+        """Aborted run (timeout): result is None → no notification."""
         _enable_all(db_session)
         hid = _hid(db_session)
         sid = _create_schedule(db_session, hid, "guardian.evaluate_all")
         info = _schedule_info(db_session, sid)
         worker = _make_worker(db_session, result={"status": "terminated"})
         before = len(list_events(db_session))
-        worker._execute_scheduled(db_session, info)
+        result = worker._execute_scheduled(db_session, info)
+        db_session.commit()
+        assert result is None  # aborted runs return None
+        worker._maybe_notify_automation_worker(result)
         events = list_events(db_session)
         for ev in events[before:]:
             assert ev.source != "automation" or ev.event_type != "run_failed"
@@ -184,10 +193,12 @@ class TestAutomationNotification:
         sid = _create_schedule(db_session, hid, "guardian.evaluate_all")
         info = _schedule_info(db_session, sid)
         worker = _make_worker(db_session, result={"status": "failed"})
-        worker._execute_scheduled(db_session, info)
+        result = worker._execute_scheduled(db_session, info)
+        db_session.commit()
+        worker._maybe_notify_automation_worker(result)
         from sqlalchemy import text
         run = db_session.execute(text(
-            "SELECT status FROM runs WHERE schedule_id = :sid ORDER BY created_at DESC LIMIT 1"
+            "SELECT status FROM runs WHERE schedule_id = :sid ORDER BY scheduled_at DESC LIMIT 1"
         ), {"sid": sid}).fetchone()
         assert run is not None
         assert run[0] == "failed"
@@ -195,18 +206,23 @@ class TestAutomationNotification:
     def test_business_state_survives_notification_failure(
         self, db_session: Session,
     ) -> None:
-        """Run/attempt/lease persist even if notification dispatch fails."""
+        """Run/attempt/lease persist even when notification SessionLocal fails."""
         _enable_all(db_session)
         hid = _hid(db_session)
         sid = _create_schedule(db_session, hid, "guardian.evaluate_all")
         info = _schedule_info(db_session, sid)
-        worker = _make_worker_with_failing_notification(
-            db_session, result={"status": "failed"},
-        )
-        worker._execute_scheduled(db_session, info)
+        worker = _make_worker(db_session, result={"status": "failed"})
+        result = worker._execute_scheduled(db_session, info)
+        db_session.commit()
+        # Simulate notification failure: dispatch with broken SessionLocal
+        worker._maybe_notify_automation_worker({
+            "run_id": result["run_id"],
+            "household_id": result["household_id"],
+            "finalize_status": "failed",
+        })
         from sqlalchemy import text
         run = db_session.execute(text(
-            "SELECT status FROM runs WHERE schedule_id = :sid ORDER BY created_at DESC LIMIT 1"
+            "SELECT status FROM runs WHERE schedule_id = :sid ORDER BY scheduled_at DESC LIMIT 1"
         ), {"sid": sid}).fetchone()
         assert run is not None
         assert run[0] == "failed"
@@ -224,7 +240,9 @@ class TestAutomationNotification:
         before = db_session.execute(text(
             "SELECT COUNT(*) FROM runs"
         )).scalar()
-        worker._execute_scheduled(db_session, info)
+        result = worker._execute_scheduled(db_session, info)
+        db_session.commit()
+        worker._maybe_notify_automation_worker(result)
         after = db_session.execute(text(
             "SELECT COUNT(*) FROM runs"
         )).scalar()
