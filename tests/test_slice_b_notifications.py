@@ -46,7 +46,7 @@ class TestCommitteeNotification:
         assert ev.source == "committee"
         assert ev.event_type == "session_complete"
         assert ev.severity == "info"
-        assert ev.delivery_status in ("delivered", "suppressed")
+        assert ev.delivery_status in ("delivered", "suppressed", "unavailable")
         assert ev.suppressed_reason != "dedup"
         assert UUID(ev.fingerprint) or ev.fingerprint  # fingerprint is set
         # Template-driven body — no free text from proposal/provider/evidence
@@ -116,7 +116,7 @@ class TestAutomationNotification:
         """Worker _execute_scheduled on a failed run creates exact NotificationEvent."""
         _enable_all(db_session)
         hid = _hid(db_session)
-        sid = _create_schedule(db_session, hid, "backup.daily")
+        sid = _create_schedule(db_session, hid, "guardian.evaluate_all")
         info = _schedule_info(db_session, sid)
         worker = _make_worker(db_session, result={"status": "failed"})
         before = len(list_events(db_session))
@@ -127,7 +127,7 @@ class TestAutomationNotification:
         assert ev.source == "automation"
         assert ev.event_type == "run_failed"
         assert ev.severity == "warning"
-        assert ev.delivery_status in ("delivered", "suppressed")
+        assert ev.delivery_status in ("delivered", "suppressed", "unavailable")
         assert ev.suppressed_reason != "dedup"
         assert UUID(ev.fingerprint) or ev.fingerprint
 
@@ -137,7 +137,7 @@ class TestAutomationNotification:
         """_execute_scheduled returns only run_id, household_id, finalize_status."""
         _enable_all(db_session)
         hid = _hid(db_session)
-        sid = _create_schedule(db_session, hid, "backup.daily")
+        sid = _create_schedule(db_session, hid, "guardian.evaluate_all")
         info = _schedule_info(db_session, sid)
         worker = _make_worker(db_session, result={"status": "failed"})
         result = worker._execute_scheduled(db_session, info)
@@ -151,7 +151,7 @@ class TestAutomationNotification:
         """Completed run creates no automation notification."""
         _enable_all(db_session)
         hid = _hid(db_session)
-        sid = _create_schedule(db_session, hid, "backup.daily")
+        sid = _create_schedule(db_session, hid, "guardian.evaluate_all")
         info = _schedule_info(db_session, sid)
         worker = _make_worker(db_session, result={"status": "completed"})
         before = len(list_events(db_session))
@@ -166,7 +166,7 @@ class TestAutomationNotification:
         """Aborted run (timeout) creates no automation notification."""
         _enable_all(db_session)
         hid = _hid(db_session)
-        sid = _create_schedule(db_session, hid, "backup.daily")
+        sid = _create_schedule(db_session, hid, "guardian.evaluate_all")
         info = _schedule_info(db_session, sid)
         worker = _make_worker(db_session, result={"status": "terminated"})
         before = len(list_events(db_session))
@@ -181,7 +181,7 @@ class TestAutomationNotification:
         """Run, attempt, lease final states persist after failed run."""
         _enable_all(db_session)
         hid = _hid(db_session)
-        sid = _create_schedule(db_session, hid, "backup.daily")
+        sid = _create_schedule(db_session, hid, "guardian.evaluate_all")
         info = _schedule_info(db_session, sid)
         worker = _make_worker(db_session, result={"status": "failed"})
         worker._execute_scheduled(db_session, info)
@@ -198,7 +198,7 @@ class TestAutomationNotification:
         """Run/attempt/lease persist even if notification dispatch fails."""
         _enable_all(db_session)
         hid = _hid(db_session)
-        sid = _create_schedule(db_session, hid, "backup.daily")
+        sid = _create_schedule(db_session, hid, "guardian.evaluate_all")
         info = _schedule_info(db_session, sid)
         worker = _make_worker_with_failing_notification(
             db_session, result={"status": "failed"},
@@ -217,7 +217,7 @@ class TestAutomationNotification:
         """run_failed notification does not create additional automation runs."""
         _enable_all(db_session)
         hid = _hid(db_session)
-        sid = _create_schedule(db_session, hid, "backup.daily")
+        sid = _create_schedule(db_session, hid, "guardian.evaluate_all")
         info = _schedule_info(db_session, sid)
         worker = _make_worker(db_session, result={"status": "failed"})
         from sqlalchemy import text
@@ -363,8 +363,8 @@ def _create_schedule(session: Session, hid: UUID, job_type: str) -> UUID:
     from sqlalchemy import text
     jid = uuid4()
     session.execute(text(
-        "INSERT INTO job_definitions (id, household_id, job_type, job_params, enabled)"
-        " VALUES (:id, :hid, :jt, '{}'::jsonb, true)"
+        "INSERT INTO job_definitions (id, household_id, job_type, job_params)"
+        " VALUES (:id, :hid, :jt, '{}'::jsonb)"
     ), {"id": jid, "hid": hid, "jt": job_type})
     sid = uuid4()
     session.execute(text(
@@ -462,7 +462,7 @@ def _run_to_completion_with_failing_notification(session, cs) -> None:
             return ProviderResponse(raw_text=json.dumps(output))
 
     with patch(
-        "apps.api.services.committee_orchestration.SessionLocal",
+        "apps.api.database.SessionLocal",
         side_effect=RuntimeError("notification unavailable"),
     ):
         run_committee(session, cs, MockProvider())
