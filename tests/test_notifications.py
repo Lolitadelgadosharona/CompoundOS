@@ -82,7 +82,7 @@ class TestStructuredDispatch:
         _enable(db_session)
         adapter = FakeAdapter()
         ne = dispatch_notification(
-            db_session, "backup", "completed", "info", now=NOW, adapter=adapter,
+            db_session, "backup", "backup_complete", "info", now=NOW, adapter=adapter,
         )
         assert ne is not None
         assert ne.delivery_status == "delivered"

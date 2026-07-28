@@ -84,13 +84,17 @@ def run_backup(
     try:
         db_size = get_db_size_bytes(db_url)
     except Exception:
-        pass
+        import logging
+        logging.getLogger(__name__).warning("Could not determine DB size", exc_info=True)
+        db_size = 0
 
     err = check_destination(dest_dir, db_size)
     if err:
         record = _create_record(dest_dir, "failed", error_detail=err)
         session.add(record)
+        bid = str(record.id)
         session.commit()
+        _maybe_notify_backup(record_id=bid, status="failed")
         return record
 
     record = _create_record(dest_dir, "requested")
@@ -121,15 +125,69 @@ def run_backup(
         record.status = "completed"
         record.completed_at = datetime.now(timezone.utc)
         record.error_detail = None
+        bid = str(record.id)
         session.commit()
+        _maybe_notify_backup(record_id=bid, status="completed")
         return record
 
     except Exception as e:
         record.status = "failed"
         record.completed_at = datetime.now(timezone.utc)
         record.error_detail = _sanitize_error(str(e))
+        bid = str(record.id)
         session.commit()
+        _maybe_notify_backup(record_id=bid, status="failed")
         return record
+
+
+def _maybe_notify_backup(*, record_id: str, status: str) -> None:
+    """Dispatch Backup notification after record is committed. Terminal statuses only."""
+    import logging
+    _log = logging.getLogger(__name__)
+    if status not in ("completed", "failed"):
+        return
+    event_type = "backup_complete" if status == "completed" else "backup_failed"
+    severity = "info" if status == "completed" else "warning"
+    try:
+        from uuid import UUID
+
+        from apps.api.database import SessionLocal
+        from apps.api.services.notification_service import dispatch_notification
+        household_id = _resolve_household_id()
+        if household_id is None:
+            _log.warning("Backup notification skipped — no household found")
+            return
+        ns = SessionLocal()
+        try:
+            dispatch_notification(
+                ns, source="backup", event_type=event_type,
+                severity=severity, household_id=UUID(household_id),
+                entity_id=record_id,
+            )
+        except Exception:
+            ns.rollback()
+            _log.warning(
+                "Backup notification dispatch failed for record %s",
+                record_id, exc_info=True,
+            )
+        finally:
+            ns.close()
+    except Exception:
+        _log.warning("Backup notification session unavailable", exc_info=True)
+
+
+def _resolve_household_id() -> str | None:
+    """Resolve the singleton household ID for backup notifications.
+    Returns None if no household exists. Raises on database error."""
+    from sqlalchemy import text
+
+    from apps.api.database import SessionLocal
+    s = SessionLocal()
+    try:
+        row = s.execute(text("SELECT id FROM household_profiles LIMIT 1")).fetchone()
+        return str(row[0]) if row else None
+    finally:
+        s.close()
 
 
 def verify_backup(path: str, age_recipient: str) -> str | None:

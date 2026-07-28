@@ -58,15 +58,21 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   - PG 552 / non-PG 134+2 / frontend 251 test baseline
   - Closeout PR #66: squash merge 2f4f12569ae702fcbcc9a0bb01b199d68fe26327
   - Main CI run 29888368096: 3/3 success
+- SM-001 (Security Maintenance): Done — PR #71 (30e9253) merged as
+  2adbf07ffc9d9a277a32cf527081ff55531ed6f7 (2026-07-27). Upgraded
+  next 16.2.10→16.2.12, eslint-config-next→16.2.12, postcss 8.5.10→8.5.18.
+  npm audit --omit=dev: 0 vulnerabilities. Resolved 11 CVEs (9 Next.js +
+  2 PostCSS).
 - Sprint 008: Planning — Owner Decided (8/8 resolved, 2026-07-22)
   - Direction: Notification Source Wiring + Daily Operations (Candidate A)
   - Proposal: docs/sprints/SPRINT_008_PROPOSAL.md
   - Open Questions: docs/sprints/SPRINT_008_OPEN_QUESTIONS.md (8/8 resolved)
   - Technical Design: docs/sprints/SPRINT_008_TECHNICAL_DESIGN.md (Owner Approved, 2026-07-22)
-  - Implementation: NOT AUTHORIZED
-  - Slices A/B/C: NOT AUTHORIZED (require individual Owner authorization)
-
-- **SM-001 Authorized (2026-07-27):** Security-maintenance Sprint authorized by Owner. Upgrade next 16.2.10→16.2.12, eslint-config-next→16.2.12, postcss 8.5.10→>=8.5.18 to resolve npm audit --omit=dev high-severity blocker (Next.js 9 CVEs + PostCSS 2 CVEs). Branch: security/frontend-next-postcss-audit from main d1c4589f. Minimum safe upgrade. Draft PR only. No force push. No merge. Target: 0 high/critical npm audit and 6/6 CI.
+  - Implementation: Slice A Authorized (Guardian + Backup notification source wiring)
+  - Slice A: In Review (Draft PR #69; code-review anchor f160610)
+  - Slice B: NOT AUTHORIZED (Committee + Automation wiring)
+  - Slice C: NOT AUTHORIZED (Daily schedules + UI)
+  - SM-001 (Security Maintenance): Done — PR #71 merged as 2adbf07 (2026-07-27). Upgraded next 16.2.10→16.2.12, postcss 8.5.10→8.5.18. npm audit --omit=dev: 0 vulnerabilities. Frontend audit BLOCKER resolved.
 
 ## Backlog
 

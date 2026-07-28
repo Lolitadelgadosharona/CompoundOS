@@ -176,16 +176,19 @@ class OrchestrationWorker:
         for item in due:
             if self._shutdown_flag.is_set():
                 break
+            guardian_result = None
             try:
                 with self._session_factory() as session:
-                    self._execute_scheduled(session, item)
+                    guardian_result = self._execute_scheduled(session, item)
                     session.commit()
                 claimed += 1
+                # Dispatch Guardian notification after business commit
+                self._maybe_notify_guardian_worker(guardian_result, item)
             except Exception:
                 logger.exception("Failed schedule %s", item["schedule_id"])
         return claimed
 
-    def _execute_scheduled(self, session: Session, schedule_info: dict) -> None:
+    def _execute_scheduled(self, session: Session, schedule_info: dict) -> dict | None:
         job_type = schedule_info["job_type"]
         job_params = schedule_info["job_params"]
         household_id = schedule_info["household_id"]
@@ -239,13 +242,23 @@ class OrchestrationWorker:
             fencing_token=lease["fencing_token"],
         )
 
-        is_timeout = result.get("status") == "terminated"
+        is_guardian = job_type.startswith("guardian.")
 
-        finalize_status = "aborted" if is_timeout else (
-            "completed" if result.get("status") == "completed" else "failed"
-        )
+        # Determine final status from the result
+        if is_guardian and "evaluation_run" in result:
+            eval_status = result.get("evaluation_run", {}).get("status", "")
+            finalize_status = (
+                "completed" if eval_status.startswith(("completed", "skipped"))
+                else "failed"
+            )
+            is_timeout = False
+        else:
+            is_timeout = result.get("status") == "terminated"
+            finalize_status = "aborted" if is_timeout else (
+                "completed" if result.get("status") == "completed" else "failed"
+            )
 
-        # Finalize run (token-gated)
+        # Finalize run (token-gated) — parent owns this for all job types
         fr = finalize_run(
             session,
             run_id=run_id,
@@ -260,11 +273,11 @@ class OrchestrationWorker:
             complete_attempt(session, aid, "failed",
                              error_message="Lease expired during execution",
                              clock=self._clock)
-            return
+            return None
 
         attempt_status = "succeeded" if finalize_status == "completed" else "failed"
         complete_attempt(session, aid, attempt_status,
-                         error_message=result.get("error"),
+                         error_message=result.get("error") if not is_guardian else None,
                          clock=self._clock)
 
         release_lease(
@@ -274,6 +287,48 @@ class OrchestrationWorker:
             fencing_token=lease["fencing_token"],
             clock=self._clock,
         )
+
+        # Return Guardian result for notification dispatch after parent commit
+        if is_guardian and finalize_status == "completed" and "evaluation_run" in result:
+            return result
+        return None
+    @staticmethod
+    def _maybe_notify_guardian_worker(guardian_result: dict | None, item: dict) -> None:
+        """Dispatch Guardian notification from worker after child's business commit."""
+        if guardian_result is None:
+            return
+        run = guardian_result.get("evaluation_run", {})
+        status = run.get("status", "")
+        events = guardian_result.get("events", [])
+        if not status.startswith("completed") or len(events) == 0:
+            return
+        import hashlib
+        from uuid import UUID
+        household_id = UUID(item["household_id"])
+        breached = sorted(set(
+            str(e.get("check_id", "")) for e in events if e.get("check_id")
+        ))
+        if not breached:
+            return
+        entity_id = hashlib.sha256("|".join(breached).encode()).hexdigest()[:16]
+        try:
+            from apps.api.database import SessionLocal
+            from apps.api.services.notification_service import dispatch_notification
+            ns = SessionLocal()
+            try:
+                dispatch_notification(
+                    ns, source="guardian", event_type="threshold_breach",
+                    severity="warning", household_id=household_id,
+                    entity_id=entity_id,
+                    context={"evaluation_run_id": str(run.get("id", ""))},
+                )
+            except Exception:
+                ns.rollback()
+                logger.warning("Guardian notification dispatch failed for run", exc_info=True)
+            finally:
+                ns.close()
+        except Exception:
+            logger.warning("Guardian notification session unavailable", exc_info=True)
 
     # ── Graceful shutdown ──
 
