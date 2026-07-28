@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 
 from apps.api.services.notification_service import (
     NOTIFICATION_TEMPLATES,
-    get_preferences,
     list_events,
     update_preferences,
 )
@@ -174,11 +173,12 @@ def _create_committee_session(session: Session, hid: UUID):
 def _run_committee_to_completion(session, cs) -> None:
     """Run committee session with a mock provider that returns valid JSON."""
     import json
-    from decimal import Decimal
-    from apps.api.services.committee_orchestration import run_committee
+
     from apps.api.services.ai_provider import (
-        AIModelProvider, ProviderConfig, ProviderResponse,
+        AIModelProvider,
+        ProviderResponse,
     )
+    from apps.api.services.committee_orchestration import run_committee
 
     class MockProvider(AIModelProvider):
         @property
