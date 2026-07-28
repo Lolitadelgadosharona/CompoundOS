@@ -379,11 +379,11 @@ def _dispatch_committee_notification(cs: CommitteeSession) -> None:
             ns.rollback()
             logger.warning(
                 "Committee notification dispatch failed for session %s",
-                cs.id, exc_info=True,
+                cs.id,
             )
         finally:
             ns.close()
     except Exception:
         logger.warning(
-            "Committee notification session unavailable", exc_info=True,
+            "Committee notification session unavailable",
         )

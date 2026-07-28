@@ -64,7 +64,7 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   next 16.2.10→16.2.12, eslint-config-next→16.2.12, postcss 8.5.10→8.5.18.
   npm audit --omit=dev: 0 vulnerabilities. Resolved 11 CVEs (9 Next.js +
   2 PostCSS).
-- Sprint 008: In Progress — Slice A Done (2026-07-28); Slices B/C Not Started
+- Sprint 008: In Progress — Slice A Done (2026-07-28); Slice B In Review
   - Direction: Notification Source Wiring + Daily Operations (Candidate A)
   - Proposal: docs/sprints/SPRINT_008_PROPOSAL.md
   - Open Questions: docs/sprints/SPRINT_008_OPEN_QUESTIONS.md (8/8 resolved)
@@ -77,7 +77,11 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
     - Backup: all completion/failure paths dispatch
     - Dedicated notification sessions per Technical Design
     - Deterministic FakeAdapter dedup tests with explicit assertions
-  - Slice B: NOT AUTHORIZED (Committee + Automation wiring)
+  - Slice B — Committee + Automation Notification Source Wiring: **Authorized / In Review** (2026-07-28)
+    - Draft PR #73
+    - Committee: dispatch session_complete info after run_committee() completion
+    - Automation: dispatch run_failed warning from worker after terminal run failure
+    - Dedicated notification sessions per Technical Design §3.2, §3.4
   - Slice C: NOT AUTHORIZED (Daily schedules + UI)
 
 ## Backlog

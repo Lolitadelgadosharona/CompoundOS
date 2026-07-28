@@ -294,10 +294,10 @@ class OrchestrationWorker:
         if is_guardian and finalize_status == "completed" and "evaluation_run" in result:
             return result
         # Return run-failure info for automation notification dispatch
-        if not is_guardian and finalize_status == "failed":
-            return {"run_id": run_id, "household_id": household_id,
-                    "job_type": job_type, "finalize_status": "failed",
-                    "error": result.get("error", "")}
+        # Applies to ALL job types that reach terminal failed state
+        if finalize_status == "failed":
+            return {"run_id": str(run_id), "household_id": str(household_id),
+                    "finalize_status": "failed"}
         return None
     @staticmethod
     def _maybe_notify_guardian_worker(guardian_result: dict | None, item: dict) -> None:
@@ -342,6 +342,10 @@ class OrchestrationWorker:
         """Dispatch Automation run_failed notification from worker after business commit."""
         if worker_result is None or worker_result.get("finalize_status") != "failed":
             return
+        run_id = worker_result.get("run_id", "")
+        household_id = worker_result.get("household_id", "")
+        if not run_id or not household_id:
+            return
         try:
             from uuid import UUID
 
@@ -352,20 +356,17 @@ class OrchestrationWorker:
                 dispatch_notification(
                     ns, source="automation", event_type="run_failed",
                     severity="warning",
-                    household_id=UUID(worker_result["household_id"]),
-                    entity_id=str(worker_result["run_id"]),
-                    context={"run_id": str(worker_result["run_id"])},
+                    household_id=UUID(household_id),
+                    entity_id=run_id,
+                    context={"run_id": run_id},
                 )
             except Exception:
                 ns.rollback()
-                logger.warning(
-                    "Automation notification dispatch failed for run %s",
-                    worker_result.get("run_id"), exc_info=True,
-                )
+                logger.warning("Automation notification dispatch failed for run %s", run_id)
             finally:
                 ns.close()
         except Exception:
-            logger.warning("Automation notification session unavailable", exc_info=True)
+            logger.warning("Automation notification session unavailable")
 
     # ── Graceful shutdown ──
 
