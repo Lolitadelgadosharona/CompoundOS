@@ -322,7 +322,7 @@ class TestAutomationNotification:
         worker = _make_worker(db_session, result={"status": "failed"})
         before = len(list_events(db_session))
         with patch(
-            "apps.api.services.orchestration_repository.finalize_run",
+            "apps.api.services.orchestration_worker.finalize_run",
             return_value=0,
         ):
             result = worker._execute_scheduled(db_session, info)
