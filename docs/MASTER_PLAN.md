@@ -69,7 +69,7 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   - Open Questions: docs/sprints/SPRINT_008_OPEN_QUESTIONS.md (8/8 resolved)
   - Technical Design: docs/sprints/SPRINT_008_TECHNICAL_DESIGN.md (Owner Approved, 2026-07-22)
   - Implementation: Slice A Authorized (Guardian + Backup notification source wiring)
-  - Slice A: In Review (Draft PR #69, HEAD f160610)
+  - Slice A: In Review (Draft PR #69; code-review anchor f160610)
   - Slice B: NOT AUTHORIZED (Committee + Automation wiring)
   - Slice C: NOT AUTHORIZED (Daily schedules + UI)
   - SM-001 (Security Maintenance): Done — PR #71 merged as 2adbf07 (2026-07-27). Upgraded next 16.2.10→16.2.12, postcss 8.5.10→8.5.18. npm audit --omit=dev: 0 vulnerabilities. Frontend audit BLOCKER resolved.
