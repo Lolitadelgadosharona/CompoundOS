@@ -5,7 +5,7 @@ Real PostgreSQL, real production entry points, exact assertions.
 # ruff: noqa: E501
 
 import json
-from datetime import time
+from datetime import datetime, time, timezone
 from unittest.mock import patch
 from uuid import UUID, uuid4
 
@@ -20,6 +20,29 @@ from apps.api.services.notification_service import (
 )
 
 pytestmark = pytest.mark.postgres
+
+# Fixed timestamp for deterministic dedup and delivery tests
+_FIXED_NOW = datetime(2026, 7, 28, 12, 0, 0, tzinfo=timezone.utc)
+
+# Sentinels injected into proposal/provider/error — must NOT appear in notification body
+_SECRET_PROPOSAL = "SECRET_PROPOSAL_xyz_001"
+_SECRET_PROVIDER = "SECRET_PROVIDER_abc_002"
+_SECRET_ERROR = "SECRET_ERROR_def_003"
+
+
+def _patch_dispatch_for_deterministic_delivery():
+    """Context manager: wrap dispatch_notification with FakeAdapter + fixed now."""
+    from apps.api.services import notification_service as ns_mod
+    from tests.test_notifications import FakeAdapter
+
+    original = ns_mod.dispatch_notification
+
+    def wrapped(*args, **kwargs):
+        kwargs.setdefault("adapter", FakeAdapter())
+        kwargs.setdefault("now", _FIXED_NOW)
+        return original(*args, **kwargs)
+
+    return patch.object(ns_mod, "dispatch_notification", wrapped)
 
 
 class TestEventTypeTemplates:
@@ -36,40 +59,47 @@ class TestCommitteeNotification:
     def test_completed_dispatches_exact_notification(
         self, db_session: Session,
     ) -> None:
-        """run_committee() completion dispatches session_complete with exact fields."""
+        """run_committee() dispatches session_complete with deterministic delivery."""
         _enable_all(db_session)
         hid = _hid(db_session)
         cs = _create_queued_session(db_session, hid)
         before = len(list_events(db_session))
-        _run_to_completion(db_session, cs)
+        with _patch_dispatch_for_deterministic_delivery():
+            _run_to_completion(db_session, cs)
         events = list_events(db_session)
         assert len(events) == before + 1
         ev = events[0]
         assert ev.source == "committee"
         assert ev.event_type == "session_complete"
         assert ev.severity == "info"
-        assert ev.delivery_status in ("delivered", "suppressed", "unavailable")
-        assert ev.suppressed_reason != "dedup"
-        assert ev.fingerprint
-        # Template-driven: exact fixed title/body
+        # Deterministic: FakeAdapter always delivers
+        assert ev.delivery_status == "delivered"
+        assert ev.suppressed_reason is None
+        # Fingerprint bound to session_id
+        expected_fp = compute_fingerprint(
+            "committee", "session_complete", "info", hid, str(cs.id),
+        )
+        assert ev.fingerprint == expected_fp
+        # Template title/body
         assert ev.title == "Committee Session Complete"
         assert ev.body == "AI Committee session finished. Review the Committee workspace."
-        # No free text from proposal or provider
-        assert "rebalancing" not in ev.title.lower()
-        assert "rebalancing" not in ev.body.lower()
+        # Sentinels must NOT leak into notification
+        assert _SECRET_PROPOSAL.lower() not in ev.title.lower()
+        assert _SECRET_PROPOSAL.lower() not in ev.body.lower()
+        assert _SECRET_PROVIDER.lower() not in ev.title.lower()
+        assert _SECRET_PROVIDER.lower() not in ev.body.lower()
 
     def test_failed_session_no_notification(
         self, db_session: Session,
     ) -> None:
-        """Failed committee session produces no notification."""
+        """Failed committee session: event count unchanged."""
         from apps.api.services.committee_orchestration import _fail_session
         _enable_all(db_session)
         hid = _hid(db_session)
         cs = _create_queued_session(db_session, hid)
-        _fail_session(db_session, cs, "test failure")
         before = len(list_events(db_session))
-        events = list_events(db_session)
-        assert len(events) == before
+        _fail_session(db_session, cs, "test failure")
+        assert len(list_events(db_session)) == before
 
     def test_disabled_preferences_suppresses(
         self, db_session: Session,
@@ -101,7 +131,7 @@ class TestCommitteeNotification:
     def test_business_result_survives_notification_failure(
         self, db_session: Session,
     ) -> None:
-        """Committee report + session persist even when SessionLocal fails."""
+        """Committee report + session persist when SessionLocal raises."""
         _enable_all(db_session)
         hid = _hid(db_session)
         cs = _create_queued_session(db_session, hid)
@@ -122,33 +152,43 @@ class TestAutomationNotification:
     def test_failed_run_creates_exact_notification(
         self, db_session: Session,
     ) -> None:
-        """Worker _execute_scheduled + notification dispatch creates exact event."""
+        """Worker failed run dispatches run_failed with deterministic delivery."""
         _enable_all(db_session)
         hid = _hid(db_session)
         sid = _create_schedule(db_session, hid, "guardian.evaluate_all")
         info = _schedule_info(db_session, sid)
-        worker = _make_worker(db_session, result={"status": "failed"})
+        worker = _make_worker(db_session, result={
+            "status": "failed", "error": _SECRET_ERROR,
+        })
         before = len(list_events(db_session))
         result = worker._execute_scheduled(db_session, info)
         db_session.commit()
-        worker._maybe_notify_automation_worker(result)
+        with _patch_dispatch_for_deterministic_delivery():
+            worker._maybe_notify_automation_worker(result)
         events = list_events(db_session)
         assert len(events) == before + 1
         ev = events[0]
         assert ev.source == "automation"
         assert ev.event_type == "run_failed"
         assert ev.severity == "warning"
-        assert ev.delivery_status in ("delivered", "suppressed", "unavailable")
-        assert ev.suppressed_reason != "dedup"
-        assert ev.fingerprint
+        assert ev.delivery_status == "delivered"
+        assert ev.suppressed_reason is None
+        # Fingerprint bound to actual persisted run_id
+        run_id = result["run_id"]
+        expected_fp = compute_fingerprint(
+            "automation", "run_failed", "warning", hid, run_id,
+        )
+        assert ev.fingerprint == expected_fp
         assert ev.title == "Automation Run Failed"
         assert ev.body == "An automation run has failed. Review automation logs."
-        assert "test" not in ev.body.lower()
+        # Executor error sentinel must NOT leak
+        assert _SECRET_ERROR.lower() not in ev.title.lower()
+        assert _SECRET_ERROR.lower() not in ev.body.lower()
 
     def test_failed_returns_exact_key_set(
         self, db_session: Session,
     ) -> None:
-        """_execute_scheduled returns only run_id, household_id, finalize_status."""
+        """_execute_scheduled returns {run_id, household_id, finalize_status}."""
         hid = _hid(db_session)
         sid = _create_schedule(db_session, hid, "guardian.evaluate_all")
         info = _schedule_info(db_session, sid)
@@ -161,7 +201,7 @@ class TestAutomationNotification:
     def test_completed_no_notification(
         self, db_session: Session,
     ) -> None:
-        """Completed run: result is None → no notification dispatched."""
+        """Completed run: event count unchanged."""
         _enable_all(db_session)
         hid = _hid(db_session)
         sid = _create_schedule(db_session, hid, "guardian.evaluate_all")
@@ -172,14 +212,12 @@ class TestAutomationNotification:
         db_session.commit()
         assert result is None
         worker._maybe_notify_automation_worker(result)
-        events = list_events(db_session)
-        for ev in events[before:]:
-            assert ev.source != "automation" or ev.event_type != "run_failed"
+        assert len(list_events(db_session)) == before
 
     def test_aborted_no_notification(
         self, db_session: Session,
     ) -> None:
-        """Aborted run (timeout): result is None → no notification."""
+        """Aborted run: event count unchanged."""
         _enable_all(db_session)
         hid = _hid(db_session)
         sid = _create_schedule(db_session, hid, "guardian.evaluate_all")
@@ -190,14 +228,12 @@ class TestAutomationNotification:
         db_session.commit()
         assert result is None
         worker._maybe_notify_automation_worker(result)
-        events = list_events(db_session)
-        for ev in events[before:]:
-            assert ev.source != "automation" or ev.event_type != "run_failed"
+        assert len(list_events(db_session)) == before
 
     def test_run_attempt_lease_persist_after_failure(
         self, db_session: Session,
     ) -> None:
-        """Run, attempt, lease all reach final state after failed run."""
+        """Run, attempt, lease all reach terminal state after failed run."""
         _enable_all(db_session)
         hid = _hid(db_session)
         sid = _create_schedule(db_session, hid, "guardian.evaluate_all")
@@ -208,19 +244,16 @@ class TestAutomationNotification:
         worker._maybe_notify_automation_worker(result)
         from sqlalchemy import text
         run_id = UUID(result["run_id"])
-        # Run: terminal status
         run = db_session.execute(text(
             "SELECT status FROM runs WHERE id = :rid"
         ), {"rid": run_id}).fetchone()
         assert run is not None and run[0] == "failed"
-        # Attempt: terminal status
         attempt = db_session.execute(text(
             "SELECT status, attempt_number FROM attempts WHERE run_id = :rid"
         ), {"rid": run_id}).fetchone()
         assert attempt is not None
         assert attempt[0] == "failed"
         assert attempt[1] >= 1
-        # Lease: released
         lease = db_session.execute(text(
             "SELECT released_at FROM leases WHERE run_id = :rid"
         ), {"rid": run_id}).fetchone()
@@ -237,13 +270,11 @@ class TestAutomationNotification:
         worker = _make_worker(db_session, result={"status": "failed"})
         result = worker._execute_scheduled(db_session, info)
         db_session.commit()
-        # Notification dispatch with broken SessionLocal — must not propagate
         with patch(
             "apps.api.database.SessionLocal",
             side_effect=RuntimeError("notification unavailable"),
         ):
             worker._maybe_notify_automation_worker(result)
-        # Business state intact
         from sqlalchemy import text
         run_id = UUID(result["run_id"])
         run = db_session.execute(text(
@@ -285,7 +316,7 @@ class TestDedupForSliceB:
     def test_same_entity_dedup_with_exact_fingerprint(
         self, db_session: Session,
     ) -> None:
-        """Same entity_id twice → second dedup-suppressed, fingerprint matches."""
+        """Same entity_id twice → first delivered, second dedup-suppressed."""
         _enable_all(db_session)
         from apps.api.services.notification_service import dispatch_notification
         from tests.test_notifications import FakeAdapter
@@ -294,22 +325,19 @@ class TestDedupForSliceB:
         expected_fp = compute_fingerprint(
             "committee", "session_complete", "info", hid, sid,
         )
-        # First dispatch — delivered
         dispatch_notification(
             db_session, source="committee", event_type="session_complete",
             severity="info", household_id=hid, entity_id=sid,
-            adapter=FakeAdapter(),
+            adapter=FakeAdapter(), now=_FIXED_NOW,
         )
         events1 = list_events(db_session)
         assert events1[0].delivery_status == "delivered"
         assert events1[0].suppressed_reason is None
         assert events1[0].fingerprint == expected_fp
-        assert events1[0].title == "Committee Session Complete"
-        # Second dispatch — dedup-suppressed
         dispatch_notification(
             db_session, source="committee", event_type="session_complete",
             severity="info", household_id=hid, entity_id=sid,
-            adapter=FakeAdapter(),
+            adapter=FakeAdapter(), now=_FIXED_NOW,
         )
         events = list_events(db_session)
         assert events[0].delivery_status == "suppressed"
@@ -332,12 +360,12 @@ class TestDedupForSliceB:
         dispatch_notification(
             db_session, source="automation", event_type="run_failed",
             severity="warning", household_id=hid, entity_id=eid1,
-            adapter=FakeAdapter(),
+            adapter=FakeAdapter(), now=_FIXED_NOW,
         )
         dispatch_notification(
             db_session, source="automation", event_type="run_failed",
             severity="warning", household_id=hid, entity_id=eid2,
-            adapter=FakeAdapter(),
+            adapter=FakeAdapter(), now=_FIXED_NOW,
         )
         events = list_events(db_session)
         assert events[0].fingerprint == fp2
@@ -346,8 +374,6 @@ class TestDedupForSliceB:
         assert events[1].delivery_status == "delivered"
         assert events[0].suppressed_reason is None
         assert events[1].suppressed_reason is None
-        assert events[0].title == "Automation Run Failed"
-        assert events[1].title == "Automation Run Failed"
 
 
 # --- Helpers ---
@@ -363,7 +389,7 @@ _VALID_OUTPUT = """{
     "recommended_direction": "aligned_with_policy",
     "sections": {
         "long_term_compounding": "Compounding effects favor staying invested.",
-        "index_passive_investing": "Passive index exposure reduces single-stock risk.",
+        "index_passive_investing": "Passive index exposure reduces single-stock risk. """ + _SECRET_PROVIDER + """",
         "macroeconomic_context": "Current rate environment warrants caution.",
         "risk_capital_preservation": "Diversification maintains adequate protection.",
         "devils_advocate": "Alternative: reduce equity exposure given macro headwinds.",
@@ -409,8 +435,8 @@ def _create_queued_session(session: Session, hid: UUID):
     session.execute(text(
         "INSERT INTO committee_sessions (id, household_id, title,"
         " proposal_text, status)"
-        " VALUES (:id, :hid, 'Test Session', 'Evaluate current allocation.', 'queued')"
-    ), {"id": sid, "hid": hid})
+        " VALUES (:id, :hid, 'Test Session', :proposal, 'queued')"
+    ), {"id": sid, "hid": hid, "proposal": _SECRET_PROPOSAL + " Evaluate allocation."})
     session.commit()
     from apps.api.models import CommitteeSession
     return session.query(CommitteeSession).filter_by(id=sid).one()
