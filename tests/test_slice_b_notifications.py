@@ -2,12 +2,16 @@
 
 Real PostgreSQL, real production entry points, exact assertions.
 """
+# ruff: noqa: E501
 
+import json
 from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy.orm import Session
 
+from apps.api.services.ai_provider import AIModelProvider, ProviderResponse
+from apps.api.services.committee_orchestration import _fail_session, run_committee
 from apps.api.services.notification_service import (
     NOTIFICATION_TEMPLATES,
     list_events,
@@ -31,12 +35,12 @@ class TestCommitteeNotification:
     def test_session_completed_dispatches_notification(
         self, db_session: Session,
     ) -> None:
-        """Committee session completion → dispatch session_complete info."""
+        """Committee session completion -> dispatch session_complete info."""
         _enable_all(db_session)
         hid = _hid(db_session)
         cs = _create_committee_session(db_session, hid)
         before = len(list_events(db_session))
-        _run_committee_to_completion(db_session, cs)
+        _run_to_completion(db_session, cs)
         events = list_events(db_session)
         assert len(events) == before + 1
         ev = events[0]
@@ -47,11 +51,10 @@ class TestCommitteeNotification:
     def test_session_failed_no_dispatch(
         self, db_session: Session,
     ) -> None:
-        """Committee session failure → no notification dispatched."""
+        """Committee session failure -> no notification dispatched."""
         _enable_all(db_session)
         hid = _hid(db_session)
         cs = _create_committee_session(db_session, hid)
-        from apps.api.services.committee_orchestration import _fail_session
         _fail_session(db_session, cs, "test failure")
         before = len(list_events(db_session))
         events = list_events(db_session)
@@ -64,7 +67,7 @@ class TestCommitteeNotification:
         hid = _hid(db_session)
         cs = _create_committee_session(db_session, hid)
         before = len(list_events(db_session))
-        _run_committee_to_completion(db_session, cs)
+        _run_to_completion(db_session, cs)
         events = list_events(db_session)
         assert len(events) == before + 1
         assert events[0].delivery_status == "suppressed"
@@ -79,7 +82,7 @@ class TestCommitteeNotification:
         hid = _hid(db_session)
         cs = _create_committee_session(db_session, hid)
         before = len(list_events(db_session))
-        _run_committee_to_completion(db_session, cs)
+        _run_to_completion(db_session, cs)
         events = list_events(db_session)
         assert len(events) == before + 1
         assert events[0].suppressed_reason == "source_disabled"
@@ -87,7 +90,7 @@ class TestCommitteeNotification:
 
 class TestAutomationNotification:
     def test_run_failed_dispatches_notification(self) -> None:
-        """Automation run failure → dispatch run_failed warning."""
+        """Automation run failure -> dispatch run_failed warning."""
         from apps.api.services.orchestration_worker import OrchestrationWorker
         result = {
             "run_id": uuid4(), "household_id": str(uuid4()),
@@ -96,12 +99,12 @@ class TestAutomationNotification:
         OrchestrationWorker._maybe_notify_automation_worker(result)
 
     def test_run_succeeded_no_dispatch(self) -> None:
-        """Automation run success → no notification (None result)."""
+        """Automation run success -> no notification (None result)."""
         from apps.api.services.orchestration_worker import OrchestrationWorker
         OrchestrationWorker._maybe_notify_automation_worker(None)
 
     def test_completed_status_no_dispatch(self) -> None:
-        """Completed finalize_status → no notification."""
+        """Completed finalize_status -> no notification."""
         from apps.api.services.orchestration_worker import OrchestrationWorker
         result = {
             "run_id": uuid4(), "household_id": str(uuid4()),
@@ -110,12 +113,12 @@ class TestAutomationNotification:
         OrchestrationWorker._maybe_notify_automation_worker(result)
 
     def test_none_result_no_dispatch(self) -> None:
-        """None result → no notification."""
+        """None result -> no notification."""
         from apps.api.services.orchestration_worker import OrchestrationWorker
         OrchestrationWorker._maybe_notify_automation_worker(None)
 
     def test_empty_dict_no_dispatch(self) -> None:
-        """Empty result → no notification."""
+        """Empty result -> no notification."""
         from apps.api.services.orchestration_worker import OrchestrationWorker
         OrchestrationWorker._maybe_notify_automation_worker({})
 
@@ -128,12 +131,12 @@ class TestNotificationIsolation:
         _enable_all(db_session)
         hid = _hid(db_session)
         cs = _create_committee_session(db_session, hid)
-        _run_committee_to_completion(db_session, cs)
+        _run_to_completion(db_session, cs)
         db_session.refresh(cs)
         assert cs.status == "completed"
 
 
-# ── Helpers ──
+# --- Helpers ---
 
 def _hid(session: Session) -> UUID:
     from apps.api.models import HouseholdProfile
@@ -170,15 +173,8 @@ def _create_committee_session(session: Session, hid: UUID):
     return cs
 
 
-def _run_committee_to_completion(session, cs) -> None:
+def _run_to_completion(session, cs) -> None:
     """Run committee session with a mock provider that returns valid JSON."""
-    import json
-
-    from apps.api.services.ai_provider import (
-        AIModelProvider,
-        ProviderResponse,
-    )
-    from apps.api.services.committee_orchestration import run_committee
 
     class MockProvider(AIModelProvider):
         @property

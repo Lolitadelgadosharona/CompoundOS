@@ -344,6 +344,7 @@ class OrchestrationWorker:
             return
         try:
             from uuid import UUID
+
             from apps.api.database import SessionLocal
             from apps.api.services.notification_service import dispatch_notification
             ns = SessionLocal()
