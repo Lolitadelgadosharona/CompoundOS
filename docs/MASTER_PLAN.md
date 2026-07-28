@@ -55,7 +55,7 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   - Notification: explicit opt-in (disabled by default), 4 API routes, structured templates, household-scoped dedup, macOS AppleScript argv adapter, body privacy preview
   - Health service wired as notification source (DEGRADED/UNAVAILABLE → dispatch)
   - Guardian and Backup notification sources wired (Sprint 008 Slice A)
-  - Committee/automation notification sources defined but not yet wired
+  - Committee and Automation notification sources wired (Sprint 008 Slice B, Draft PR #73)
   - PG 571 / non-PG 134+2 / frontend 251 test baseline
   - Closeout PR #66: squash merge 2f4f12569ae702fcbcc9a0bb01b199d68fe26327
   - Main CI run 29888368096: 3/3 success
