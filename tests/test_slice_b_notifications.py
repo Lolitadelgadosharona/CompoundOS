@@ -314,47 +314,66 @@ class TestAutomationNotification:
     def test_stale_token_fenced_no_notification(
         self, db_session: Session,
     ) -> None:
-        """Stale token (fenced): _execute_scheduled returns None, no notification."""
+        """Stale token via real finalize_run: wrong token → returns 0, result None."""
         _enable_all(db_session)
         hid = _hid(db_session)
         sid = _create_schedule(db_session, hid, "guardian.evaluate_all")
         info = _schedule_info(db_session, sid)
         worker = _make_worker(db_session, result={"status": "failed"})
         before = len(list_events(db_session))
-        with patch(
-            "apps.api.services.orchestration_worker.finalize_run",
-            return_value=0,
-        ):
+        # Wrap real finalize_run: inject a deliberately wrong fencing_token
+        # so the real PostgreSQL UPDATE returns rowcount 0
+        from apps.api.services import orchestration_worker as ow_mod
+        original = ow_mod.finalize_run
+
+        def fenced_finalize(*args, **kwargs):
+            kwargs["fencing_token"] = 999999  # guaranteed wrong
+            return original(*args, **kwargs)
+
+        with patch.object(ow_mod, "finalize_run", fenced_finalize):
             result = worker._execute_scheduled(db_session, info)
         db_session.commit()
-        # Stale token → None result
         assert result is None
         worker._maybe_notify_automation_worker(result)
         assert len(list_events(db_session)) == before
-        # Run/attempt/lease reflect fencing state
+        # Run/attempt/lease reflect fencing: attempt failed, run not finalized
         from sqlalchemy import text
-        run = db_session.execute(text(
-            "SELECT status FROM runs WHERE schedule_id = :sid ORDER BY scheduled_at DESC LIMIT 1"
+        run_row = db_session.execute(text(
+            "SELECT id, status FROM runs WHERE schedule_id = :sid"
+            " ORDER BY scheduled_at DESC LIMIT 1"
         ), {"sid": sid}).fetchone()
-        assert run is not None
-        # Fenced run: attempt is marked failed but run may not be finalized
+        assert run_row is not None
+        run_id = run_row[0]
+        # Run stays 'started' — never finalized by stale-token path
         attempt = db_session.execute(text(
-            "SELECT status FROM attempts WHERE run_id = ("
-            " SELECT id FROM runs WHERE schedule_id = :sid ORDER BY scheduled_at DESC LIMIT 1"
-            ")"
-        ), {"sid": sid}).fetchone()
+            "SELECT status FROM attempts WHERE run_id = :rid"
+        ), {"rid": run_id}).fetchone()
         assert attempt is not None and attempt[0] == "failed"
+        lease = db_session.execute(text(
+            "SELECT released_at FROM leases WHERE run_id = :rid"
+        ), {"rid": run_id}).fetchone()
+        assert lease is not None
 
     def test_non_final_status_no_notification(
         self, db_session: Session,
     ) -> None:
-        """Non-final outcome: _maybe_notify_automation_worker does nothing."""
+        """Non-final outcome with real persisted run: no notification created."""
         _enable_all(db_session)
+        hid = _hid(db_session)
+        sid = _create_schedule(db_session, hid, "guardian.evaluate_all")
+        info = _schedule_info(db_session, sid)
+        worker = _make_worker(db_session, result={"status": "failed"})
+        # Execute a real failed run to get a valid persisted run_id
+        result = worker._execute_scheduled(db_session, info)
+        db_session.commit()
+        assert result is not None
+        run_id = result["run_id"]
+        household_id = result["household_id"]
+        # Now dispatch with non-final status using the real persisted identity
         before = len(list_events(db_session))
-        from apps.api.services.orchestration_worker import OrchestrationWorker
-        OrchestrationWorker._maybe_notify_automation_worker({
-            "run_id": str(uuid4()),
-            "household_id": str(uuid4()),
+        worker._maybe_notify_automation_worker({
+            "run_id": run_id,
+            "household_id": household_id,
             "finalize_status": "pending",
         })
         assert len(list_events(db_session)) == before
