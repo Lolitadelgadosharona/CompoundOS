@@ -6,6 +6,7 @@ Real PostgreSQL, real production entry points, exact assertions.
 
 import json
 from datetime import time
+from unittest.mock import patch
 from uuid import UUID, uuid4
 
 import pytest
@@ -13,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.services.notification_service import (
     NOTIFICATION_TEMPLATES,
+    compute_fingerprint,
     list_events,
     update_preferences,
 )
@@ -48,10 +50,13 @@ class TestCommitteeNotification:
         assert ev.severity == "info"
         assert ev.delivery_status in ("delivered", "suppressed", "unavailable")
         assert ev.suppressed_reason != "dedup"
-        assert ev.fingerprint  # fingerprint is set (SHA-256 hash)
-        # Template-driven body — no free text from proposal/provider/evidence
+        assert ev.fingerprint
+        # Template-driven: exact fixed title/body
+        assert ev.title == "Committee Session Complete"
+        assert ev.body == "AI Committee session finished. Review the Committee workspace."
+        # No free text from proposal or provider
+        assert "rebalancing" not in ev.title.lower()
         assert "rebalancing" not in ev.body.lower()
-        assert "deepseek" not in ev.body.lower()
 
     def test_failed_session_no_notification(
         self, db_session: Session,
@@ -96,11 +101,15 @@ class TestCommitteeNotification:
     def test_business_result_survives_notification_failure(
         self, db_session: Session,
     ) -> None:
-        """Committee report + session persist even if notification dispatch fails."""
+        """Committee report + session persist even when SessionLocal fails."""
         _enable_all(db_session)
         hid = _hid(db_session)
         cs = _create_queued_session(db_session, hid)
-        _run_to_completion_with_failing_notification(db_session, cs)
+        with patch(
+            "apps.api.database.SessionLocal",
+            side_effect=RuntimeError("notification unavailable"),
+        ):
+            _run_to_completion(db_session, cs)
         db_session.refresh(cs)
         assert cs.status == "completed"
         from apps.api.models import CommitteeReport
@@ -113,7 +122,7 @@ class TestAutomationNotification:
     def test_failed_run_creates_exact_notification(
         self, db_session: Session,
     ) -> None:
-        """Worker _execute_scheduled + notification dispatch creates exact NotificationEvent."""
+        """Worker _execute_scheduled + notification dispatch creates exact event."""
         _enable_all(db_session)
         hid = _hid(db_session)
         sid = _create_schedule(db_session, hid, "guardian.evaluate_all")
@@ -122,7 +131,6 @@ class TestAutomationNotification:
         before = len(list_events(db_session))
         result = worker._execute_scheduled(db_session, info)
         db_session.commit()
-        # Notification dispatch after business commit (same as _claim_and_execute)
         worker._maybe_notify_automation_worker(result)
         events = list_events(db_session)
         assert len(events) == before + 1
@@ -133,12 +141,14 @@ class TestAutomationNotification:
         assert ev.delivery_status in ("delivered", "suppressed", "unavailable")
         assert ev.suppressed_reason != "dedup"
         assert ev.fingerprint
+        assert ev.title == "Automation Run Failed"
+        assert ev.body == "An automation run has failed. Review automation logs."
+        assert "test" not in ev.body.lower()
 
     def test_failed_returns_exact_key_set(
         self, db_session: Session,
     ) -> None:
         """_execute_scheduled returns only run_id, household_id, finalize_status."""
-        _enable_all(db_session)
         hid = _hid(db_session)
         sid = _create_schedule(db_session, hid, "guardian.evaluate_all")
         info = _schedule_info(db_session, sid)
@@ -160,7 +170,7 @@ class TestAutomationNotification:
         before = len(list_events(db_session))
         result = worker._execute_scheduled(db_session, info)
         db_session.commit()
-        assert result is None  # completed runs return None
+        assert result is None
         worker._maybe_notify_automation_worker(result)
         events = list_events(db_session)
         for ev in events[before:]:
@@ -178,7 +188,7 @@ class TestAutomationNotification:
         before = len(list_events(db_session))
         result = worker._execute_scheduled(db_session, info)
         db_session.commit()
-        assert result is None  # aborted runs return None
+        assert result is None
         worker._maybe_notify_automation_worker(result)
         events = list_events(db_session)
         for ev in events[before:]:
@@ -187,7 +197,7 @@ class TestAutomationNotification:
     def test_run_attempt_lease_persist_after_failure(
         self, db_session: Session,
     ) -> None:
-        """Run, attempt, lease final states persist after failed run."""
+        """Run, attempt, lease all reach final state after failed run."""
         _enable_all(db_session)
         hid = _hid(db_session)
         sid = _create_schedule(db_session, hid, "guardian.evaluate_all")
@@ -197,16 +207,29 @@ class TestAutomationNotification:
         db_session.commit()
         worker._maybe_notify_automation_worker(result)
         from sqlalchemy import text
+        run_id = UUID(result["run_id"])
+        # Run: terminal status
         run = db_session.execute(text(
-            "SELECT status FROM runs WHERE schedule_id = :sid ORDER BY scheduled_at DESC LIMIT 1"
-        ), {"sid": sid}).fetchone()
-        assert run is not None
-        assert run[0] == "failed"
+            "SELECT status FROM runs WHERE id = :rid"
+        ), {"rid": run_id}).fetchone()
+        assert run is not None and run[0] == "failed"
+        # Attempt: terminal status
+        attempt = db_session.execute(text(
+            "SELECT status, attempt_number FROM attempts WHERE run_id = :rid"
+        ), {"rid": run_id}).fetchone()
+        assert attempt is not None
+        assert attempt[0] == "failed"
+        assert attempt[1] >= 1
+        # Lease: released
+        lease = db_session.execute(text(
+            "SELECT released_at FROM leases WHERE run_id = :rid"
+        ), {"rid": run_id}).fetchone()
+        assert lease is not None and lease[0] is not None
 
     def test_business_state_survives_notification_failure(
         self, db_session: Session,
     ) -> None:
-        """Run/attempt/lease persist even when notification SessionLocal fails."""
+        """Run/attempt/lease persist even when SessionLocal raises."""
         _enable_all(db_session)
         hid = _hid(db_session)
         sid = _create_schedule(db_session, hid, "guardian.evaluate_all")
@@ -214,23 +237,32 @@ class TestAutomationNotification:
         worker = _make_worker(db_session, result={"status": "failed"})
         result = worker._execute_scheduled(db_session, info)
         db_session.commit()
-        # Simulate notification failure: dispatch with broken SessionLocal
-        worker._maybe_notify_automation_worker({
-            "run_id": result["run_id"],
-            "household_id": result["household_id"],
-            "finalize_status": "failed",
-        })
+        # Notification dispatch with broken SessionLocal — must not propagate
+        with patch(
+            "apps.api.database.SessionLocal",
+            side_effect=RuntimeError("notification unavailable"),
+        ):
+            worker._maybe_notify_automation_worker(result)
+        # Business state intact
         from sqlalchemy import text
+        run_id = UUID(result["run_id"])
         run = db_session.execute(text(
-            "SELECT status FROM runs WHERE schedule_id = :sid ORDER BY scheduled_at DESC LIMIT 1"
-        ), {"sid": sid}).fetchone()
-        assert run is not None
-        assert run[0] == "failed"
+            "SELECT status FROM runs WHERE id = :rid"
+        ), {"rid": run_id}).fetchone()
+        assert run is not None and run[0] == "failed"
+        attempt = db_session.execute(text(
+            "SELECT status FROM attempts WHERE run_id = :rid"
+        ), {"rid": run_id}).fetchone()
+        assert attempt is not None and attempt[0] == "failed"
+        lease = db_session.execute(text(
+            "SELECT released_at FROM leases WHERE run_id = :rid"
+        ), {"rid": run_id}).fetchone()
+        assert lease is not None and lease[0] is not None
 
     def test_notification_does_not_create_automation_run(
         self, db_session: Session,
     ) -> None:
-        """run_failed notification does not create additional automation runs."""
+        """run_failed notification does not create additional runs."""
         _enable_all(db_session)
         hid = _hid(db_session)
         sid = _create_schedule(db_session, hid, "guardian.evaluate_all")
@@ -246,39 +278,44 @@ class TestAutomationNotification:
         after = db_session.execute(text(
             "SELECT COUNT(*) FROM runs"
         )).scalar()
-        assert after == before + 1  # exactly one run, not two
+        assert after == before + 1
 
 
 class TestDedupForSliceB:
-    def test_same_committee_entity_dedup_suppressed(
+    def test_same_entity_dedup_with_exact_fingerprint(
         self, db_session: Session,
     ) -> None:
-        """Same entity_id twice → second dedup-suppressed."""
+        """Same entity_id twice → second dedup-suppressed, fingerprint matches."""
         _enable_all(db_session)
         from apps.api.services.notification_service import dispatch_notification
         from tests.test_notifications import FakeAdapter
         hid = _hid(db_session)
         sid = str(uuid4())
-        before = len(list_events(db_session))
+        expected_fp = compute_fingerprint(
+            "committee", "session_complete", "info", hid, sid,
+        )
+        # First dispatch — delivered
         dispatch_notification(
             db_session, source="committee", event_type="session_complete",
             severity="info", household_id=hid, entity_id=sid,
             adapter=FakeAdapter(),
         )
-        after1 = len(list_events(db_session))
-        assert after1 == before + 1
+        events1 = list_events(db_session)
+        assert events1[0].delivery_status == "delivered"
+        assert events1[0].suppressed_reason is None
+        assert events1[0].fingerprint == expected_fp
+        assert events1[0].title == "Committee Session Complete"
+        # Second dispatch — dedup-suppressed
         dispatch_notification(
             db_session, source="committee", event_type="session_complete",
             severity="info", household_id=hid, entity_id=sid,
             adapter=FakeAdapter(),
         )
-        after2 = len(list_events(db_session))
-        assert after2 == after1 + 1
         events = list_events(db_session)
+        assert events[0].delivery_status == "suppressed"
         assert events[0].suppressed_reason == "dedup"
-        assert events[1].delivery_status == "delivered"
-        assert events[1].suppressed_reason is None
-        assert events[0].fingerprint == events[1].fingerprint
+        assert events[0].fingerprint == expected_fp
+        assert events[1].fingerprint == expected_fp
 
     def test_different_entities_different_fingerprints(
         self, db_session: Session,
@@ -288,27 +325,29 @@ class TestDedupForSliceB:
         from apps.api.services.notification_service import dispatch_notification
         from tests.test_notifications import FakeAdapter
         hid = _hid(db_session)
-        before = len(list_events(db_session))
+        eid1, eid2 = str(uuid4()), str(uuid4())
+        fp1 = compute_fingerprint("automation", "run_failed", "warning", hid, eid1)
+        fp2 = compute_fingerprint("automation", "run_failed", "warning", hid, eid2)
+        assert fp1 != fp2
         dispatch_notification(
-            db_session, source="committee", event_type="session_complete",
-            severity="info", household_id=hid, entity_id=str(uuid4()),
+            db_session, source="automation", event_type="run_failed",
+            severity="warning", household_id=hid, entity_id=eid1,
             adapter=FakeAdapter(),
         )
-        after1 = len(list_events(db_session))
-        assert after1 == before + 1
         dispatch_notification(
-            db_session, source="committee", event_type="session_complete",
-            severity="info", household_id=hid, entity_id=str(uuid4()),
+            db_session, source="automation", event_type="run_failed",
+            severity="warning", household_id=hid, entity_id=eid2,
             adapter=FakeAdapter(),
         )
-        after2 = len(list_events(db_session))
-        assert after2 == after1 + 1
         events = list_events(db_session)
-        assert events[0].fingerprint != events[1].fingerprint
+        assert events[0].fingerprint == fp2
+        assert events[1].fingerprint == fp1
         assert events[0].delivery_status == "delivered"
         assert events[1].delivery_status == "delivered"
-        assert events[0].suppressed_reason != "dedup"
-        assert events[1].suppressed_reason != "dedup"
+        assert events[0].suppressed_reason is None
+        assert events[1].suppressed_reason is None
+        assert events[0].title == "Automation Run Failed"
+        assert events[1].title == "Automation Run Failed"
 
 
 # --- Helpers ---
@@ -411,29 +450,15 @@ def _schedule_info(session: Session, sid: UUID) -> dict:
 
 
 def _make_worker(session, result):
-    """Create OrchestrationWorker with deterministic FakeJobExecutor."""
     from apps.api.services.orchestration_worker import OrchestrationWorker
     db_url = session.get_bind().url.render_as_string(hide_password=False)
-    worker = OrchestrationWorker(
+    return OrchestrationWorker(
         db_url, worker_id="test-worker-slice-b",
         executor=FakeJobExecutor(result=result),
     )
-    return worker
-
-
-def _make_worker_with_failing_notification(session, result):
-    """Worker whose notification dispatch fails (SessionLocal unavailable)."""
-    from apps.api.services.orchestration_worker import OrchestrationWorker
-    db_url = "postgresql://nonexistent:5432/nonexistent"
-    worker = OrchestrationWorker(
-        db_url, worker_id="test-worker-slice-b",
-        executor=FakeJobExecutor(result=result),
-    )
-    return worker
 
 
 class FakeJobExecutor:
-    """Deterministic executor that returns a pre-configured result."""
     def __init__(self, result=None):
         self._result = result or {}
 
@@ -442,7 +467,6 @@ class FakeJobExecutor:
 
 
 def _run_to_completion(session, cs) -> None:
-    """Run committee to completion with mock provider returning valid output."""
     from apps.api.services.ai_provider import AIModelProvider, ProviderResponse
     from apps.api.services.committee_orchestration import run_committee
     output = json.loads(_VALID_OUTPUT)
@@ -457,30 +481,3 @@ def _run_to_completion(session, cs) -> None:
             return ProviderResponse(raw_text=json.dumps(output))
 
     run_committee(session, cs, MockProvider())
-
-
-def _run_to_completion_with_failing_notification(session, cs) -> None:
-    """Run committee where notification dispatch fails (broken SessionLocal).
-
-    Temporarily patches SessionLocal to raise, proving business commit survives.
-    """
-    from unittest.mock import patch
-
-    from apps.api.services.ai_provider import AIModelProvider, ProviderResponse
-    from apps.api.services.committee_orchestration import run_committee
-    output = json.loads(_VALID_OUTPUT)
-
-    class MockProvider(AIModelProvider):
-        @property
-        def provider_name(self) -> str:
-            return "mock"
-
-        def call(self, system_prompt: str, user_prompt: str,
-                 config=None) -> ProviderResponse:
-            return ProviderResponse(raw_text=json.dumps(output))
-
-    with patch(
-        "apps.api.database.SessionLocal",
-        side_effect=RuntimeError("notification unavailable"),
-    ):
-        run_committee(session, cs, MockProvider())
