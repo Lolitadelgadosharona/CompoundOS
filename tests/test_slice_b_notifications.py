@@ -311,6 +311,54 @@ class TestAutomationNotification:
         )).scalar()
         assert after == before + 1
 
+    def test_stale_token_fenced_no_notification(
+        self, db_session: Session,
+    ) -> None:
+        """Stale token (fenced): _execute_scheduled returns None, no notification."""
+        _enable_all(db_session)
+        hid = _hid(db_session)
+        sid = _create_schedule(db_session, hid, "guardian.evaluate_all")
+        info = _schedule_info(db_session, sid)
+        worker = _make_worker(db_session, result={"status": "failed"})
+        before = len(list_events(db_session))
+        with patch(
+            "apps.api.services.orchestration_repository.finalize_run",
+            return_value=0,
+        ):
+            result = worker._execute_scheduled(db_session, info)
+        db_session.commit()
+        # Stale token → None result
+        assert result is None
+        worker._maybe_notify_automation_worker(result)
+        assert len(list_events(db_session)) == before
+        # Run/attempt/lease reflect fencing state
+        from sqlalchemy import text
+        run = db_session.execute(text(
+            "SELECT status FROM runs WHERE schedule_id = :sid ORDER BY scheduled_at DESC LIMIT 1"
+        ), {"sid": sid}).fetchone()
+        assert run is not None
+        # Fenced run: attempt is marked failed but run may not be finalized
+        attempt = db_session.execute(text(
+            "SELECT status FROM attempts WHERE run_id = ("
+            " SELECT id FROM runs WHERE schedule_id = :sid ORDER BY scheduled_at DESC LIMIT 1"
+            ")"
+        ), {"sid": sid}).fetchone()
+        assert attempt is not None and attempt[0] == "failed"
+
+    def test_non_final_status_no_notification(
+        self, db_session: Session,
+    ) -> None:
+        """Non-final outcome: _maybe_notify_automation_worker does nothing."""
+        _enable_all(db_session)
+        before = len(list_events(db_session))
+        from apps.api.services.orchestration_worker import OrchestrationWorker
+        OrchestrationWorker._maybe_notify_automation_worker({
+            "run_id": str(uuid4()),
+            "household_id": str(uuid4()),
+            "finalize_status": "pending",
+        })
+        assert len(list_events(db_session)) == before
+
 
 class TestDedupForSliceB:
     def test_same_entity_dedup_with_exact_fingerprint(
