@@ -254,6 +254,9 @@ def _hid(session: Session) -> UUID:
 
 
 def _enable_all(session: Session) -> None:
+    from datetime import time
+
+    from apps.api.services.notification_service import get_preferences
     update_preferences(
         session,
         enabled=True,
@@ -261,6 +264,10 @@ def _enable_all(session: Session) -> None:
                           "automation"],
         enabled_severities=["info", "warning", "critical"],
     )
+    prefs = get_preferences(session)
+    prefs.quiet_hours_start = time(0, 0)
+    prefs.quiet_hours_end = time(0, 1)
+    session.commit()
 
 
 def _create_queued_session(session: Session, hid: UUID):
@@ -301,3 +308,4 @@ def _run_to_completion(session, cs) -> None:
         run_committee(session, cs, MockProvider())
     except Exception:
         session.rollback()
+        raise
