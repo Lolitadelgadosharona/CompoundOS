@@ -224,6 +224,9 @@ def run_committee(
     committee_session.status = "completed"
     session.commit()
 
+    # ── Sprint 008 Slice B: Committee notification dispatch ──
+    _dispatch_committee_notification(committee_session)
+
     return report
 
 
@@ -351,3 +354,36 @@ def _fail_session(
     cs.status = "failed"
     # Error detail is not persisted in current schema — logged only
     session.commit()
+
+
+def _dispatch_committee_notification(cs: CommitteeSession) -> None:
+    """Dispatch committee session_complete notification after business commit.
+
+    Sprint 008 Slice B — dedicated notification session, independent of
+    the business transaction.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    try:
+        from apps.api.database import SessionLocal
+        from apps.api.services.notification_service import dispatch_notification
+        ns = SessionLocal()
+        try:
+            dispatch_notification(
+                ns, source="committee", event_type="session_complete",
+                severity="info", household_id=cs.household_id,
+                entity_id=str(cs.id),
+                context={"session_id": str(cs.id)},
+            )
+        except Exception:
+            ns.rollback()
+            logger.warning(
+                "Committee notification dispatch failed for session %s",
+                cs.id, exc_info=True,
+            )
+        finally:
+            ns.close()
+    except Exception:
+        logger.warning(
+            "Committee notification session unavailable", exc_info=True,
+        )
