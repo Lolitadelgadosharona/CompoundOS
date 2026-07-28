@@ -48,7 +48,7 @@ class TestCommitteeNotification:
         assert ev.severity == "info"
         assert ev.delivery_status in ("delivered", "suppressed", "unavailable")
         assert ev.suppressed_reason != "dedup"
-        assert UUID(ev.fingerprint) or ev.fingerprint  # fingerprint is set
+        assert ev.fingerprint  # fingerprint is set (SHA-256 hash)
         # Template-driven body — no free text from proposal/provider/evidence
         assert "rebalancing" not in ev.body.lower()
         assert "deepseek" not in ev.body.lower()
@@ -368,10 +368,10 @@ def _create_schedule(session: Session, hid: UUID, job_type: str) -> UUID:
     ), {"id": jid, "hid": hid, "jt": job_type})
     sid = uuid4()
     session.execute(text(
-        "INSERT INTO schedules (id, job_definition_id, household_id,"
+        "INSERT INTO schedules (id, job_definition_id,"
         " execution_time, timezone, enabled, next_run_at)"
-        " VALUES (:id, :jid, :hid, '09:00', 'UTC', true, NOW())"
-    ), {"id": sid, "jid": jid, "hid": hid})
+        " VALUES (:id, :jid, '09:00', 'UTC', true, NOW())"
+    ), {"id": sid, "jid": jid})
     session.commit()
     return sid
 
@@ -379,7 +379,7 @@ def _create_schedule(session: Session, hid: UUID, job_type: str) -> UUID:
 def _schedule_info(session: Session, sid: UUID) -> dict:
     from sqlalchemy import text
     row = session.execute(text(
-        "SELECT s.id, s.job_definition_id, s.household_id, s.execution_time,"
+        "SELECT s.id, s.job_definition_id, jd.household_id, s.execution_time,"
         " s.timezone, jd.job_type, jd.job_params"
         " FROM schedules s JOIN job_definitions jd ON s.job_definition_id = jd.id"
         " WHERE s.id = :sid"
