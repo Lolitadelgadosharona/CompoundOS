@@ -55,7 +55,7 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   - Notification: explicit opt-in (disabled by default), 4 API routes, structured templates, household-scoped dedup, macOS AppleScript argv adapter, body privacy preview
   - Health service wired as notification source (DEGRADED/UNAVAILABLE → dispatch)
   - Guardian and Backup notification sources wired (Sprint 008 Slice A)
-  - Committee/automation notification sources defined but not yet wired
+  - Committee and Automation notification sources wired (Sprint 008 Slice B, Draft PR #73)
   - PG 571 / non-PG 134+2 / frontend 251 test baseline
   - Closeout PR #66: squash merge 2f4f12569ae702fcbcc9a0bb01b199d68fe26327
   - Main CI run 29888368096: 3/3 success
@@ -64,7 +64,7 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   next 16.2.10→16.2.12, eslint-config-next→16.2.12, postcss 8.5.10→8.5.18.
   npm audit --omit=dev: 0 vulnerabilities. Resolved 11 CVEs (9 Next.js +
   2 PostCSS).
-- Sprint 008: In Progress — Slice A Done (2026-07-28); Slices B/C Not Started
+- Sprint 008: In Progress — Slice A Done (2026-07-28); Slice B In Review
   - Direction: Notification Source Wiring + Daily Operations (Candidate A)
   - Proposal: docs/sprints/SPRINT_008_PROPOSAL.md
   - Open Questions: docs/sprints/SPRINT_008_OPEN_QUESTIONS.md (8/8 resolved)
@@ -77,7 +77,11 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
     - Backup: all completion/failure paths dispatch
     - Dedicated notification sessions per Technical Design
     - Deterministic FakeAdapter dedup tests with explicit assertions
-  - Slice B: NOT AUTHORIZED (Committee + Automation wiring)
+  - Slice B — Committee + Automation Notification Source Wiring: **Authorized / In Review** (2026-07-28)
+    - Draft PR #73
+    - Committee: dispatch session_complete info after run_committee() completion
+    - Automation: dispatch run_failed warning from worker after terminal run failure
+    - Dedicated notification sessions per Technical Design §3.2, §3.4
   - Slice C: NOT AUTHORIZED (Daily schedules + UI)
 
 ## Backlog
