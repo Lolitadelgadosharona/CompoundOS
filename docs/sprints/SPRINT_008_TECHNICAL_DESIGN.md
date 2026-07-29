@@ -8,9 +8,9 @@
 >
 > IMPLEMENTATION STATUS:
 > - Technical Design: OWNER APPROVED (2026-07-22, corrected 2026-07-22)
-> - Slice A: Implementation Authorized / In Progress (Draft PR #69)
-> - Slice B: NOT AUTHORIZED
-> - Slice C: NOT AUTHORIZED
+> - Slice A: Done (PR #69, merged aa444aa)
+> - Slice B: Done (PR #73, merged a7a01ca)
+> - Slice C: Authorized / In Progress
 >
 > TD-8-1: **Owner Resolved** — Option A with schedule-local timezone definition
 

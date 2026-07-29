@@ -87,18 +87,23 @@ def create_run(
     triggered_by: str,
     scheduled_at: datetime,
     household_id: str,
-) -> str:
-    """Create a new Run. Returns the run_id as string.
+) -> str | None:
+    """Create a new Run. Returns the run_id as string, or None on duplicate.
 
-    Raises IntegrityError on duplicate idempotency_key (already claimed).
+    Uses ON CONFLICT (idempotency_key) DO NOTHING RETURNING id.
+    If the idempotency_key already exists the INSERT is a no-op and
+    RETURNING id yields None — the caller must still advance
+    next_run_at to keep the schedule moving.
     """
     run_id = uuid4()
-    session.execute(
+    result = session.execute(
         text(
             "INSERT INTO runs"
             " (id, job_definition_id, schedule_id, idempotency_key,"
             " status, triggered_by, scheduled_at, household_id)"
             " VALUES (:id, :jid, :sid, :ik, :st, :tb, :sa, :hid)"
+            " ON CONFLICT (idempotency_key) DO NOTHING"
+            " RETURNING id"
         ),
         {
             "id": run_id,
@@ -111,7 +116,10 @@ def create_run(
             "hid": household_id,
         },
     )
-    return str(run_id)
+    row = result.fetchone()
+    if row is None:
+        return None
+    return str(row[0])
 
 
 def advance_next_run_at(

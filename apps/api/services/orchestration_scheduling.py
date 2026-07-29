@@ -25,7 +25,9 @@ def utc_now() -> datetime:
 # Job allowlist
 # ---------------------------------------------------------------------------
 
-ALLOWED_JOB_TYPES = frozenset({"guardian.evaluate_all", "guardian.evaluate_one"})
+ALLOWED_JOB_TYPES = frozenset({
+    "guardian.evaluate_all", "guardian.evaluate_one", "backup.daily",
+})
 
 
 class InvalidJobParamsError(ValueError):
@@ -54,6 +56,12 @@ def validate_job_params(job_type: str, job_params: dict | None) -> dict:
         if set(params):
             raise InvalidJobParamsError(
                 "guardian.evaluate_all accepts no parameters,"
+                f" got: {set(params)}"
+            )
+    if job_type == "backup.daily":
+        if set(params):
+            raise InvalidJobParamsError(
+                "backup.daily accepts no parameters,"
                 f" got: {set(params)}"
             )
     return params
@@ -172,11 +180,14 @@ def compute_idempotency_key(
     job_type: str,
     job_params: dict | None,
     scheduled_date: date,
+    *,
+    schedule_id: str | None = None,
 ) -> str:
     params_str = ""
     if job_params:
         params_str = "||" + "||".join(
             f"{k}={v}" for k, v in sorted(job_params.items())
         )
-    payload = f"{job_type}{params_str}||{scheduled_date.isoformat()}"
+    sid = f"||sid={schedule_id}" if schedule_id else ""
+    payload = f"{job_type}{params_str}{sid}||{scheduled_date.isoformat()}"
     return hashlib.sha256(payload.encode()).hexdigest()
