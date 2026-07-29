@@ -9,7 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 
-revision: str = "0017_schedule_allowlist_backup_daily"
+revision: str = "0017_backup_daily_allowlist"
 down_revision: Union[str, None] = "0016_notification_integrity"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
