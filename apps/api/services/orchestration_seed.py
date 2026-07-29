@@ -31,8 +31,18 @@ DAILY_SCHEDULES = [
 
 
 def seed_daily_schedules(session: Session) -> None:
-    """Ensure daily schedules exist. Default disabled. Idempotent."""
+    """Ensure daily schedules exist. Default disabled. Idempotent.
+    
+    Safe to call when no household exists — simply returns early.
+    """
     from uuid import uuid4
+
+    # Guard: no household → nothing to seed
+    existing = session.execute(
+        text("SELECT id FROM household_profiles LIMIT 1")
+    ).fetchone()
+    if existing is None:
+        return
 
     for spec in DAILY_SCHEDULES:
         job_type = spec["job_type"]
