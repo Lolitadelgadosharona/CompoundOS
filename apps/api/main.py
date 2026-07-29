@@ -3,7 +3,6 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from apps.api.database import SessionLocal
 from apps.api.mutation_gate import mutation_gate
 from apps.api.routers.automation import router as automation_router
 from apps.api.routers.backup import router as backup_router
@@ -61,20 +60,3 @@ app.include_router(committee_router)
 app.include_router(backup_router)
 app.include_router(health_router)
 app.include_router(notifications_router)
-
-
-# ── Sprint 008 Slice C: Daily schedule seed ──
-@app.on_event("startup")
-def _seed_daily_schedules() -> None:
-    """Seed Guardian + Backup daily schedules (default disabled). Idempotent."""
-    import logging
-    _logger = logging.getLogger(__name__)
-    try:
-        from apps.api.services.orchestration_seed import seed_daily_schedules
-        session = SessionLocal()
-        try:
-            seed_daily_schedules(session)
-        finally:
-            session.close()
-    except Exception:
-        _logger.warning("Daily schedule seed skipped — DB unavailable")
