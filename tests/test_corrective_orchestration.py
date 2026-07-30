@@ -408,23 +408,18 @@ class TestReconcileDeferred40P01:
         rid, aid, lease = _create_run_lease(db_session, hid, jid, "wdl")
         db_url = db_session.get_bind().url.render_as_string(hide_password=False)
 
-        # Persistent reverse-locker: holds lease + extra locks.
-        # Extra locks make PostgreSQL preferentially kill reconcile's transaction.
+        # Persistent reverse-locker: holds lease lock, biases PG kills towards
+        # reconcile by holding 2 locks (lease + dummy) vs reconcile's 1 (runs).
         stop_flag = threading.Event()
         blocker_ready = threading.Event()
         sqlstates = []
 
         def persistent_blocker(rid_str):
-            while not stop_flag.is_set():
+            cycles = 0
+            while not stop_flag.is_set() and cycles < 10:
                 e = create_engine(db_url)
                 s = sessionmaker(bind=e)()
                 try:
-                    s.execute(text(
-                        "SELECT id FROM household_profiles LIMIT 1 FOR UPDATE"
-                    ))
-                    s.execute(text(
-                        "SELECT id FROM job_definitions LIMIT 1 FOR UPDATE"
-                    ))
                     s.execute(
                         text(
                             "SELECT id FROM leases WHERE run_id=:r FOR UPDATE"
@@ -451,7 +446,8 @@ class TestReconcileDeferred40P01:
                 finally:
                     s.close()
                     e.dispose()
-                    time.sleep(0.05)
+                    cycles += 1
+                    time.sleep(0.1)
 
         bt = threading.Thread(target=persistent_blocker, args=(rid,))
         bt.start()
@@ -469,7 +465,7 @@ class TestReconcileDeferred40P01:
         stop_flag.set()
         bt.join(timeout=10)
 
-        assert len(sqlstates) >= 1, f"No deadlocks observed: {sqlstates}"
+        assert len(sqlstates) >= 1, f"No deadlocks observed: {sqlstates}" 
         assert result.outcome == "reconciliation_deferred", (
             f"Got {result.outcome}"
         )
