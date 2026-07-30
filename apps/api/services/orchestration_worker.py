@@ -95,10 +95,8 @@ def reconcile_after_child_exit(
 
     Lock order: runs → leases → ALL attempts ORDER BY id.
     Terminal check BEFORE lease ownership check.
-    Retries on PostgreSQL 40P01 deadlock, returns reconciliation_deferred on exhaustion.
-
-    _test_deadlock_attempts: when > 0, raises SQLSTATE 40P01 on the first
-    N reconciliation attempts. Test seam only; 0 means normal production behavior.
+    Retries on PostgreSQL 40P01 deadlock, returns reconciliation_deferred
+    on exhaustion.
     """
     from sqlalchemy.exc import DBAPIError
 

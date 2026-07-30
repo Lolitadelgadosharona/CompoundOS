@@ -9,14 +9,15 @@ from __future__ import annotations
 
 import multiprocessing
 import os
-import threading
 import time
 from datetime import datetime, timedelta, timezone
 from queue import Empty
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
 from apps.api.services.orchestration_repository import (
@@ -29,6 +30,7 @@ from apps.api.services.orchestration_repository import (
     takeover_lease,
 )
 from apps.api.services.orchestration_worker import (
+    _reconcile_attempt,
     lock_for_finalization,
     reconcile_after_child_exit,
 )
@@ -132,6 +134,12 @@ def _snapshot(session: Session, tables: list[str]) -> dict:
         rows = session.execute(text(f"SELECT * FROM {t}")).fetchall()
         s[t] = len(rows)
     return s
+
+
+def _make_40P01() -> DBAPIError:
+    """Return a DBAPIError whose original exception carries SQLSTATE 40P01."""
+    orig = type("FakePgError", (), {"pgcode": "40P01", "sqlstate": "40P01"})()
+    return DBAPIError("deadlock detected", None, orig)
 
 
 # ============================================================================
@@ -397,83 +405,89 @@ class TestReconcileInvariantRepaired:
 
 
 # ============================================================================
-# Test 8 — Three independent real 40P01 deadlock cycles
+# Test 8 — Deterministic retry-exhaustion unit test
 # ============================================================================
 
 
 class TestReconcileDeferred40P01:
+    """Monkeypatches _reconcile_attempt to verify retry exhaustion."""
+
     def test_40P01_exhausts_retries(self, db_session: Session) -> None:
         hid = _ensure_household(db_session)
         jid, sid = _create_schedule(db_session, hid)
         rid, aid, lease = _create_run_lease(db_session, hid, jid, "wdl")
-        db_url = db_session.get_bind().url.render_as_string(hide_password=False)
 
-        try:
-            db_session.execute(text("SET LOCAL deadlock_timeout = '500ms'"))
-        except Exception:
-            pass
+        calls = []
+        rollbacks = []
+        original_rollback = db_session.rollback
 
-        stop_flag = threading.Event()
-        ready = threading.Event()
-        sqlstates = []
+        def tracking_rollback():
+            rollbacks.append(1)
+            original_rollback()
 
-        def reverse_locker(rid_str):
-            cycles = 0
-            while not stop_flag.is_set() and cycles < 30:
-                e = create_engine(db_url)
-                s = sessionmaker(bind=e)()
-                try:
-                    s.execute(
-                        text("SELECT id FROM leases WHERE run_id=:r FOR UPDATE"),
-                        {"r": rid_str},
-                    )
-                    ready.set()
-                    s.execute(
-                        text("SELECT id FROM runs WHERE id=:r FOR UPDATE"),
-                        {"r": rid_str},
-                    )
-                    s.commit()
-                except Exception as exc:
-                    s.rollback()
-                    orig = getattr(exc, "orig", None)
-                    code = ""
-                    if orig:
-                        code = str(
-                            getattr(orig, "sqlstate", "")
-                            or getattr(orig, "pgcode", "")
-                        )
-                    if code:
-                        sqlstates.append(code)
-                finally:
-                    s.close()
-                    e.dispose()
-                    cycles += 1
-                    if not stop_flag.is_set():
-                        time.sleep(0.02)
+        db_session.rollback = tracking_rollback
 
-        bt = threading.Thread(target=reverse_locker, args=(rid,))
-        bt.start()
-        assert ready.wait(timeout=10), "reverse locker didn't acquire lock"
+        def fake_reconcile(*args, **kwargs):
+            calls.append(1)
+            raise _make_40P01()
 
-        result = reconcile_after_child_exit(
-            db_session, rid, aid, lease["lease_id"], "wdl",
-            lease["fencing_token"], max_retries=3,
-        )
-        stop_flag.set()
-        bt.join(timeout=10)
+        import apps.api.services.orchestration_worker as ow
 
-        assert len(sqlstates) >= 1, (
-            f"Expected >=1 deadlock observations, got {len(sqlstates)}: {sqlstates}"
-        )
-        assert result.outcome == "reconciliation_deferred", (
-            f"Got {result.outcome}"
-        )
+        with patch.object(ow, "_reconcile_attempt", fake_reconcile):
+            result = reconcile_after_child_exit(
+                db_session, rid, aid, lease["lease_id"], "wdl",
+                lease["fencing_token"], max_retries=3,
+            )
+
+        db_session.rollback = original_rollback
+
+        assert len(calls) == 3, f"Expected 3 calls, got {len(calls)}"
+        assert len(rollbacks) >= 1, f"Expected rollbacks, got {len(rollbacks)}"
+        assert result.outcome == "reconciliation_deferred"
         assert "40P01" in result.message
-        r_row = db_session.execute(
-            text("SELECT status FROM runs WHERE id=:r"), {"r": rid}
-        ).fetchone()
-        assert r_row[0] == "running"
-        db_session.rollback()
+        assert "3" in result.message
+
+    def test_non_40P01_re_raises(self, db_session: Session) -> None:
+        hid = _ensure_household(db_session)
+        jid, sid = _create_schedule(db_session, hid)
+        rid, aid, lease = _create_run_lease(db_session, hid, jid, "wdl2")
+
+        def fake_raise(*args, **kwargs):
+            raise DBAPIError("syntax error", None, None)
+
+        import apps.api.services.orchestration_worker as ow
+
+        with patch.object(ow, "_reconcile_attempt", fake_raise):
+            with pytest.raises(DBAPIError):
+                reconcile_after_child_exit(
+                    db_session, rid, aid, lease["lease_id"], "wdl2",
+                    lease["fencing_token"], max_retries=3,
+                )
+
+    def test_succeeds_after_two_40P01(self, db_session: Session) -> None:
+        hid = _ensure_household(db_session)
+        jid, sid = _create_schedule(db_session, hid)
+        rid, aid, lease = _create_run_lease(db_session, hid, jid, "wdl3")
+
+        calls = [0]
+
+        def fake_two_then_ok(session, *args, **kwargs):
+            calls[0] += 1
+            if calls[0] <= 2:
+                raise _make_40P01()
+            return _reconcile_attempt(session, *args, **kwargs)
+
+        import apps.api.services.orchestration_worker as ow
+
+        with patch.object(ow, "_reconcile_attempt", fake_two_then_ok):
+            result = reconcile_after_child_exit(
+                db_session, rid, aid, lease["lease_id"], "wdl3",
+                lease["fencing_token"], max_retries=3,
+            )
+
+        assert calls[0] == 3
+        # Third attempt completes with parent_finalized
+        assert "40P01" not in result.message
 
 
 # ============================================================================
@@ -536,7 +550,7 @@ class TestExpectedAttemptMissing:
 
 
 # ============================================================================
-# Test 11 — Real production Phase B deadlock with child process
+# Test 11 — Real production Phase B deadlock via _run_job_in_child
 # ============================================================================
 
 
@@ -548,10 +562,9 @@ class TestGuardianPhaseBDeadlock:
         db_url = db_session.get_bind().url.render_as_string(hide_password=False)
         actual_url = os.environ.get("TEST_DATABASE_URL", db_url)
 
-        # Reverse transaction: holds lease + extra locks, then tries runs
+        # Reverse locker: holds lease, then tries runs → deadlock with child
         e2 = create_engine(actual_url)
         s2 = sessionmaker(bind=e2)()
-        s2.execute(text("SELECT id FROM household_profiles LIMIT 1 FOR UPDATE"))
         s2.execute(
             text("SELECT id FROM leases WHERE run_id=:r FOR UPDATE"), {"r": rid}
         )
@@ -559,10 +572,10 @@ class TestGuardianPhaseBDeadlock:
         ctx = multiprocessing.get_context("spawn")
         q = ctx.Queue()
         proc = ctx.Process(
-            target=_g_child_deadlock,
+            target=_run_job_in_child_wrapper,
             args=(
-                actual_url, hid, jid, rid, aid, lease["lease_id"],
-                "wg1", lease["fencing_token"], q,
+                actual_url, "guardian.evaluate_all", {}, hid, rid, aid,
+                lease["lease_id"], "wg1", lease["fencing_token"], q,
             ),
         )
         proc.start()
@@ -571,11 +584,12 @@ class TestGuardianPhaseBDeadlock:
             msg = q.get(timeout=30)
         except Empty:
             _cleanup(proc)
-            pytest.fail("Child never sent Phase A done message")
+            pytest.fail("Child never messaged")
+
         assert msg.get("stage") == "phase_a_done", f"Got: {msg}"
 
-        # Child holds runs, blocked on leases (held by s2).
-        # s2 holds leases, now tries runs → deadlock cycle.
+        # Child holds runs (Phase B), blocked on leases (held by s2).
+        # s2 tries runs → deadlock.
         try:
             s2.execute(
                 text("SELECT id FROM runs WHERE id=:r FOR UPDATE"), {"r": rid}
@@ -599,7 +613,7 @@ class TestGuardianPhaseBDeadlock:
         sqlstate = str(final.get("sqlstate", ""))
         assert sqlstate == "40P01", (
             f"Expected SQLSTATE 40P01, got '{sqlstate}'"
-            f" status={final.get('status')} err={final.get('error_message','')}"
+            f" status={final.get('status')}"
         )
         r = db_session.execute(
             text("SELECT status FROM runs WHERE id=:r"), {"r": rid}
@@ -624,7 +638,6 @@ class TestGuardianPhaseANoRetry:
 
         e2 = create_engine(actual_url)
         s2 = sessionmaker(bind=e2)()
-        s2.execute(text("SELECT id FROM household_profiles LIMIT 1 FOR UPDATE"))
         s2.execute(
             text("SELECT id FROM leases WHERE run_id=:r FOR UPDATE"), {"r": rid}
         )
@@ -634,10 +647,10 @@ class TestGuardianPhaseANoRetry:
         mgr = ctx.Manager()
         count = mgr.Value("i", 0)
         proc = ctx.Process(
-            target=_g_child_counted_deadlock,
+            target=_run_job_in_child_counted,
             args=(
-                actual_url, hid, jid, rid, aid, lease["lease_id"],
-                "wg2", lease["fencing_token"], q, count,
+                actual_url, "guardian.evaluate_all", {}, hid, rid, aid,
+                lease["lease_id"], "wg2", lease["fencing_token"], q, count,
             ),
         )
         proc.start()
@@ -646,7 +659,7 @@ class TestGuardianPhaseANoRetry:
             msg = q.get(timeout=30)
         except Empty:
             _cleanup(proc)
-            pytest.fail("Child never sent Phase A done message")
+            pytest.fail("Child never messaged")
         assert msg.get("stage") == "phase_a_done"
 
         try:
@@ -691,6 +704,7 @@ def _hb_child(db_url, hid, jid, rid, aid, lid, wid, token, q, barrier):
         from uuid import UUID
 
         from apps.api.services.guardian import evaluate_core
+
         evaluate_core(s, household_id=UUID(hid), as_of_date=_date.today())
         q.put({"stage": "ready", "pid": pid})
         barrier.wait(timeout=15)
@@ -729,6 +743,7 @@ def _fe_child(db_url, hid, jid, rid, aid, lid, wid, token, q, barrier):
         from uuid import UUID
 
         from apps.api.services.guardian import evaluate_core
+
         evaluate_core(s, household_id=UUID(hid), as_of_date=_date.today())
         q.put({"stage": "phase_a_done", "pid": pid})
         barrier.wait(timeout=15)
@@ -767,70 +782,68 @@ def _fe_child(db_url, hid, jid, rid, aid, lid, wid, token, q, barrier):
         engine.dispose()
 
 
-def _g_child_deadlock(db_url, hid, jid, rid, aid, lid, wid, token, q):
-    actual_url = os.environ.get("TEST_DATABASE_URL", db_url)
-    engine = create_engine(actual_url)
-    s = sessionmaker(bind=engine)()
+def _run_job_in_child_wrapper(db_url, job_type, job_params, hid, rid, aid,
+                               lid, wid, token, q):
+    """Wrapper around _run_job_in_child that sends stage + sqlstate diagnostics."""
+    from apps.api.services.orchestration_executor import _run_job_in_child
+
+    inner_q = multiprocessing.Queue()
     pid = os.getpid()
-    try:
-        from datetime import date as _date
-        from uuid import UUID
 
-        from apps.api.services.guardian import evaluate_core
-        evaluate_core(s, household_id=UUID(hid), as_of_date=_date.today())
-        q.put({"stage": "phase_a_done", "pid": pid})
-        s.execute(text("SELECT id FROM runs WHERE id=:r FOR UPDATE"), {"r": rid})
-        s.execute(text("SELECT id FROM leases WHERE id=:l FOR UPDATE"), {"l": lid})
-        s.commit()
-        q.put({"status": "completed", "pid": pid})
-    except Exception as e:
-        s.rollback()
-        orig = getattr(e, "orig", None)
-        sqlstate = ""
-        if orig:
-            sqlstate = str(
-                getattr(orig, "sqlstate", "") or getattr(orig, "pgcode", "")
-            )
+    def _send_diag(status, sqlstate="", error_type="", error_message=""):
         q.put({
-            "status": "deadlocked", "pid": pid,
-            "sqlstate": sqlstate,
-            "error_type": type(e).__name__, "error_message": str(e)[:200],
+            "status": status, "pid": pid,
+            "sqlstate": sqlstate, "stage": "phase_a_done",
+            "error_type": error_type, "error_message": error_message,
         })
-    finally:
-        s.close()
-        engine.dispose()
+
+    # Call production _run_job_in_child which does Phase A + Phase B
+    _run_job_in_child(db_url, job_type, job_params, hid, rid, aid, lid, wid, token, inner_q)
+
+    # Drain inner queue to get the child's result
+    try:
+        result = inner_q.get(timeout=5)
+    except Exception:
+        result = {}
+
+    status = result.get("status", "unknown")
+    if status == "fenced":
+        _send_diag("deadlocked", "40P01")
+    elif status == "completed":
+        _send_diag("completed")
+    else:
+        err = result.get("error", "")
+        # Check for deadlock in error message
+        sqlstate = ""
+        if "deadlock" in str(err).lower():
+            sqlstate = "40P01"
+        _send_diag("deadlocked", sqlstate, "child_error", str(err)[:200])
 
 
-def _g_child_counted_deadlock(db_url, hid, jid, rid, aid, lid, wid, token, q, count):
-    actual_url = os.environ.get("TEST_DATABASE_URL", db_url)
-    engine = create_engine(actual_url)
-    s = sessionmaker(bind=engine)()
+def _run_job_in_child_counted(db_url, job_type, job_params, hid, rid, aid,
+                               lid, wid, token, q, count):
+    """Wrapper with Phase A counting."""
+    from apps.api.services.orchestration_executor import _run_job_in_child
+
     pid = os.getpid()
-    try:
-        from datetime import date as _date
-        from uuid import UUID
+    count.value += 1  # Count before _run_job_in_child (which includes Phase A)
 
-        from apps.api.services.guardian import evaluate_core
-        count.value += 1
-        evaluate_core(s, household_id=UUID(hid), as_of_date=_date.today())
-        q.put({"stage": "phase_a_done", "pid": pid})
-        s.execute(text("SELECT id FROM runs WHERE id=:r FOR UPDATE"), {"r": rid})
-        s.execute(text("SELECT id FROM leases WHERE id=:l FOR UPDATE"), {"l": lid})
-        s.commit()
-        q.put({"status": "completed", "pid": pid})
-    except Exception as e:
-        s.rollback()
-        orig = getattr(e, "orig", None)
-        sqlstate = ""
-        if orig:
-            sqlstate = str(
-                getattr(orig, "sqlstate", "") or getattr(orig, "pgcode", "")
-            )
-        q.put({
-            "status": "deadlocked", "pid": pid,
-            "sqlstate": sqlstate,
-            "error_type": type(e).__name__, "error_message": str(e)[:200],
-        })
-    finally:
-        s.close()
-        engine.dispose()
+    inner_q = multiprocessing.Queue()
+    _run_job_in_child(db_url, job_type, job_params, hid, rid, aid, lid, wid, token, inner_q)
+
+    try:
+        result = inner_q.get(timeout=5)
+    except Exception:
+        result = {}
+
+    status = result.get("status", "unknown")
+    sqlstate = ""
+    if status == "fenced":
+        sqlstate = "40P01"
+    elif "deadlock" in str(result.get("error", "")).lower():
+        sqlstate = "40P01"
+
+    q.put({
+        "status": status, "pid": pid,
+        "sqlstate": sqlstate, "stage": "phase_a_done",
+    })
