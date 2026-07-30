@@ -478,20 +478,20 @@ class TestReconcileDeferred40P01:
         db_url = db_session.get_bind().url.render_as_string(hide_password=False)
 
         import threading
-        s2_ready = threading.Event()
-        s2_continue = threading.Event()
+        blocker_ready = threading.Event()
+        blocker_done = threading.Event()
 
-        def s2_worker():
+        def blocker():
             engine = create_engine(db_url)
             s = sessionmaker(bind=engine)()
             try:
+                # Hold lease lock persistently for all 3 retries
                 s.execute(text(
                     "SELECT id FROM leases WHERE run_id = :rid FOR UPDATE"
                 ), {"rid": rid})
-                s2_ready.set()  # Signal: lease lock held
-                s2_continue.wait(timeout=10)  # Wait for reconcile to start
-                # Now try runs while reconcile holds runs and wants leases
-                # -> deadlock (40P01)
+                blocker_ready.set()
+                blocker_done.wait(timeout=30)
+                # Try runs — each reconcile retry holds runs and wants leases
                 s.execute(text(
                     "SELECT id FROM runs WHERE id = :rid FOR UPDATE"
                 ), {"rid": rid})
@@ -501,25 +501,19 @@ class TestReconcileDeferred40P01:
                 s.close()
                 engine.dispose()
 
-        t = threading.Thread(target=s2_worker)
+        t = threading.Thread(target=blocker)
         t.start()
-        assert s2_ready.wait(timeout=10), "s2 did not acquire lease lock"
+        assert blocker_ready.wait(timeout=10), "blocker did not hold lease lock"
 
-        # Release s2 to start its runs lock attempt
-        s2_continue.set()
-        # Give s2 time to actually start the runs FOR UPDATE
-        time.sleep(0.3)
-
-        # Now reconcile locks runs first (succeeds), then tries leases
-        # which s2 holds. s2 holds leases, wants runs which reconcile holds.
-        # -> PostgreSQL deadlock detector fires 40P01
+        # Each retry: locks runs, tries leases (held) → 40P01
+        # Blocker holds leases for ALL 3 retries → all 3 deadlock
         result = reconcile_after_child_exit(
             db_session, rid, aid, lease["lease_id"], "test-dl",
             lease["fencing_token"], max_retries=3)
 
+        blocker_done.set()
         t.join(timeout=5)
 
-        # After 3 retries all hitting 40P01 → reconciliation_deferred
         assert result.outcome == "reconciliation_deferred", (
             f"Expected reconciliation_deferred, got {result.outcome}")
         assert "40P01" in result.message
