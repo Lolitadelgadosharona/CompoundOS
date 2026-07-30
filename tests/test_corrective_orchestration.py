@@ -480,8 +480,9 @@ class TestReconcileDeferred40P01:
         db_url = db_session.get_bind().url.render_as_string(hide_password=False)
         import threading
 
-        # Deterministic deadlock: reverse_locker holds runs lock, then tries leases.
-        # reconcile holds runs and tries leases → deadlock cycle.
+        # Deterministic deadlock: reverse_locker holds leases, reconcile holds runs.
+        # Both want the other's lock → 40P01 cycle.
+        ready = threading.Event()
         deadlocks = [0]
 
         def reverse_locker(rid_str):
@@ -493,8 +494,9 @@ class TestReconcileDeferred40P01:
                     text("SELECT id FROM leases WHERE run_id=:r FOR UPDATE"),
                     {"r": rid_str},
                 )
-                s.execute(text("SELECT pg_sleep(0.5)"))
+                ready.set()
                 # Now try runs — reconcile holds runs, wants leases
+                # This creates the deadlock cycle
                 s.execute(
                     text("SELECT id FROM runs WHERE id=:r FOR UPDATE"),
                     {"r": rid_str},
@@ -509,7 +511,7 @@ class TestReconcileDeferred40P01:
 
         t = threading.Thread(target=reverse_locker, args=(rid,))
         t.start()
-        time.sleep(0.3)
+        assert ready.wait(timeout=5), "reverse_locker did not acquire lease lock"
         result = reconcile_after_child_exit(
             db_session,
             rid,
@@ -519,7 +521,7 @@ class TestReconcileDeferred40P01:
             lease["fencing_token"],
             max_retries=3,
         )
-        t.join(timeout=5)
+        t.join(timeout=10)
         assert result.outcome == "reconciliation_deferred", f"Got {result.outcome}"
         assert "40P01" in result.message
         r_row = db_session.execute(
@@ -613,12 +615,11 @@ class TestGuardianPhaseBDeadlock:
         proc.start()
         msg = q.get(timeout=30)
         assert msg["stage"] == "phase_a_done", f"Got: {msg}"
-        # Child is now in Phase B trying to lock leases (held by s2)
-        # s2 holds leases, child holds runs -> deadlock -> 40P01
-        _cleanup(proc)
+        # Release s2's lock first so child can complete/fail with 40P01
         s2.rollback()
         s2.close()
         e2.dispose()
+        _cleanup(proc)
         final = None
         while True:
             try:
@@ -672,10 +673,10 @@ class TestGuardianPhaseANoRetry:
         proc.start()
         msg = q.get(timeout=20)
         assert msg["stage"] == "phase_a_done"
-        _cleanup(proc)
         s2.rollback()
         s2.close()
         e2.dispose()
+        _cleanup(proc)
         assert count.value == 1, f"Phase A called {count.value} times"
 
 
