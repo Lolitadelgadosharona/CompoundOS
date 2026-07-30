@@ -505,10 +505,14 @@ class TestReconcileDeferred40P01:
         t.start()
         assert s2_ready.wait(timeout=10), "s2 did not acquire lease lock"
 
-        # Now reconcile_locks runs first, then tries leases which s2 holds
-        # Both want each other's lock -> 40P01
+        # Release s2 to start its runs lock attempt
         s2_continue.set()
+        # Give s2 time to actually start the runs FOR UPDATE
+        time.sleep(0.3)
 
+        # Now reconcile locks runs first (succeeds), then tries leases
+        # which s2 holds. s2 holds leases, wants runs which reconcile holds.
+        # -> PostgreSQL deadlock detector fires 40P01
         result = reconcile_after_child_exit(
             db_session, rid, aid, lease["lease_id"], "test-dl",
             lease["fencing_token"], max_retries=3)
