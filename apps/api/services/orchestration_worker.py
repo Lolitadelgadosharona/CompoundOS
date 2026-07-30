@@ -448,7 +448,9 @@ class OrchestrationWorker:
             session.rollback()
             return None
 
-        finalize_status = "aborted" if is_timeout else "failed"
+        is_success = result.get("status") == "completed"
+        finalize_status = "aborted" if is_timeout else (
+            "completed" if is_success else "failed")
         lease_check = session.execute(text(
             "SELECT 1 FROM leases WHERE id = :lid AND worker_id = :wid"
             " AND fencing_token = :token AND released_at IS NULL"
@@ -466,7 +468,7 @@ class OrchestrationWorker:
             session.rollback()
             return None
 
-        attempt_status2 = "aborted" if is_timeout else "failed"
+        attempt_status2 = "aborted" if is_timeout else ("succeeded" if is_success else "failed")
         complete_attempt(session, expected_attempt_id, attempt_status2,
             error_message=result.get("error") if not is_guardian else None,
             clock=self._clock)
