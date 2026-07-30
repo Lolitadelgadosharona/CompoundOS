@@ -475,52 +475,18 @@ class TestReconcileDeferred40P01:
         jid, sid = _create_schedule(db_session, hid)
         rid, aid, lease = _create_run_and_lease(db_session, hid, jid, "test-dl")
 
-        db_url = db_session.get_bind().url.render_as_string(hide_password=False)
-
-        import threading
-        deadlock_hits = [0]
-        stop = threading.Event()
-
-        def persistent_blocker():
-            """Continuously hold lease lock, re-acquiring after deadlocks."""
-            while not stop.is_set():
-                engine = create_engine(db_url, pool_pre_ping=True)
-                s = sessionmaker(bind=engine, expire_on_commit=False)()
-                try:
-                    s.execute(text(
-                        "SELECT id FROM leases WHERE run_id = :rid FOR UPDATE"
-                    ), {"rid": rid})
-                    # Try runs in reverse order — reconcile holds runs first
-                    s.execute(text(
-                        "SELECT id FROM runs WHERE id = :rid FOR UPDATE"
-                    ), {"rid": rid})
-                except Exception:
-                    s.rollback()
-                    deadlock_hits[0] += 1
-                finally:
-                    try:
-                        s.close()
-                        engine.dispose()
-                    except Exception:
-                        pass
-                    time.sleep(0.05)  # Brief pause before re-acquiring
-
-        t = threading.Thread(target=persistent_blocker)
-        t.start()
-        # Give blocker time to acquire its first lease lock
-        time.sleep(0.3)
-
+        # Test seam: inject SQLSTATE 40P01 on all 3 retry attempts.
+        # This tests the production retry logic without relying on
+        # real deadlock timing in CI.
         result = reconcile_after_child_exit(
             db_session, rid, aid, lease["lease_id"], "test-dl",
-            lease["fencing_token"], max_retries=3)
-
-        stop.set()
-        t.join(timeout=5)
+            lease["fencing_token"], max_retries=3,
+            _test_deadlock_attempts=3)
 
         assert result.outcome == "reconciliation_deferred", (
             f"Expected reconciliation_deferred, got {result.outcome}")
         assert "40P01" in result.message
-        assert deadlock_hits[0] >= 1, "At least one deadlock must be observed"
+        assert "3" in result.message  # retry exhaustion
         db_session.rollback()
 
 

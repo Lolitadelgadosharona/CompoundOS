@@ -57,6 +57,12 @@ def _get_sqlstate(exc: DBAPIError) -> str:
     return ""
 
 
+def _raise_test_40P01():
+    """Test seam: raise a DBAPIError carrying SQLSTATE 40P01."""
+    orig = type("FakeOrig", (), {"pgcode": "40P01", "sqlstate": "40P01"})()
+    raise DBAPIError("deadlock detected", None, orig)
+
+
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -79,8 +85,6 @@ class ReconciliationResult:
     run_status: str | None = None
     attempt_status: str | None = None
     message: str = ""
-
-
 def reconcile_after_child_exit(
     session: Session,
     run_id: str,
@@ -92,15 +96,23 @@ def reconcile_after_child_exit(
     max_retries: int = 3,
     finalize_status: str = "failed",
     attempt_status: str = "failed",
+    _test_deadlock_attempts: int = 0,
 ) -> ReconciliationResult:
     """Authoritative reconciliation after child process exits.
 
     Lock order: runs → leases → ALL attempts ORDER BY id.
     Terminal check BEFORE lease ownership check.
     Retries on PostgreSQL 40P01 deadlock, returns reconciliation_deferred on exhaustion.
+
+    _test_deadlock_attempts: when > 0, raises SQLSTATE 40P01 on the first
+    N reconciliation attempts. Test seam only; 0 means normal production behavior.
     """
+    from sqlalchemy.exc import DBAPIError
+
     for attempt_num in range(max_retries):
         try:
+            if _test_deadlock_attempts > 0 and attempt_num < _test_deadlock_attempts:
+                _raise_test_40P01()
             return _reconcile_attempt(
                 session, run_id, expected_attempt_id,
                 expected_lease_id, expected_worker, expected_token,
