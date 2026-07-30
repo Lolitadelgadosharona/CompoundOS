@@ -367,12 +367,23 @@ class TestReconcileTerminalConsistent:
     def test_terminal_consistent_no_writes(self, db_session: Session) -> None:
         hid = _ensure_household(db_session)
         jid, sid = _create_schedule(db_session, hid)
-        rid, aid, lease = _create_run_and_lease(
-            db_session, hid, jid, "test-tc", run_status="completed")
-        # Override attempt status to succeeded
+        # Create run as pending, then directly set completed+succeeded
+        rid = create_run(db_session, job_definition_id=jid, schedule_id=None,
+            idempotency_key=f"tc-{uuid4().hex[:8]}", status="pending",
+            triggered_by="schedule", scheduled_at=datetime.now(UTC),
+            household_id=hid)
+        aid = create_attempt(db_session, run_id=rid, attempt_number=1)
+        start_run(db_session, rid)
+        start_attempt(db_session, aid)
+        lease = acquire_lease(db_session, run_id=rid, worker_id="test-tc")
+        db_session.commit()
+        # Directly set terminal state (bypassing immutability trigger via raw SQL at setup)
         db_session.execute(text(
             "UPDATE attempts SET status = 'succeeded', completed_at = NOW() WHERE id = :aid"
         ), {"aid": aid})
+        db_session.execute(text(
+            "UPDATE runs SET status = 'completed', completed_at = NOW() WHERE id = :rid"
+        ), {"rid": rid})
         db_session.execute(text(
             "UPDATE leases SET released_at = NOW() WHERE id = :lid"
         ), {"lid": lease["lease_id"]})
@@ -467,18 +478,20 @@ class TestReconcileDeferred40P01:
         db_url = db_session.get_bind().url.render_as_string(hide_password=False)
 
         import threading
-        barrier = threading.Barrier(2, timeout=10)
+        s2_ready = threading.Event()
+        s2_continue = threading.Event()
 
         def s2_worker():
             engine = create_engine(db_url)
             s = sessionmaker(bind=engine)()
             try:
-                # Lock leases FIRST (reverse of runs→leases)
                 s.execute(text(
                     "SELECT id FROM leases WHERE run_id = :rid FOR UPDATE"
                 ), {"rid": rid})
-                barrier.wait()
-                # Now try runs — creates deadlock with s1 which holds runs, wants leases
+                s2_ready.set()  # Signal: lease lock held
+                s2_continue.wait(timeout=10)  # Wait for reconcile to start
+                # Now try runs while reconcile holds runs and wants leases
+                # -> deadlock (40P01)
                 s.execute(text(
                     "SELECT id FROM runs WHERE id = :rid FOR UPDATE"
                 ), {"rid": rid})
@@ -490,10 +503,11 @@ class TestReconcileDeferred40P01:
 
         t = threading.Thread(target=s2_worker)
         t.start()
+        assert s2_ready.wait(timeout=10), "s2 did not acquire lease lock"
 
-        # s1: reconcile locks runs→leases. s2 holds leases.
-        # Deadlock on s1 wanting leases while s2 wants runs → 40P01
-        barrier.wait(timeout=10)
+        # Now reconcile_locks runs first, then tries leases which s2 holds
+        # Both want each other's lock -> 40P01
+        s2_continue.set()
 
         result = reconcile_after_child_exit(
             db_session, rid, aid, lease["lease_id"], "test-dl",
