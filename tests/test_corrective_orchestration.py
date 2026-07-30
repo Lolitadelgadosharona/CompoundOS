@@ -408,25 +408,23 @@ class TestReconcileDeferred40P01:
         rid, aid, lease = _create_run_lease(db_session, hid, jid, "wdl")
         db_url = db_session.get_bind().url.render_as_string(hide_password=False)
 
-        # Persistent reverse-locker: holds lease lock, biases PG kills towards
-        # reconcile by holding 2 locks (lease + dummy) vs reconcile's 1 (runs).
+        # Bounded reverse-locker: continuously re-acquires lease lock.
+        # Reconcile retries 3x, each blocked by lock → deadlock.
+        # deadlock_timeout=500ms on reconcile session accelerates detection.
         stop_flag = threading.Event()
-        blocker_ready = threading.Event()
+        ready = threading.Event()
         sqlstates = []
 
-        def persistent_blocker(rid_str):
-            cycles = 0
-            while not stop_flag.is_set() and cycles < 10:
+        def reverse_locker(rid_str):
+            while not stop_flag.is_set():
                 e = create_engine(db_url)
                 s = sessionmaker(bind=e)()
                 try:
                     s.execute(
-                        text(
-                            "SELECT id FROM leases WHERE run_id=:r FOR UPDATE"
-                        ),
+                        text("SELECT id FROM leases WHERE run_id=:r FOR UPDATE"),
                         {"r": rid_str},
                     )
-                    blocker_ready.set()
+                    ready.set()
                     s.execute(
                         text("SELECT id FROM runs WHERE id=:r FOR UPDATE"),
                         {"r": rid_str},
@@ -446,26 +444,29 @@ class TestReconcileDeferred40P01:
                 finally:
                     s.close()
                     e.dispose()
-                    cycles += 1
-                    time.sleep(0.1)
+                    if not stop_flag.is_set():
+                        time.sleep(0.02)
 
-        bt = threading.Thread(target=persistent_blocker, args=(rid,))
+        bt = threading.Thread(target=reverse_locker, args=(rid,))
         bt.start()
-        assert blocker_ready.wait(timeout=10), "blocker didn't acquire locks"
+        assert ready.wait(timeout=10), "reverse locker didn't acquire lock"
+
+        # Set short deadlock_timeout on reconcile session for fast detection
+        try:
+            db_session.execute(text("SET LOCAL deadlock_timeout = '500ms'"))
+        except Exception:
+            pass  # role may not permit; fall back to default 1s
 
         result = reconcile_after_child_exit(
-            db_session,
-            rid,
-            aid,
-            lease["lease_id"],
-            "wdl",
-            lease["fencing_token"],
-            max_retries=3,
+            db_session, rid, aid, lease["lease_id"], "wdl",
+            lease["fencing_token"], max_retries=3,
         )
         stop_flag.set()
         bt.join(timeout=10)
 
-        assert len(sqlstates) >= 1, f"No deadlocks observed: {sqlstates}" 
+        assert len(sqlstates) >= 1, (
+            f"Expected >=1 deadlock observations, got {len(sqlstates)}: {sqlstates}"
+        )
         assert result.outcome == "reconciliation_deferred", (
             f"Got {result.outcome}"
         )
