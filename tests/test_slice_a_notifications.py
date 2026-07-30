@@ -34,9 +34,11 @@ class TestEventTypeTemplates:
         assert "completed" not in NOTIFICATION_TEMPLATES["backup"]
         assert "failed" not in NOTIFICATION_TEMPLATES["backup"]
 
-    def test_committee_automation_unchanged(self) -> None:
-        assert "completed" in NOTIFICATION_TEMPLATES["committee"]
-        assert "failed" in NOTIFICATION_TEMPLATES["automation"]
+    def test_committee_automation_slice_b_keys(self) -> None:
+        # Slice B renamed: committee/completed → session_complete,
+        # automation/failed → run_failed per Technical Design §4
+        assert "session_complete" in NOTIFICATION_TEMPLATES["committee"]
+        assert "run_failed" in NOTIFICATION_TEMPLATES["automation"]
 
 
 class TestGuardianHTTPNotification:

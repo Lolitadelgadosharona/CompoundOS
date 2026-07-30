@@ -184,6 +184,8 @@ class OrchestrationWorker:
                 claimed += 1
                 # Dispatch Guardian notification after business commit
                 self._maybe_notify_guardian_worker(guardian_result, item)
+                # Dispatch Automation notification if run failed
+                self._maybe_notify_automation_worker(guardian_result)
             except Exception:
                 logger.exception("Failed schedule %s", item["schedule_id"])
         return claimed
@@ -332,6 +334,11 @@ class OrchestrationWorker:
         )
 
         session.commit()
+        # Return Guardian result for notification dispatch after parent commit
+        # (Sprint 008 Slice B — retained)
+        eval_status = result.get("evaluation_run", {}).get("status", "")
+        if is_guardian and eval_status.startswith(("completed", "skipped")):
+            return result
         return None
     @staticmethod
     def _maybe_notify_guardian_worker(guardian_result: dict | None, item: dict) -> None:
@@ -370,6 +377,37 @@ class OrchestrationWorker:
                 ns.close()
         except Exception:
             logger.warning("Guardian notification session unavailable", exc_info=True)
+
+    @staticmethod
+    def _maybe_notify_automation_worker(worker_result: dict | None) -> None:
+        """Dispatch Automation run_failed notification from worker after business commit."""
+        if worker_result is None or worker_result.get("finalize_status") != "failed":
+            return
+        run_id = worker_result.get("run_id", "")
+        household_id = worker_result.get("household_id", "")
+        if not run_id or not household_id:
+            return
+        try:
+            from uuid import UUID
+
+            from apps.api.database import SessionLocal
+            from apps.api.services.notification_service import dispatch_notification
+            ns = SessionLocal()
+            try:
+                dispatch_notification(
+                    ns, source="automation", event_type="run_failed",
+                    severity="warning",
+                    household_id=UUID(household_id),
+                    entity_id=run_id,
+                    context={"run_id": run_id},
+                )
+            except Exception:
+                ns.rollback()
+                logger.warning("Automation notification dispatch failed for run %s", run_id)
+            finally:
+                ns.close()
+        except Exception:
+            logger.warning("Automation notification session unavailable")
 
     # ── Graceful shutdown ──
 

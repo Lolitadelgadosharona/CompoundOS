@@ -59,13 +59,13 @@ NOTIFICATION_TEMPLATES: dict[str, dict[str, dict[str, str]]] = {
         },
     },
     "committee": {
-        "completed": {
+        "session_complete": {
             "title": "Committee Session Complete",
             "body": "AI Committee session finished. Review the Committee workspace.",
         },
     },
     "automation": {
-        "failed": {
+        "run_failed": {
             "title": "Automation Run Failed",
             "body": "An automation run has failed. Review automation logs.",
         },
