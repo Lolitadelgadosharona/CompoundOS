@@ -478,51 +478,49 @@ class TestReconcileDeferred40P01:
         db_url = db_session.get_bind().url.render_as_string(hide_password=False)
 
         import threading
-        barrier = threading.Barrier(2, timeout=15)
-        deadlock_count = [0]
+        deadlock_hits = [0]
+        stop = threading.Event()
 
         def persistent_blocker():
-            """Re-acquire lease lock after each deadlock kill."""
-            for _ in range(4):  # 3 retries + safety
-                engine = create_engine(db_url)
-                s = sessionmaker(bind=engine)()
+            """Continuously hold lease lock, re-acquiring after deadlocks."""
+            while not stop.is_set():
+                engine = create_engine(db_url, pool_pre_ping=True)
+                s = sessionmaker(bind=engine, expire_on_commit=False)()
                 try:
                     s.execute(text(
                         "SELECT id FROM leases WHERE run_id = :rid FOR UPDATE"
                     ), {"rid": rid})
-                    try:
-                        barrier.wait(timeout=10)
-                    except threading.BrokenBarrierError:
-                        pass
-                    # Now try runs — reconcile holds runs first
+                    # Try runs in reverse order — reconcile holds runs first
                     s.execute(text(
                         "SELECT id FROM runs WHERE id = :rid FOR UPDATE"
                     ), {"rid": rid})
                 except Exception:
                     s.rollback()
-                    deadlock_count[0] += 1
+                    deadlock_hits[0] += 1
                 finally:
-                    # Reset barrier for next round
                     try:
                         s.close()
                         engine.dispose()
                     except Exception:
                         pass
+                    time.sleep(0.05)  # Brief pause before re-acquiring
 
         t = threading.Thread(target=persistent_blocker)
         t.start()
+        # Give blocker time to acquire its first lease lock
+        time.sleep(0.3)
 
-        # 3 reconcile attempts, each deadlocks with the persistent blocker
         result = reconcile_after_child_exit(
             db_session, rid, aid, lease["lease_id"], "test-dl",
             lease["fencing_token"], max_retries=3)
 
-        t.join(timeout=10)
+        stop.set()
+        t.join(timeout=5)
 
         assert result.outcome == "reconciliation_deferred", (
             f"Expected reconciliation_deferred, got {result.outcome}")
         assert "40P01" in result.message
-        assert deadlock_count[0] >= 1, "At least one deadlock must be observed"
+        assert deadlock_hits[0] >= 1, "At least one deadlock must be observed"
         db_session.rollback()
 
 
