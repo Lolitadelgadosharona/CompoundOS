@@ -3,6 +3,11 @@
 Sprint 005 Slice B — process/transaction integrity closure.
 The Worker child calls this instead of the HTTP-facing Guardian service,
 so that lease validation and Guardian results are in ONE transaction.
+
+Sprint 005 Orchestration Corrective:
+- Phase A/B separation with explicit commit/rollback
+- runs→leases→ALL attempts lock order
+- _FencedError for proper rollback on lease loss
 """
 
 from __future__ import annotations
@@ -16,6 +21,14 @@ logger = __import__("logging").getLogger("orchestration.executor")
 
 Clock = Callable[[], datetime]
 MAX_RUNTIME_SECONDS = 300
+
+
+class _FencedError(Exception):
+    """Raised when lease validation fails during Phase B finalization.
+
+    Caught internally to trigger rollback + fenced result.
+    Never propagates outside _run_job_in_child.
+    """
 
 
 def _utc_now() -> datetime:
@@ -77,18 +90,11 @@ def _run_job_in_child(
 ) -> None:
     """Execute Guardian evaluation + lease-validated fenced commit.
 
-    CRITICAL ORDER (Sprint 005 Slice B corrective):
-    1. Evaluate Guardian FIRST (no lease lock — parent heartbeat can update)
-    2. Lock lease FOR UPDATE at final commit window
-    3. If lease missing/expired: rollback entire transaction
-    4. Finalize attempt + run + release lease → atomic COMMIT
-
-    The FOR UPDATE lock covers only the short finalization window, NOT
-    the long Guardian evaluation.  Parent heartbeat connections update the
-    same lease row freely during evaluation.
-
-    If marker_table/marker_key are provided, writes a test marker row
-    to demonstrate that an uncommitted row is rolled back on kill.
+    CORRECTED ORDER (Sprint 005 Orchestration Corrective):
+    1. Phase A: Guardian evaluation (NO orchestration locks)
+    2. Phase B: runs→leases→ALL attempts FOR UPDATE
+    3. If lease invalid: raise _FencedError → rollback
+    4. Finalize attempt + run + release lease → commit
     """
     from sqlalchemy import create_engine, text
     from sqlalchemy.orm import sessionmaker
@@ -97,104 +103,114 @@ def _run_job_in_child(
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
 
     try:
-        with session_factory() as session:
-            # Write test marker
-            if marker_table and marker_key:
-                try:
-                    session.execute(text(
-                        f"INSERT INTO {marker_table}"
-                        f" (id) VALUES (:id)"
-                        f" ON CONFLICT DO NOTHING"
-                    ), {"id": marker_key})
-                except Exception:
-                    pass
+        session = session_factory()
 
-            # Notify parent we've reached the blocking point
-            result_queue.put({"stage": "ready"})
-
-            # Single fenced transaction — lease lock at final window only
-            with session.begin():
-                # ── Phase 1: Guardian evaluation (NO lease lock) ──
-                # Parent heartbeat can freely UPDATE the lease row during
-                # this potentially long-running evaluation.
-                from datetime import date as _date
-
-                from apps.api.services.guardian import evaluate_core
-
-                result = evaluate_core(
-                    session,
-                    household_id=UUID(household_id),
-                    as_of_date=_date.today(),
-                    target_check_id=(
-                        UUID(job_params["check_id"])
-                        if job_type == "guardian.evaluate_one"
-                        else None
-                    ),
-                )
-
-                # ── Phase 2: Final commit window ──
-                # Lock lease with FOR UPDATE and validate with
-                # PostgreSQL clock_timestamp() — the definitive wall-clock
-                # at the instant of validation, not a transaction-start
-                # snapshot.  This correctly detects lease expiry even when
-                # the evaluation ran for a long time.
-                row = session.execute(text(
-                    "SELECT 1 FROM leases"
-                    " WHERE id = :lid AND worker_id = :wid"
-                    " AND fencing_token = :token"
-                    " AND released_at IS NULL"
-                    " AND expires_at > clock_timestamp()"
-                    " FOR UPDATE"
-                ), {
-                    "lid": lease_id, "wid": worker_id,
-                    "token": fencing_token,
-                }).fetchone()
-
-                if row is None:
-                    # Lease was taken over or expired during evaluation.
-                    # Rollback the entire transaction — zero Guardian
-                    # effects persist.
-                    result_queue.put({
-                        "status": "fenced",
-                        "error": "Lease lost before final commit window",
-                    })
-                    return
-
-                # ── Phase 3: Finalize Automation state ──
-                attempt_status = (
-                    "succeeded"
-                    if result.get("evaluation_run", {}).get("status", "").startswith(
-                        ("completed", "skipped"))
-                    else "failed"
-                )
+        if marker_table and marker_key:
+            try:
                 session.execute(text(
-                    "UPDATE attempts SET status = :st, completed_at = NOW(),"
-                    " error_message = :err WHERE id = :id"
-                ), {
-                    "id": attempt_id, "st": attempt_status,
-                    "err": result.get("error"),
-                })
+                    f"INSERT INTO {marker_table}"
+                    f" (id) VALUES (:id)"
+                    f" ON CONFLICT DO NOTHING"
+                ), {"id": marker_key})
+            except Exception:
+                pass
 
-                run_status = (
-                    "completed"
-                    if result.get("evaluation_run", {}).get("status", "").startswith(
-                        ("completed", "skipped"))
-                    else "failed"
-                )
-                session.execute(text(
-                    "UPDATE runs SET status = :st, completed_at = NOW()"
-                    " WHERE id = :id"
-                ), {"id": run_id, "st": run_status})
+        result_queue.put({"stage": "ready"})
 
-                # ── Phase 4: Release lease ──
-                session.execute(text(
-                    "UPDATE leases SET released_at = NOW()"
-                    " WHERE id = :lid AND worker_id = :wid"
-                    " AND fencing_token = :token"
-                ), {"lid": lease_id, "wid": worker_id, "token": fencing_token})
+        try:
+            # Phase A: Business operation (NO orchestration locks)
+            from datetime import date as _date
 
-            # Transaction committed atomically — all or nothing
+            from apps.api.services.guardian import evaluate_core
+
+            result = evaluate_core(
+                session,
+                household_id=UUID(household_id),
+                as_of_date=_date.today(),
+                target_check_id=(
+                    UUID(job_params["check_id"])
+                    if job_type == "guardian.evaluate_one"
+                    else None
+                ),
+            )
+
+            # Phase B: Short finalization window
+            # Lock order: runs → leases → ALL attempts ORDER BY id
+
+            # 1) runs FOR UPDATE
+            run_row = session.execute(text(
+                "SELECT id FROM runs WHERE id = :rid FOR UPDATE"
+            ), {"rid": run_id}).fetchone()
+            if run_row is None:
+                raise _FencedError("Run missing during finalization")
+
+            # 2) leases FOR UPDATE
+            lease_row = session.execute(text(
+                "SELECT 1 FROM leases"
+                " WHERE id = :lid AND worker_id = :wid"
+                " AND fencing_token = :token"
+                " AND released_at IS NULL"
+                " AND expires_at > clock_timestamp()"
+                " FOR UPDATE"
+            ), {
+                "lid": lease_id, "wid": worker_id,
+                "token": fencing_token,
+            }).fetchone()
+
+            if lease_row is None:
+                raise _FencedError("Lease lost before final commit window")
+
+            # 3) ALL attempts FOR UPDATE ORDER BY id
+            session.execute(text(
+                "SELECT id FROM attempts"
+                " WHERE run_id = :rid ORDER BY id FOR UPDATE"
+            ), {"rid": run_id})
+
+            # Finalize
+            attempt_status = (
+                "succeeded"
+                if result.get("evaluation_run", {}).get("status", "").startswith(
+                    ("completed", "skipped"))
+                else "failed"
+            )
+            session.execute(text(
+                "UPDATE attempts SET status = :st, completed_at = NOW(),"
+                " error_message = :err WHERE id = :id"
+            ), {
+                "id": attempt_id, "st": attempt_status,
+                "err": result.get("error"),
+            })
+
+            run_status = (
+                "completed"
+                if result.get("evaluation_run", {}).get("status", "").startswith(
+                    ("completed", "skipped"))
+                else "failed"
+            )
+            session.execute(text(
+                "UPDATE runs SET status = :st, completed_at = NOW()"
+                " WHERE id = :id"
+            ), {"id": run_id, "st": run_status})
+
+            session.execute(text(
+                "UPDATE leases SET released_at = NOW()"
+                " WHERE id = :lid AND worker_id = :wid"
+                " AND fencing_token = :token"
+            ), {"lid": lease_id, "wid": worker_id, "token": fencing_token})
+
+            session.commit()
             result_queue.put(result)
+
+        except _FencedError as e:
+            session.rollback()
+            result_queue.put({"status": "fenced", "error": str(e)})
+
+        except Exception:
+            session.rollback()
+            raise
+
+        finally:
+            session.close()
 
     except Exception as exc:
         try:
@@ -206,7 +222,7 @@ def _run_job_in_child(
 
 
 # ---------------------------------------------------------------------------
-# Timeout-enforcing executor (unchanged from reliability PR)
+# Timeout-enforcing executor
 # ---------------------------------------------------------------------------
 
 
@@ -267,7 +283,6 @@ class TimeoutJobExecutor:
                     "error": f"Max runtime {self.max_runtime}s exceeded"}
 
         try:
-            # Drain queue — first "ready" signal, then result
             for _ in range(2):
                 try:
                     msg = queue.get_nowait()

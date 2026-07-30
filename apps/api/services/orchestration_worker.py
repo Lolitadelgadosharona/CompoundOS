@@ -230,67 +230,108 @@ class OrchestrationWorker:
 
         lease = acquire_lease(session, run_id=run_id, worker_id=self.worker_id, clock=self._clock)
 
-        # Execute with timeout
+        # ── Sprint 005 Corrective: Pre-spawn commit ──
+        # Commit run/attempt/lease BEFORE spawning child so the child's
+        # independent database connection can see and lock them.
+        expected_lease_id = lease["lease_id"]
+        expected_token = lease["fencing_token"]
+        expected_worker = self.worker_id
+        expected_run_id = run_id
+        expected_attempt_id = aid
+
+        session.commit()
+
+        # Execute with timeout — child runs in independent process
         result = self._executor.execute(
             job_type=job_type,
             job_params=job_params,
             household_id=household_id,
             run_id=run_id,
             attempt_id=aid,
-            lease_id=lease["lease_id"],
-            worker_id=self.worker_id,
-            fencing_token=lease["fencing_token"],
+            lease_id=expected_lease_id,
+            worker_id=expected_worker,
+            fencing_token=expected_token,
         )
 
         is_guardian = job_type.startswith("guardian.")
 
-        # Determine final status from the result
-        if is_guardian and "evaluation_run" in result:
-            eval_status = result.get("evaluation_run", {}).get("status", "")
-            finalize_status = (
-                "completed" if eval_status.startswith(("completed", "skipped"))
-                else "failed"
-            )
-            is_timeout = False
-        else:
-            is_timeout = result.get("status") == "terminated"
-            finalize_status = "aborted" if is_timeout else (
-                "completed" if result.get("status") == "completed" else "failed"
-            )
+        # ── Sprint 005 Corrective: Authoritative reconciliation ──
+        # Child may have already finalized (committed run/attempt/lease).
+        # Re-read DB to determine what actually happened.
+        # Queue result is a signal, not authoritative.
 
-        # Finalize run (token-gated) — parent owns this for all job types
+        if is_guardian and "evaluation_run" in result:
+            # Child returned Guardian result — it successfully committed.
+            # DB is authoritative. Re-read to confirm terminal state.
+            # Parent does NOT finalize — child already did.
+            row = session.execute(text(
+                "SELECT r.status, a.status"
+                " FROM runs r JOIN attempts a ON a.run_id = r.id"
+                " WHERE r.id = :rid AND a.id = :aid"
+            ), {"rid": expected_run_id, "aid": expected_attempt_id}).fetchone()
+            if row and row[0] in ("completed", "failed", "aborted"):
+                return result
+            # Fall through: child result claims success but DB says otherwise
+            # → treat as non-completion (rare race condition)
+
+        # Child did NOT finalize — parent handles non-completion
+        is_timeout = result.get("status") == "terminated"
+        is_fenced = result.get("status") == "fenced"
+
+        if is_fenced:
+            # Child was fenced — DO NOT write anything.
+            # Lease was stolen or expired. Another worker or reaper owns it.
+            session.rollback()
+            return None
+
+        finalize_status = "aborted" if is_timeout else "failed"
+
+        # Verify parent still owns lease with expected credentials
+        lease_check = session.execute(text(
+            "SELECT 1 FROM leases"
+            " WHERE id = :lid AND worker_id = :wid"
+            " AND fencing_token = :token"
+            " AND released_at IS NULL"
+            " AND expires_at > clock_timestamp()"
+            " FOR UPDATE"
+        ), {
+            "lid": expected_lease_id,
+            "wid": expected_worker,
+            "token":expected_token}).fetchone()
+
+        if lease_check is None:
+            # Lease no longer ours — do not write
+            session.rollback()
+            return None
+
         fr = finalize_run(
             session,
-            run_id=run_id,
-            lease_id=lease["lease_id"],
-            worker_id=self.worker_id,
-            fencing_token=lease["fencing_token"],
+            run_id=expected_run_id,
+            lease_id=expected_lease_id,
+            worker_id=expected_worker,
+            fencing_token=expected_token,
             status=finalize_status,
             clock=self._clock,
         )
         if fr == 0:
-            logger.warning("Finalize failed — stale token for run %s", run_id)
-            complete_attempt(session, aid, "failed",
-                             error_message="Lease expired during execution",
-                             clock=self._clock)
+            # Stale token — do NOT fallback to writing attempt
+            session.rollback()
             return None
 
-        attempt_status = "succeeded" if finalize_status == "completed" else "failed"
-        complete_attempt(session, aid, attempt_status,
+        attempt_status = "aborted" if is_timeout else "failed"
+        complete_attempt(session, expected_attempt_id, attempt_status,
                          error_message=result.get("error") if not is_guardian else None,
                          clock=self._clock)
 
         release_lease(
             session,
-            lease_id=lease["lease_id"],
-            worker_id=self.worker_id,
-            fencing_token=lease["fencing_token"],
+            lease_id=expected_lease_id,
+            worker_id=expected_worker,
+            fencing_token=expected_token,
             clock=self._clock,
         )
 
-        # Return Guardian result for notification dispatch after parent commit
-        if is_guardian and finalize_status == "completed" and "evaluation_run" in result:
-            return result
+        session.commit()
         return None
     @staticmethod
     def _maybe_notify_guardian_worker(guardian_result: dict | None, item: dict) -> None:

@@ -336,9 +336,10 @@ def takeover_lease(
 
 
 _HEARTBEAT_SQL = (
-    "UPDATE leases SET heartbeat_at = :as_of"
+    "UPDATE leases SET heartbeat_at = clock_timestamp(),"
+    " expires_at = clock_timestamp() + INTERVAL '60 seconds'"
     " WHERE id = :lid AND worker_id = :wid AND fencing_token = :token"
-    " AND released_at IS NULL AND expires_at > :as_of"
+    " AND released_at IS NULL AND expires_at > clock_timestamp()"
 )
 
 
@@ -348,13 +349,15 @@ def heartbeat_lease(
     lease_id: str,
     worker_id: str,
     fencing_token: int,
-    clock: Any = None,
 ) -> int:
-    """Atomically heartbeat a lease. Returns rowcount (0 = stale/expired)."""
-    now = (clock or _utc_now)() if callable(clock) else clock or _utc_now()
+    """Atomically heartbeat a lease. Returns rowcount (0 = stale/expired).
+
+    Uses database clock_timestamp() for all time comparisons — no
+    application clock parameter. Extends expires_at on each heartbeat.
+    """
     result = session.execute(
         text(_HEARTBEAT_SQL),
-        {"lid": lease_id, "wid": worker_id, "token": fencing_token, "as_of": now},
+        {"lid": lease_id, "wid": worker_id, "token": fencing_token},
     )
     return result.rowcount
 
