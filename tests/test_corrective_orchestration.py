@@ -416,7 +416,7 @@ class TestReconcileTerminalConsistent:
             " VALUES (:id, :rid, 1, 'succeeded', :now)"
         ), {"id": aid, "rid": rid, "now": now})
         db_session.execute(text(
-            "INSERT INTO leases (id, run_id, worker_id, acquires_at, heartbeat_at,"
+            "INSERT INTO leases (id, run_id, worker_id, acquired_at, heartbeat_at,"
             " expires_at, released_at)"
             " VALUES (:id, :rid, 'test-w', :now, :now, :exp, :now)"
         ), {"id": lid, "rid": rid, "exp": now + timedelta(days=1), "now": now})
@@ -532,7 +532,7 @@ class TestReconcileDeferred40P01:
             " VALUES (:id, :rid, 1, 'running')"
         ), {"id": aid, "rid": rid})
         db_session.execute(text(
-            "INSERT INTO leases (id, run_id, worker_id, expires_at, acquires_at,"
+            "INSERT INTO leases (id, run_id, worker_id, expires_at, acquired_at,"
             " heartbeat_at)"
             " VALUES (:id, :rid, 'test-dl', :exp, :now, :now)"
         ), {"id": lid, "rid": rid, "exp": now + timedelta(hours=1), "now": now})
@@ -669,7 +669,7 @@ class TestExpectedAttemptMissing:
             " VALUES (:id, :jid, NULL, :ik, 'running', 'schedule', :now, :hid)"
         ), {"id": rid, "jid": jid, "ik": f"em-{uuid4().hex[:8]}", "hid": hid, "now": now})
         db_session.execute(text(
-            "INSERT INTO leases (id, run_id, worker_id, expires_at, acquires_at,"
+            "INSERT INTO leases (id, run_id, worker_id, expires_at, acquired_at,"
             " heartbeat_at)"
             " VALUES (:id, :rid, 'test-em', :exp, :now, :now)"
         ), {"id": lid, "rid": rid, "exp": now + timedelta(hours=1), "now": now})
@@ -707,9 +707,9 @@ class TestGuardianPhaseBDeadlockReal:
         lease = acquire_lease(db_session, run_id=rid, worker_id="test-gd")
         db_session.commit()
 
-        call_count = multiprocessing.Value("i", 0)
-
         ctx = multiprocessing.get_context("spawn")
+        manager = ctx.Manager()
+        call_count = manager.Value("i", 0)
         q = ctx.Queue()
         db_url = db_session.get_bind().url.render_as_string(hide_password=False)
 

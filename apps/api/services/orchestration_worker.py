@@ -477,6 +477,11 @@ class OrchestrationWorker:
         eval_status = result.get("evaluation_run", {}).get("status", "")
         if is_guardian and eval_status.startswith(("completed", "skipped")):
             return result
+        # Sprint 008 Slice B: return failure info for automation notification
+        if finalize_status == "failed":
+            return {"run_id": str(expected_run_id),
+                    "household_id": str(household_id),
+                    "finalize_status": "failed"}
         return None
 
     @staticmethod
