@@ -47,6 +47,16 @@ logger = logging.getLogger("orchestration.worker")
 Clock = Callable[[], datetime]
 
 
+def _get_sqlstate(exc: DBAPIError) -> str:
+    """Extract SQLSTATE from a DBAPIError using the driver's pgcode."""
+    orig = getattr(exc, "orig", None)
+    if orig is not None:
+        code = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
+        if code:
+            return str(code)
+    return ""
+
+
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -98,7 +108,8 @@ def reconcile_after_child_exit(
             )
         except DBAPIError as e:
             session.rollback()
-            if "deadlock" in str(e).lower() or "40P01" in str(e):
+            sqlstate = _get_sqlstate(e)
+            if sqlstate == "40P01":
                 if attempt_num == max_retries - 1:
                     return ReconciliationResult(
                         "reconciliation_deferred",
@@ -434,6 +445,7 @@ class OrchestrationWorker:
 
         is_guardian = job_type.startswith("guardian.")
         if is_guardian and "evaluation_run" in result:
+            # Child successfully committed — DB is authoritative
             row = session.execute(text(
                 "SELECT r.status, a.status FROM runs r"
                 " JOIN attempts a ON a.run_id = r.id"
@@ -448,39 +460,27 @@ class OrchestrationWorker:
             session.rollback()
             return None
 
-        is_success = result.get("status") == "completed"
         finalize_status = "aborted" if is_timeout else (
-            "completed" if is_success else "failed")
-        lease_check = session.execute(text(
-            "SELECT 1 FROM leases WHERE id = :lid AND worker_id = :wid"
-            " AND fencing_token = :token AND released_at IS NULL"
-            " AND expires_at > clock_timestamp() FOR UPDATE"
-        ), {"lid": expected_lease_id, "wid": expected_worker,
-            "token": expected_token}).fetchone()
-        if lease_check is None:
-            session.rollback()
+            "completed" if result.get("status") == "completed" else "failed")
+        attempt_status = "aborted" if is_timeout else (
+            "succeeded" if result.get("status") == "completed" else "failed")
+
+        # ── Production reconciliation: replace duplicate logic ──
+        rec_result = reconcile_after_child_exit(
+            session, expected_run_id, expected_attempt_id,
+            expected_lease_id, expected_worker, expected_token,
+            finalize_status=finalize_status,
+            attempt_status=attempt_status,
+        )
+        if rec_result.outcome == "not_owner":
             return None
 
-        fr = finalize_run(session, run_id=expected_run_id,
-            lease_id=expected_lease_id, worker_id=expected_worker,
-            fencing_token=expected_token,status=finalize_status, clock=self._clock)
-        if fr == 0:
-            session.rollback()
-            return None
-
-        attempt_status2 = "aborted" if is_timeout else ("succeeded" if is_success else "failed")
-        complete_attempt(session, expected_attempt_id, attempt_status2,
-            error_message=result.get("error") if not is_guardian else None,
-            clock=self._clock)
-        release_lease(session, lease_id=expected_lease_id,
-            worker_id=expected_worker, fencing_token=expected_token,
-            clock=self._clock)
         session.commit()
         eval_status = result.get("evaluation_run", {}).get("status", "")
         if is_guardian and eval_status.startswith(("completed", "skipped")):
             return result
-        # Sprint 008 Slice B: return failure info for non-guardian failures
-        if not is_guardian and finalize_status == "failed":
+        # Sprint 008 Slice B: return failure info for failed runs
+        if finalize_status == "failed":
             return {"run_id": str(expected_run_id),
                     "household_id": str(household_id),
                     "finalize_status": "failed"}
