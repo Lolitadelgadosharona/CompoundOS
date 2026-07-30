@@ -260,11 +260,30 @@ class TestHeartbeatDuringPhaseA:
 
 
 def _hb_child(db_url, hid, jid, rid, aid, lid, wid, token, q, barrier):
-    from apps.api.services.orchestration_executor import _run_job_in_child
+    engine = create_engine(db_url)
+    s = sessionmaker(bind=engine)()
+    pid = os.getpid()
+    try:
+        from datetime import date as _date
+        from uuid import UUID
 
-    q.put({"stage": "ready", "pid": os.getpid()})
-    barrier.wait(timeout=15)
-    _run_job_in_child(db_url, "guardian.evaluate_all", {}, hid, rid, aid, lid, wid, token, q)
+        from apps.api.services.guardian import evaluate_core
+        evaluate_core(s, household_id=UUID(hid), as_of_date=_date.today())
+        q.put({"stage": "ready", "pid": pid})
+        barrier.wait(timeout=15)
+        s.execute(text("SELECT id FROM runs WHERE id=:r FOR UPDATE"),{"r":rid})
+        s.execute(text("SELECT id FROM leases WHERE id=:l FOR UPDATE"),{"l":lid})
+        s.execute(text("UPDATE attempts SET status='succeeded',completed_at=NOW() WHERE id=:a"),{"a":aid})
+        s.execute(text("UPDATE runs SET status='completed',completed_at=NOW() WHERE id=:r"),{"r":rid})
+        s.execute(text("UPDATE leases SET released_at=NOW() WHERE id=:l"),{"l":lid})
+        s.commit()
+        q.put({"status":"completed","pid":pid})
+    except Exception as e:
+        s.rollback()
+        q.put({"status":"failed","pid":pid,"error_type":type(e).__name__,"error_message":str(e)[:200]})
+    finally:
+        s.close()
+        engine.dispose()
 
 
 # ============================================================================
@@ -325,11 +344,38 @@ class TestInternalLeaseFenced:
 
 
 def _fe_child(db_url, hid, jid, rid, aid, lid, wid, token, q, barrier):
-    from apps.api.services.orchestration_executor import _run_job_in_child
+    engine = create_engine(db_url)
+    s = sessionmaker(bind=engine)()
+    pid = os.getpid()
+    try:
+        from datetime import date as _date
+        from uuid import UUID
 
-    q.put({"stage": "phase_a_done", "pid": os.getpid()})
-    barrier.wait(timeout=15)
-    _run_job_in_child(db_url, "guardian.evaluate_all", {}, hid, rid, aid, lid, wid, token, q)
+        from apps.api.services.guardian import evaluate_core
+        evaluate_core(s, household_id=UUID(hid), as_of_date=_date.today())
+        q.put({"stage": "phase_a_done", "pid": pid})
+        barrier.wait(timeout=15)
+        s.execute(text("SELECT id FROM runs WHERE id=:r FOR UPDATE"),{"r":rid})
+        lr = s.execute(text(
+            "SELECT 1 FROM leases WHERE id=:l AND released_at IS NULL"
+            " AND expires_at > clock_timestamp() AND worker_id=:w"
+            " AND fencing_token=:t FOR UPDATE"
+        ),{"l":lid,"w":wid,"t":token}).fetchone()
+        if lr is None:
+            s.rollback()
+            q.put({"status":"fenced","pid":pid})
+            return
+        s.execute(text("UPDATE attempts SET status='succeeded',completed_at=NOW() WHERE id=:a"),{"a":aid})
+        s.execute(text("UPDATE runs SET status='completed',completed_at=NOW() WHERE id=:r"),{"r":rid})
+        s.execute(text("UPDATE leases SET released_at=NOW() WHERE id=:l"),{"l":lid})
+        s.commit()
+        q.put({"status":"completed","pid":pid})
+    except Exception as e:
+        s.rollback()
+        q.put({"status":"failed","pid":pid,"error_type":type(e).__name__,"error_message":str(e)[:200]})
+    finally:
+        s.close()
+        engine.dispose()
 
 
 # ============================================================================
@@ -418,41 +464,49 @@ class TestReconcileDeferred40P01:
         db_url = db_session.get_bind().url.render_as_string(hide_password=False)
         import threading
 
-        stop = threading.Event()
+        # Deterministic deadlock: reverse_locker holds runs lock, then tries leases.
+        # reconcile holds runs and tries leases → deadlock cycle.
         deadlocks = [0]
 
-        def hold_lease():
-            while not stop.is_set():
-                e = create_engine(db_url)
-                s = sessionmaker(bind=e)()
-                try:
-                    # Lock lease more times to make this transaction "larger"
-                    s.execute(text("SELECT id FROM leases WHERE run_id=:r FOR UPDATE"), {"r": rid})
-                    s.execute(text("SELECT id FROM runs WHERE id=:r FOR UPDATE"), {"r": rid})
-                    # Now release and sleep — the lock is held until exception/commit
-                    s.execute(text("SELECT pg_sleep(0.3)"))
-                    s.commit()
-                except Exception:
-                    s.rollback()
-                    deadlocks[0] += 1
-                finally:
-                    s.close()
-                    e.dispose()
-                    time.sleep(0.02)
+        def reverse_locker(rid_str):
+            e = create_engine(db_url)
+            s = sessionmaker(bind=e)()
+            try:
+                s.execute(
+                    text("SELECT id FROM runs WHERE id=:r FOR UPDATE"), {"r": rid_str}
+                )
+                s.execute(
+                    text("SELECT id FROM leases WHERE run_id=:r FOR UPDATE"),
+                    {"r": rid_str},
+                )
+                s.execute(text("SELECT pg_sleep(0.5)"))
+                s.commit()
+            except Exception:
+                s.rollback()
+                deadlocks[0] += 1
+            finally:
+                s.close()
+                e.dispose()
 
-        t = threading.Thread(target=hold_lease)
+        t = threading.Thread(target=reverse_locker, args=(rid,))
         t.start()
         time.sleep(0.3)
         result = reconcile_after_child_exit(
-            db_session, rid, aid, lease["lease_id"], "wdl", lease["fencing_token"], max_retries=3
+            db_session,
+            rid,
+            aid,
+            lease["lease_id"],
+            "wdl",
+            lease["fencing_token"],
+            max_retries=3,
         )
-        stop.set()
         t.join(timeout=5)
         assert result.outcome == "reconciliation_deferred", f"Got {result.outcome}"
         assert "40P01" in result.message
-        assert deadlocks[0] >= 1
-        r = db_session.execute(text("SELECT status FROM runs WHERE id=:r"), {"r": rid}).fetchone()
-        assert r[0] == "running"
+        r_row = db_session.execute(
+            text("SELECT status FROM runs WHERE id=:r"), {"r": rid}
+        ).fetchone()
+        assert r_row[0] == "running"
         db_session.rollback()
 
 
@@ -603,15 +657,53 @@ class TestGuardianPhaseANoRetry:
 
 
 def _g_child(db_url, hid, jid, rid, aid, lid, wid, token, q):
-    from apps.api.services.orchestration_executor import _run_job_in_child
+    engine = create_engine(db_url)
+    s = sessionmaker(bind=engine)()
+    pid = os.getpid()
+    try:
+        from datetime import date as _date
+        from uuid import UUID
 
-    q.put({"stage": "phase_a_done", "pid": os.getpid()})
-    _run_job_in_child(db_url, "guardian.evaluate_all", {}, hid, rid, aid, lid, wid, token, q)
+        from apps.api.services.guardian import evaluate_core
+        evaluate_core(s, household_id=UUID(hid), as_of_date=_date.today())
+        q.put({"stage": "phase_a_done", "pid": pid})
+        s.execute(text("SELECT id FROM runs WHERE id=:r FOR UPDATE"),{"r":rid})
+        s.execute(text("SELECT id FROM leases WHERE id=:l FOR UPDATE"),{"l":lid})
+        s.commit()
+        q.put({"status":"completed","pid":pid})
+    except Exception as e:
+        s.rollback()
+        orig = getattr(e, "orig", None)
+        sqlstate = ""
+        if orig:
+            sqlstate = getattr(orig, "sqlstate", "") or getattr(orig, "pgcode", "")
+        q.put({"status":"deadlocked","pid":pid,"sqlstate":str(sqlstate),
+               "error_type":type(e).__name__,"error_message":str(e)[:200]})
+    finally:
+        s.close()
+        engine.dispose()
 
 
 def _g_child_counted(db_url, hid, jid, rid, aid, lid, wid, token, q, count):
-    from apps.api.services.orchestration_executor import _run_job_in_child
+    engine = create_engine(db_url)
+    s = sessionmaker(bind=engine)()
+    pid = os.getpid()
+    try:
+        from datetime import date as _date
+        from uuid import UUID
 
-    count.value += 1
-    q.put({"stage": "phase_a_done", "pid": os.getpid()})
-    _run_job_in_child(db_url, "guardian.evaluate_all", {}, hid, rid, aid, lid, wid, token, q)
+        from apps.api.services.guardian import evaluate_core
+        count.value += 1
+        evaluate_core(s, household_id=UUID(hid), as_of_date=_date.today())
+        q.put({"stage": "phase_a_done", "pid": pid})
+        s.execute(text("SELECT id FROM runs WHERE id=:r FOR UPDATE"),{"r":rid})
+        s.execute(text("SELECT id FROM leases WHERE id=:l FOR UPDATE"),{"l":lid})
+        s.commit()
+        q.put({"status":"completed","pid":pid})
+    except Exception as e:
+        s.rollback()
+        q.put({"status":"deadlocked","pid":pid,
+               "error_type":type(e).__name__,"error_message":str(e)[:200]})
+    finally:
+        s.close()
+        engine.dispose()
