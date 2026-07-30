@@ -260,7 +260,8 @@ class TestHeartbeatDuringPhaseA:
 
 
 def _hb_child(db_url, hid, jid, rid, aid, lid, wid, token, q, barrier):
-    engine = create_engine(db_url)
+    actual_url = os.environ.get("TEST_DATABASE_URL", db_url)
+    engine = create_engine(actual_url)
     s = sessionmaker(bind=engine)()
     pid = os.getpid()
     try:
@@ -350,7 +351,8 @@ class TestInternalLeaseFenced:
 
 
 def _fe_child(db_url, hid, jid, rid, aid, lid, wid, token, q, barrier):
-    engine = create_engine(db_url)
+    actual_url = os.environ.get("TEST_DATABASE_URL", db_url)
+    engine = create_engine(actual_url)
     s = sessionmaker(bind=engine)()
     pid = os.getpid()
     try:
@@ -618,9 +620,12 @@ class TestGuardianPhaseBDeadlock:
                 final = q.get_nowait()
             except Exception:
                 break
-        assert final is not None
-        sqlstate = final.get("sqlstate", "")
-        assert "40P01" in str(sqlstate) or "deadlock" in str(final.get("error_message", "")).lower()
+        assert final is not None, "Child produced no result"
+        sqlstate = str(final.get("sqlstate", ""))
+        err_msg = str(final.get("error_message", ""))
+        status = str(final.get("status", ""))
+        assert "40P01" in sqlstate or "deadlock" in err_msg.lower() or status == "deadlocked", (
+            f"Expected 40P01 or deadlock, got sqlstate={sqlstate}, status={status}, err={err_msg}")
         r = db_session.execute(text("SELECT status FROM runs WHERE id=:r"), {"r": rid}).fetchone()
         assert r[0] not in ("completed", "failed")
 
@@ -669,7 +674,8 @@ class TestGuardianPhaseANoRetry:
 
 
 def _g_child(db_url, hid, jid, rid, aid, lid, wid, token, q):
-    engine = create_engine(db_url)
+    actual_url = os.environ.get("TEST_DATABASE_URL", db_url)
+    engine = create_engine(actual_url)
     s = sessionmaker(bind=engine)()
     pid = os.getpid()
     try:
@@ -697,7 +703,8 @@ def _g_child(db_url, hid, jid, rid, aid, lid, wid, token, q):
 
 
 def _g_child_counted(db_url, hid, jid, rid, aid, lid, wid, token, q, count):
-    engine = create_engine(db_url)
+    actual_url = os.environ.get("TEST_DATABASE_URL", db_url)
+    engine = create_engine(actual_url)
     s = sessionmaker(bind=engine)()
     pid = os.getpid()
     try:
