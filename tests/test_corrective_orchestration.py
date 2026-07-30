@@ -373,11 +373,19 @@ class TestRunningTakeover:
         lease = acquire_lease(db_session, run_id=rid, worker_id="original-worker")
         db_session.commit()
 
-        # Another worker takes over
-        takeover_lease(
+        # Force lease to expire so takeover can succeed
+        db_session.execute(text(
+            "UPDATE leases SET expires_at = :past WHERE id = :lid"
+        ), {"past": datetime.now(UTC) - timedelta(seconds=10),
+            "lid": lease["lease_id"]})
+        db_session.commit()
+
+        # Another worker takes over the expired lease
+        new_token = takeover_lease(
             db_session, lease_id=lease["lease_id"],
             worker_id="new-worker", base_token=lease["fencing_token"],
         )
+        assert new_token is not None, "Takeover should succeed on expired lease"
         db_session.commit()
 
         row = db_session.execute(text(
@@ -557,13 +565,21 @@ class TestFinalizeRunNoFallback:
         old_token = lease["fencing_token"]
         db_session.commit()
 
-        # Takeover: another worker steals the lease
-        takeover_lease(
+        # Force lease to expire so takeover can succeed
+        db_session.execute(text(
+            "UPDATE leases SET expires_at = :past WHERE id = :lid"
+        ), {"past": datetime.now(UTC) - timedelta(seconds=10),
+            "lid": lease["lease_id"]})
+        db_session.commit()
+
+        # Takeover: another worker steals the expired lease
+        new_token = takeover_lease(
             db_session,
             lease_id=lease["lease_id"],
             worker_id="new-owner",
             base_token=old_token,
         )
+        assert new_token is not None, "Takeover should succeed"
         db_session.commit()
 
         # Old owner tries to finalize with stale token
@@ -620,7 +636,7 @@ class TestExpectedAttemptMissing:
         nonexistent_aid = str(uuid4())
 
         # Query with explicit error contract: must raise, not return None silently
-        with pytest.raises(ValueError, match="expected attempt.*not found"):
+        with pytest.raises(ValueError, match="Expected attempt.*not found"):
             row = db_session.execute(text(
                 "SELECT a.status FROM attempts a"
                 " JOIN runs r ON r.id = a.run_id"
