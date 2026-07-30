@@ -273,8 +273,14 @@ def _hb_child(db_url, hid, jid, rid, aid, lid, wid, token, q, barrier):
         barrier.wait(timeout=15)
         s.execute(text("SELECT id FROM runs WHERE id=:r FOR UPDATE"),{"r":rid})
         s.execute(text("SELECT id FROM leases WHERE id=:l FOR UPDATE"),{"l":lid})
-        s.execute(text("UPDATE attempts SET status='succeeded',completed_at=NOW() WHERE id=:a"),{"a":aid})
-        s.execute(text("UPDATE runs SET status='completed',completed_at=NOW() WHERE id=:r"),{"r":rid})
+        s.execute(
+                text("UPDATE attempts SET status='succeeded',completed_at=NOW() WHERE id=:a"),
+                {"a": aid},
+            )
+        s.execute(
+                text("UPDATE runs SET status='completed',completed_at=NOW() WHERE id=:r"),
+                {"r": rid},
+            )
         s.execute(text("UPDATE leases SET released_at=NOW() WHERE id=:l"),{"l":lid})
         s.commit()
         q.put({"status":"completed","pid":pid})
@@ -365,8 +371,14 @@ def _fe_child(db_url, hid, jid, rid, aid, lid, wid, token, q, barrier):
             s.rollback()
             q.put({"status":"fenced","pid":pid})
             return
-        s.execute(text("UPDATE attempts SET status='succeeded',completed_at=NOW() WHERE id=:a"),{"a":aid})
-        s.execute(text("UPDATE runs SET status='completed',completed_at=NOW() WHERE id=:r"),{"r":rid})
+        s.execute(
+                text("UPDATE attempts SET status='succeeded',completed_at=NOW() WHERE id=:a"),
+                {"a": aid},
+            )
+        s.execute(
+                text("UPDATE runs SET status='completed',completed_at=NOW() WHERE id=:r"),
+                {"r": rid},
+            )
         s.execute(text("UPDATE leases SET released_at=NOW() WHERE id=:l"),{"l":lid})
         s.commit()
         q.put({"status":"completed","pid":pid})
