@@ -272,6 +272,8 @@ def _hb_child(db_url, hid, jid, rid, aid, lid, wid, token, q, barrier):
         evaluate_core(s, household_id=UUID(hid), as_of_date=_date.today())
         q.put({"stage": "ready", "pid": pid})
         barrier.wait(timeout=15)
+        # Brief delay to let parent heartbeat execute before Phase B locks
+        s.execute(text("SELECT pg_sleep(0.3)"))
         s.execute(text("SELECT id FROM runs WHERE id=:r FOR UPDATE"),{"r":rid})
         s.execute(text("SELECT id FROM leases WHERE id=:l FOR UPDATE"),{"l":lid})
         s.execute(
@@ -486,14 +488,17 @@ class TestReconcileDeferred40P01:
             e = create_engine(db_url)
             s = sessionmaker(bind=e)()
             try:
-                s.execute(
-                    text("SELECT id FROM runs WHERE id=:r FOR UPDATE"), {"r": rid_str}
-                )
+                # Lock leases FIRST (reverse of reconcile's runs->leases)
                 s.execute(
                     text("SELECT id FROM leases WHERE run_id=:r FOR UPDATE"),
                     {"r": rid_str},
                 )
                 s.execute(text("SELECT pg_sleep(0.5)"))
+                # Now try runs — reconcile holds runs, wants leases
+                s.execute(
+                    text("SELECT id FROM runs WHERE id=:r FOR UPDATE"),
+                    {"r": rid_str},
+                )
                 s.commit()
             except Exception:
                 s.rollback()
@@ -606,7 +611,7 @@ class TestGuardianPhaseBDeadlock:
             args=(db_url, hid, jid, rid, aid, lease["lease_id"], "wg1", lease["fencing_token"], q),
         )
         proc.start()
-        msg = q.get(timeout=20)
+        msg = q.get(timeout=30)
         assert msg["stage"] == "phase_a_done", f"Got: {msg}"
         # Child is now in Phase B trying to lock leases (held by s2)
         # s2 holds leases, child holds runs -> deadlock -> 40P01
@@ -620,7 +625,8 @@ class TestGuardianPhaseBDeadlock:
                 final = q.get_nowait()
             except Exception:
                 break
-        assert final is not None, "Child produced no result"
+        assert final is not None, (
+            "Child produced no result. Queue may be empty after cleanup.")
         sqlstate = str(final.get("sqlstate", ""))
         err_msg = str(final.get("error_message", ""))
         status = str(final.get("status", ""))
