@@ -169,14 +169,20 @@ class TestProductionLockOrder:
         db_url = db_session.get_bind().url.render_as_string(hide_password=False)
         e2 = create_engine(db_url)
         s2 = sessionmaker(bind=e2)()
+        import sqlalchemy.exc
         try:
             s2.execute(text("SET lock_timeout='1s'"))
             s2.execute(
                 text("SELECT id FROM attempts WHERE run_id=:r FOR UPDATE NOWAIT"),
                 {"r": rid},
             )
-        except Exception as ex:
-            assert "could not obtain" in str(ex).lower() or "lock" in str(ex).lower()
+            pytest.fail("NOWAIT should block — lock was not held")
+        except sqlalchemy.exc.OperationalError as ex:
+            orig = getattr(ex, "orig", None)
+            code = ""
+            if orig:
+                code = str(getattr(orig, "sqlstate", "") or getattr(orig, "pgcode", ""))
+            assert code == "55P03", f"Expected 55P03, got {code}: {ex}"
         finally:
             s2.rollback()
             s2.close()
@@ -203,6 +209,7 @@ class TestAllAttemptsLocked:
         db_url = db_session.get_bind().url.render_as_string(hide_password=False)
         e2 = create_engine(db_url)
         s2 = sessionmaker(bind=e2)()
+        import sqlalchemy.exc
         try:
             s2.execute(text("SET lock_timeout='1s'"))
             s2.execute(
@@ -211,9 +218,13 @@ class TestAllAttemptsLocked:
                 ),
                 {"r": rid},
             )
-            pytest.fail("NOWAIT should block")
-        except Exception:
-            pass
+            pytest.fail("NOWAIT should block — all attempts should be locked")
+        except sqlalchemy.exc.OperationalError as ex:
+            orig = getattr(ex, "orig", None)
+            code = ""
+            if orig:
+                code = str(getattr(orig, "sqlstate", "") or getattr(orig, "pgcode", ""))
+            assert code == "55P03", f"Expected 55P03, got {code}: {ex}"
         finally:
             s2.rollback()
             s2.close()
@@ -481,6 +492,25 @@ class TestStaleOwnershipReconciliation:
             {"l": lease["lease_id"]},
         ).fetchone()
         assert lr[0] is None
+        db_session.rollback()
+
+
+# ============================================================================
+# Test 10 — expected attempt missing
+# ============================================================================
+
+
+@pytest.mark.postgres
+class TestExpectedAttemptMissing:
+    def test_missing_attempt(self, db_session: Session) -> None:
+        hid = _ensure_household(db_session)
+        jid, sid = _create_schedule(db_session, hid)
+        rid, aid, lease = _create_run_lease(db_session, hid, jid, "wem")
+        with pytest.raises(ValueError, match="Expected attempt.*not found"):
+            reconcile_after_child_exit(
+                db_session, rid, str(uuid4()), lease["lease_id"], "wem",
+                lease["fencing_token"],
+            )
         db_session.rollback()
 
 
