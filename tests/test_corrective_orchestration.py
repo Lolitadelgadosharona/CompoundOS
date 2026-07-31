@@ -520,6 +520,7 @@ class TestExpectedAttemptMissing:
 # ============================================================================
 
 
+@pytest.mark.postgres
 class TestGuardianPhaseBDeadlock:
     def test_phase_b_deadlock_rollback(self, db_session: Session) -> None:
         hid = _ensure_household(db_session)
@@ -605,76 +606,75 @@ class TestGuardianPhaseBDeadlock:
                 f" and blocked by {blocker_pid}"
             )
 
-        # 3. Launch async reverse run-lock request in a thread
-        # This lets us observe BOTH directions of pg_blocking_pids
-        reverse_ready = threading.Event()
-        reverse_result = {"sqlstate": "", "done": False}
+        # 3. s2 directly requests run lock → deadlock with child.
+        # A polling thread captures bidirectional pg_blocking_pids.
+        blocking_evidence = {"child_blockers": [], "reverse_blockers": [], "done": False}
 
-        def _async_reverse():
+        def _poll_blocking():
             e = create_engine(actual_url)
             s = sessionmaker(bind=e)()
             try:
-                s.execute(text("SET statement_timeout = '20s'"))
-                # Already holds lease lock from s2
-                reverse_ready.set()
-                s.execute(
-                    text("SELECT id FROM runs WHERE id=:r FOR UPDATE"), {"r": rid}
-                )
-                s.commit()
-            except Exception as exc:
-                s.rollback()
-                orig = getattr(exc, "orig", None)
-                if orig:
-                    reverse_result["sqlstate"] = str(
-                        getattr(orig, "sqlstate", "") or getattr(orig, "pgcode", "")
-                    )
+                s.execute(text("SET statement_timeout = '30s'"))
+                deadline = time.time() + 5
+                while time.time() < deadline and not blocking_evidence["done"]:
+                    s.rollback()
+                    cb = s.execute(
+                        text("SELECT unnest(pg_blocking_pids(:bp))"), {"bp": backend_pid}
+                    ).fetchall()
+                    rb = s.execute(
+                        text("SELECT unnest(pg_blocking_pids(:bp))"), {"bp": blocker_pid}
+                    ).fetchall()
+                    blocking_evidence["child_blockers"] = [r[0] for r in cb]
+                    blocking_evidence["reverse_blockers"] = [r[0] for r in rb]
+                    if (blocking_evidence["child_blockers"]
+                            and blocking_evidence["reverse_blockers"]):
+                        blocking_evidence["done"] = True
+                        break
+                    time.sleep(0.05)
             finally:
                 s.close()
                 e.dispose()
-                reverse_result["done"] = True
 
-        rt = threading.Thread(target=_async_reverse)
-        rt.start()
-        assert reverse_ready.wait(timeout=10), "async reverse not ready"
+        pt = threading.Thread(target=_poll_blocking)
+        pt.start()
 
-        # 4. Observe BOTH directions of pg_blocking_pids before resolution
-        time.sleep(0.3)  # give async query time to begin blocking on child
-        s_obs.rollback()
-        child_blockers = s_obs.execute(
-            text("SELECT unnest(pg_blocking_pids(:bp))"),
-            {"bp": backend_pid},
-        ).fetchall()
-        reverse_blockers = s_obs.execute(
-            text("SELECT unnest(pg_blocking_pids(:bp))"),
-            {"bp": blocker_pid},
-        ).fetchall()
+        reverse_sqlstate = ""
+        try:
+            s2.execute(
+                text("SELECT id FROM runs WHERE id=:r FOR UPDATE"), {"r": rid}
+            )
+        except Exception as exc:
+            s2.rollback()
+            orig = getattr(exc, "orig", None)
+            if orig:
+                reverse_sqlstate = str(
+                    getattr(orig, "sqlstate", "") or getattr(orig, "pgcode", "")
+                )
 
-        child_blocker_list = [r[0] for r in child_blockers]
-        reverse_blocker_list = [r[0] for r in reverse_blockers]
+        blocking_evidence["done"] = True
+        pt.join(timeout=5)
 
-        # Wait for deadlock resolution
-        rt.join(timeout=15)
-
-        # Both directions observed (at least one must show reciprocal blocking)
-        assert blocker_pid in child_blocker_list or backend_pid in reverse_blocker_list, (
-            f"No deadlock observed. Child blockers: {child_blocker_list},"
-            f" Reverse blockers: {reverse_blocker_list}"
+        assert blocker_pid in blocking_evidence["child_blockers"], (
+            f"Child not blocked by reverse. Child blockers: {blocking_evidence['child_blockers']}"
+        )
+        rbl = blocking_evidence['reverse_blockers']
+        assert backend_pid in rbl, (
+            f"Reverse not blocked by child. Reverse blockers: {rbl}"
         )
 
-        # 5. Collect final child diagnostic BEFORE cleanup
-        final = None
-        while True:
-            try:
-                final = q.get_nowait()
-            except Empty:
-                break
-
+        # 4. Collect final child diagnostic BEFORE cleanup
+        try:
+            final = q.get(timeout=10)
+        except Empty:
+            final = None
         assert final is not None, "Child produced no final diagnostic"
         child_sqlstate = str(final.get("sqlstate", ""))
         assert child_sqlstate == "40P01", (
             f"Expected SQLSTATE 40P01, got '{child_sqlstate}'"
         )
-        reverse_result["sqlstate"]
+        assert reverse_sqlstate in ("40P01", ""), (
+            f"Reverse SQLSTATE unexpected: {reverse_sqlstate}"
+        )
 
         # 6. Bounded natural join — child must exit naturally
         proc.join(timeout=10)
@@ -716,6 +716,7 @@ class TestGuardianPhaseBDeadlock:
 # ============================================================================
 
 
+@pytest.mark.postgres
 class TestGuardianPhaseANoRetry:
     def test_phase_a_once(self, db_session: Session) -> None:
         hid = _ensure_household(db_session)
@@ -799,67 +800,76 @@ class TestGuardianPhaseANoRetry:
             mgr.shutdown()
             pytest.fail("Could not prove child lock state")
 
-        # Async reverse run-lock
-        reverse_ready = threading.Event()
-        reverse_result = {"sqlstate": ""}
+        # 3. s2 directly + polling thread captures bidirectional evidence
+        blocking_evidence = {"child_blockers": [], "reverse_blockers": [], "done": False}
 
-        def _async_reverse():
+        def _poll_blocking():
             e = create_engine(actual_url)
             s = sessionmaker(bind=e)()
             try:
-                s.execute(text("SET statement_timeout = '20s'"))
-                reverse_ready.set()
-                s.execute(
-                    text("SELECT id FROM runs WHERE id=:r FOR UPDATE"), {"r": rid}
-                )
-                s.commit()
-            except Exception as exc:
-                s.rollback()
-                orig = getattr(exc, "orig", None)
-                if orig:
-                    reverse_result["sqlstate"] = str(
-                        getattr(orig, "sqlstate", "") or getattr(orig, "pgcode", "")
-                    )
+                s.execute(text("SET statement_timeout = '30s'"))
+                deadline = time.time() + 5
+                while time.time() < deadline and not blocking_evidence["done"]:
+                    s.rollback()
+                    cb = s.execute(
+                        text("SELECT unnest(pg_blocking_pids(:bp))"), {"bp": backend_pid}
+                    ).fetchall()
+                    rb = s.execute(
+                        text("SELECT unnest(pg_blocking_pids(:bp))"), {"bp": blocker_pid}
+                    ).fetchall()
+                    blocking_evidence["child_blockers"] = [r[0] for r in cb]
+                    blocking_evidence["reverse_blockers"] = [r[0] for r in rb]
+                    if (blocking_evidence["child_blockers"]
+                            and blocking_evidence["reverse_blockers"]):
+                        blocking_evidence["done"] = True
+                        break
+                    time.sleep(0.05)
             finally:
                 s.close()
                 e.dispose()
 
-        rt = threading.Thread(target=_async_reverse)
-        rt.start()
-        assert reverse_ready.wait(timeout=10)
+        pt = threading.Thread(target=_poll_blocking)
+        pt.start()
 
-        time.sleep(0.3)
-        s_obs.rollback()
-        s_obs.execute(
-            text("SELECT unnest(pg_blocking_pids(:bp))"), {"bp": backend_pid}
-        ).fetchall()
-        s_obs.execute(
-            text("SELECT unnest(pg_blocking_pids(:bp))"), {"bp": blocker_pid}
-        ).fetchall()
+        reverse_sqlstate = ""
+        try:
+            s2.execute(
+                text("SELECT id FROM runs WHERE id=:r FOR UPDATE"), {"r": rid}
+            )
+        except Exception as exc:
+            s2.rollback()
+            orig = getattr(exc, "orig", None)
+            if orig:
+                reverse_sqlstate = str(
+                    getattr(orig, "sqlstate", "") or getattr(orig, "pgcode", "")
+                )
 
-        rt.join(timeout=15)
+        blocking_evidence["done"] = True
+        pt.join(timeout=5)
 
-        # Collect final diagnostic BEFORE cleanup
-        final = None
-        while True:
-            try:
-                final = q.get_nowait()
-            except Empty:
-                break
+        assert blocker_pid in blocking_evidence["child_blockers"], (
+            f"Child not blocked. Child blockers: {blocking_evidence['child_blockers']}"
+        )
+        assert backend_pid in blocking_evidence["reverse_blockers"], (
+            f"Reverse not blocked. Reverse blockers: {blocking_evidence['reverse_blockers']}"
+        )
+
+        try:
+            final = q.get(timeout=10)
+        except Empty:
+            final = None
         assert final is not None, "Child produced no final diagnostic"
         child_sqlstate = str(final.get("sqlstate", ""))
         assert child_sqlstate == "40P01", (
             f"Expected SQLSTATE 40P01, got '{child_sqlstate}'"
         )
+        assert reverse_sqlstate in ("40P01", ""), (
+            f"Reverse SQLSTATE unexpected: {reverse_sqlstate}"
+        )
         assert count.value == 1, f"evaluate_core called {count.value} times"
 
-        # Natural exit
         proc.join(timeout=10)
-        assert proc.exitcode == 0, (
-            f"Child must exit naturally, got exitcode={proc.exitcode}"
-        )
-
-        # Cleanup
+        assert proc.exitcode == 0
         try:
             s2.rollback()
         except Exception:

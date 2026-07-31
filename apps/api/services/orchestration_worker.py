@@ -483,8 +483,11 @@ class OrchestrationWorker:
                                   "parent_finalized"):
             session.commit()
 
-        # Use authoritative run_status for notification decisions
-        authoritative_status = rec_result.run_status or finalize_status
+        # Use authoritative run_status for notification decisions.
+        # Do not fall back to stale child-derived finalize_status.
+        authoritative_status = rec_result.run_status
+        if authoritative_status is None:
+            return None
 
         eval_status = result.get("evaluation_run", {}).get("status", "")
         if is_guardian and eval_status.startswith(("completed", "skipped")):
