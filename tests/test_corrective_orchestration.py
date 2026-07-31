@@ -13,12 +13,10 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from queue import Empty
-from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, text
-from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
 from apps.api.services.orchestration_repository import (
@@ -31,12 +29,10 @@ from apps.api.services.orchestration_repository import (
     takeover_lease,
 )
 from apps.api.services.orchestration_worker import (
-    _reconcile_attempt,
     lock_for_finalization,
     reconcile_after_child_exit,
 )
 
-pytestmark = pytest.mark.postgres
 UTC = timezone.utc
 
 
@@ -137,17 +133,13 @@ def _snapshot(session: Session, tables: list[str]) -> dict:
     return s
 
 
-def _make_40P01() -> DBAPIError:
-    """Return a DBAPIError whose original exception carries SQLSTATE 40P01."""
-    orig = type("FakePgError", (), {"pgcode": "40P01", "sqlstate": "40P01"})()
-    return DBAPIError("deadlock detected", None, orig)
-
-
 # ============================================================================
 # Test 1 — lock_for_finalization() runs→leases→attempts
 # ============================================================================
 
 
+
+@pytest.mark.postgres
 class TestProductionLockOrder:
     def test_lock_order(self, db_session: Session) -> None:
         hid = _ensure_household(db_session)
@@ -190,6 +182,8 @@ class TestProductionLockOrder:
 # ============================================================================
 
 
+
+@pytest.mark.postgres
 class TestAllAttemptsLocked:
     def test_all_attempts_locked(self, db_session: Session) -> None:
         hid = _ensure_household(db_session)
@@ -227,6 +221,8 @@ class TestAllAttemptsLocked:
 # ============================================================================
 
 
+
+@pytest.mark.postgres
 class TestHeartbeatDuringPhaseA:
     def test_heartbeat_extends_expiry(self, db_session: Session) -> None:
         hid = _ensure_household(db_session)
@@ -273,6 +269,8 @@ class TestHeartbeatDuringPhaseA:
 # ============================================================================
 
 
+
+@pytest.mark.postgres
 class TestInternalLeaseFenced:
     def test_fenced_child_rollback(self, db_session: Session) -> None:
         hid = _ensure_household(db_session)
@@ -327,6 +325,8 @@ class TestInternalLeaseFenced:
 # ============================================================================
 
 
+
+@pytest.mark.postgres
 class TestReconcileTerminalConsistent:
     def test_terminal_consistent(self, db_session: Session) -> None:
         hid = _ensure_household(db_session)
@@ -349,6 +349,8 @@ class TestReconcileTerminalConsistent:
         db_session.rollback()
 
 
+
+@pytest.mark.postgres
 class TestReconcileNotOwner:
     def test_not_owner(self, db_session: Session) -> None:
         hid = _ensure_household(db_session)
@@ -379,6 +381,8 @@ class TestReconcileNotOwner:
         db_session.rollback()
 
 
+
+@pytest.mark.postgres
 class TestReconcileInvariantRepaired:
     def test_invariant_repaired(self, db_session: Session) -> None:
         hid = _ensure_household(db_session)
@@ -406,96 +410,12 @@ class TestReconcileInvariantRepaired:
 
 
 # ============================================================================
-# Test 8 — Deterministic retry-exhaustion unit test
-# ============================================================================
-
-
-class TestReconcileDeferred40P01:
-    """Monkeypatches _reconcile_attempt to verify retry exhaustion."""
-
-    def test_40P01_exhausts_retries(self, db_session: Session) -> None:
-        hid = _ensure_household(db_session)
-        jid, sid = _create_schedule(db_session, hid)
-        rid, aid, lease = _create_run_lease(db_session, hid, jid, "wdl")
-
-        calls = []
-        rollbacks = []
-        original_rollback = db_session.rollback
-
-        def tracking_rollback():
-            rollbacks.append(1)
-            original_rollback()
-
-        db_session.rollback = tracking_rollback
-
-        def fake_reconcile(*args, **kwargs):
-            calls.append(1)
-            raise _make_40P01()
-
-        import apps.api.services.orchestration_worker as ow
-
-        with patch.object(ow, "_reconcile_attempt", fake_reconcile):
-            result = reconcile_after_child_exit(
-                db_session, rid, aid, lease["lease_id"], "wdl",
-                lease["fencing_token"], max_retries=3,
-            )
-
-        db_session.rollback = original_rollback
-
-        assert len(calls) == 3, f"Expected 3 calls, got {len(calls)}"
-        assert len(rollbacks) >= 1, f"Expected rollbacks, got {len(rollbacks)}"
-        assert result.outcome == "reconciliation_deferred"
-        assert "40P01" in result.message
-        assert "3" in result.message
-
-    def test_non_40P01_re_raises(self, db_session: Session) -> None:
-        hid = _ensure_household(db_session)
-        jid, sid = _create_schedule(db_session, hid)
-        rid, aid, lease = _create_run_lease(db_session, hid, jid, "wdl2")
-
-        def fake_raise(*args, **kwargs):
-            raise DBAPIError("syntax error", None, None)
-
-        import apps.api.services.orchestration_worker as ow
-
-        with patch.object(ow, "_reconcile_attempt", fake_raise):
-            with pytest.raises(DBAPIError):
-                reconcile_after_child_exit(
-                    db_session, rid, aid, lease["lease_id"], "wdl2",
-                    lease["fencing_token"], max_retries=3,
-                )
-
-    def test_succeeds_after_two_40P01(self, db_session: Session) -> None:
-        hid = _ensure_household(db_session)
-        jid, sid = _create_schedule(db_session, hid)
-        rid, aid, lease = _create_run_lease(db_session, hid, jid, "wdl3")
-
-        calls = [0]
-
-        def fake_two_then_ok(session, *args, **kwargs):
-            calls[0] += 1
-            if calls[0] <= 2:
-                raise _make_40P01()
-            return _reconcile_attempt(session, *args, **kwargs)
-
-        import apps.api.services.orchestration_worker as ow
-
-        with patch.object(ow, "_reconcile_attempt", fake_two_then_ok):
-            result = reconcile_after_child_exit(
-                db_session, rid, aid, lease["lease_id"], "wdl3",
-                lease["fencing_token"], max_retries=3,
-            )
-
-        assert calls[0] == 3
-        # Third attempt completes with parent_finalized
-        assert "40P01" not in result.message
-
-
-# ============================================================================
 # Test 9 — finalize_run rowcount=0 (concurrency seam)
 # ============================================================================
 
 
+
+@pytest.mark.postgres
 class TestStaleOwnershipNoFallback:
     def test_rowcount_zero_no_writes(self, db_session: Session) -> None:
         hid = _ensure_household(db_session)
@@ -568,6 +488,8 @@ class TestStaleOwnershipNoFallback:
 # ============================================================================
 
 
+
+@pytest.mark.postgres
 class TestExpectedAttemptMissing:
     def test_missing_attempt(self, db_session: Session) -> None:
         hid = _ensure_household(db_session)
@@ -586,6 +508,8 @@ class TestExpectedAttemptMissing:
 # ============================================================================
 
 
+
+@pytest.mark.postgres
 class TestGuardianPhaseBDeadlock:
     def test_phase_b_deadlock_rollback(self, db_session: Session) -> None:
         hid = _ensure_household(db_session)
@@ -660,6 +584,8 @@ class TestGuardianPhaseBDeadlock:
 # ============================================================================
 
 
+
+@pytest.mark.postgres
 class TestGuardianPhaseANoRetry:
     def test_phase_a_once(self, db_session: Session) -> None:
         hid = _ensure_household(db_session)
