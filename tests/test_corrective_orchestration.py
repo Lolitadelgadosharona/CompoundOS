@@ -554,6 +554,8 @@ class TestGuardianPhaseBDeadlock:
         )
         proc.start()
 
+        forced = {"required": False}
+
         # 1. Receive ready diagnostic while child is alive
         try:
             ready = q.get(timeout=15)
@@ -672,12 +674,19 @@ class TestGuardianPhaseBDeadlock:
         assert child_sqlstate == "40P01", (
             f"Expected SQLSTATE 40P01, got '{child_sqlstate}'"
         )
-        assert reverse_sqlstate in ("40P01", ""), (
-            f"Reverse SQLSTATE unexpected: {reverse_sqlstate}"
+        assert reverse_sqlstate == "00000", (
+            f"Reverse SQLSTATE expected 00000 (success), got: {reverse_sqlstate}"
         )
 
         # 6. Bounded natural join — child must exit naturally
         proc.join(timeout=10)
+        if proc.is_alive():
+            forced["required"] = True
+            proc.terminate()
+            proc.join(timeout=5)
+            if proc.is_alive():
+                proc.kill()
+                proc.join(timeout=5)
         assert proc.exitcode == 0, (
             f"Child must exit naturally, got exitcode={proc.exitcode}"
         )
@@ -701,6 +710,10 @@ class TestGuardianPhaseBDeadlock:
         except Exception:
             pass
         e_obs.dispose()
+        q.close()
+        q.join_thread()
+
+        assert not forced["required"], "Test passed but forced cleanup was required"
 
         assert final.get("pid") == child_pid
         r = db_session.execute(
@@ -751,6 +764,8 @@ class TestGuardianPhaseANoRetry:
             ),
         )
         proc.start()
+
+        forced = {"required": False}
 
         try:
             ready = q.get(timeout=15)
@@ -863,12 +878,19 @@ class TestGuardianPhaseANoRetry:
         assert child_sqlstate == "40P01", (
             f"Expected SQLSTATE 40P01, got '{child_sqlstate}'"
         )
-        assert reverse_sqlstate in ("40P01", ""), (
-            f"Reverse SQLSTATE unexpected: {reverse_sqlstate}"
+        assert reverse_sqlstate == "00000", (
+            f"Reverse SQLSTATE expected 00000 (success), got: {reverse_sqlstate}"
         )
         assert count.value == 1, f"evaluate_core called {count.value} times"
 
         proc.join(timeout=10)
+        if proc.is_alive():
+            forced["required"] = True
+            proc.terminate()
+            proc.join(timeout=5)
+            if proc.is_alive():
+                proc.kill()
+                proc.join(timeout=5)
         assert proc.exitcode == 0
         try:
             s2.rollback()
@@ -888,7 +910,10 @@ class TestGuardianPhaseANoRetry:
         except Exception:
             pass
         e_obs.dispose()
+        q.close()
+        q.join_thread()
         mgr.shutdown()
+        assert not forced["required"], "Test passed but forced cleanup was required"
 
 
 # ============================================================================
