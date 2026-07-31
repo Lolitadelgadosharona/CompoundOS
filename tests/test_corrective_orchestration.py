@@ -446,12 +446,16 @@ def _child_for_deadlock_with_backend_pid(
     # Run production _run_job_in_child
     _run_job_in_child(db_url, job_type, job_params, hid, rid, aid, lid, wid, token, inner_q)
 
-    # Drain and forward result
+    # Forward both ready and result messages
+    try:
+        ready_msg = inner_q.get(timeout=5)
+        q.put(ready_msg)  # Forward ready with backend_pid
+    except Exception:
+        pass
     try:
         result = inner_q.get(timeout=5)
     except Exception:
         result = {"status": "unknown"}
-
     result["pid"] = pid
     result["stage"] = result.get("stage", "phase_b")
     q.put(result)
@@ -476,6 +480,12 @@ def _child_counted_with_backend_pid(
 
     try:
         _run_job_in_child(db_url, job_type, job_params, hid, rid, aid, lid, wid, token, inner_q)
+        # Forward ready message
+        try:
+            ready_msg = inner_q.get(timeout=5)
+            q.put(ready_msg)
+        except Exception:
+            pass
         try:
             result = inner_q.get(timeout=5)
         except Exception:
