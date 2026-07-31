@@ -721,6 +721,28 @@ class TestGuardianPhaseBDeadlock:
 
         assert not forced["required"], "Test passed but forced cleanup was required"
 
+        # Verify no residual resources
+        _v = create_engine(actual_url)
+        _vs = sessionmaker(bind=_v)()
+        try:
+            for pid in [backend_pid, blocker_pid]:
+                row = _vs.execute(
+                    text("SELECT 1 FROM pg_stat_activity WHERE pid = :p"),
+                    {"p": pid},
+                ).fetchone()
+                assert row is None, f"Backend {pid} still active"
+            locks = _vs.execute(
+                text(
+                    "SELECT 1 FROM pg_locks"
+                    " WHERE pid IN (:bp, :cp) LIMIT 1"
+                ),
+                {"bp": backend_pid, "cp": blocker_pid},
+            ).fetchone()
+            assert locks is None, "Residual locks remain"
+        finally:
+            _vs.close()
+            _v.dispose()
+
         assert final.get("pid") == child_pid
         r = db_session.execute(
             text("SELECT status FROM runs WHERE id=:r"), {"r": rid}
@@ -893,6 +915,7 @@ class TestGuardianPhaseANoRetry:
         assert reverse_result["sqlstate"] == "00000", (
             f"Reverse expected 00000 (success), got: {reverse_result}"
         )
+        assert count.value == 1, f"evaluate_core called {count.value} times"
 
         proc.join(timeout=10)
         if proc.is_alive():
@@ -925,6 +948,27 @@ class TestGuardianPhaseANoRetry:
         q.join_thread()
         mgr.shutdown()
         assert not forced["required"], "Test passed but forced cleanup was required"
+
+        # Verify no residual resources
+        _v = create_engine(actual_url)
+        _vs = sessionmaker(bind=_v)()
+        try:
+            for pid in [backend_pid, blocker_pid]:
+                row = _vs.execute(
+                    text("SELECT 1 FROM pg_stat_activity WHERE pid = :p"), {"p": pid}
+                ).fetchone()
+                assert row is None, f"Backend {pid} still active"
+            locks = _vs.execute(
+                text(
+                    "SELECT 1 FROM pg_locks"
+                    " WHERE pid IN (:bp, :cp) LIMIT 1"
+                ),
+                {"bp": backend_pid, "cp": blocker_pid},
+            ).fetchone()
+            assert locks is None, "Residual locks remain"
+        finally:
+            _vs.close()
+            _v.dispose()
 
 
 # ============================================================================
