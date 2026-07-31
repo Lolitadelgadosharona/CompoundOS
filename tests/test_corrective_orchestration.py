@@ -1,7 +1,7 @@
-"""Sprint 005 Corrective — Tests 11, 12, 9B, deferred notification regression.
+"""Sprint 005 Corrective — Tests 9A, 9B, 11, 12 + deferred regression.
 
-Real PostgreSQL lock-state observation through pg_stat_activity/pg_locks.
-Production _run_job_in_child / evaluate_core / reconcile_after_child_exit.
+Real PostgreSQL lock-state observation through pg_locks, pg_stat_activity,
+pg_blocking_pids. Production _run_job_in_child / evaluate_core / reconciliation.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from apps.api.services.orchestration_repository import (
     acquire_lease,
     create_attempt,
     create_run,
+    finalize_run,
     start_attempt,
     start_run,
 )
@@ -94,14 +95,84 @@ def _create_run_lease(
     return rid, aid, lease
 
 
-def _cleanup(proc):
-    proc.join(timeout=10)
-    if proc.is_alive():
-        proc.terminate()
-        proc.join(timeout=5)
-        if proc.is_alive():
-            proc.kill()
-            proc.join()
+# ============================================================================
+# Test 9A — Repository integration: finalize_run with stale token
+# ============================================================================
+
+
+class TestFinalizeRunRowcountZero:
+    def test_finalize_run_stale_token_returns_zero(self, db_session: Session) -> None:
+        hid = _ensure_household(db_session)
+        jid, sid = _create_schedule(db_session, hid)
+        rid, aid, lease = _create_run_lease(db_session, hid, jid, "w9a")
+        rc = finalize_run(
+            db_session,
+            run_id=rid,
+            lease_id=lease["lease_id"],
+            worker_id="wrong_worker",
+            fencing_token=999,
+            status="failed",
+        )
+        assert rc == 0, f"Expected rowcount 0, got {rc}"
+        r = db_session.execute(
+            text("SELECT status FROM runs WHERE id=:r"), {"r": rid}
+        ).fetchone()
+        assert r[0] == "running"
+        a = db_session.execute(
+            text("SELECT status FROM attempts WHERE id=:a"), {"a": aid}
+        ).fetchone()
+        assert a[0] == "running"
+        lr = db_session.execute(
+            text("SELECT released_at FROM leases WHERE id=:l"),
+            {"l": lease["lease_id"]},
+        ).fetchone()
+        assert lr[0] is None
+        db_session.rollback()
+
+
+# ============================================================================
+# Test 9B — Reconciliation monkeypatch (finalize_run → 0)
+# ============================================================================
+
+
+class TestStaleOwnershipReconciliation:
+    def test_finalize_run_zero_causes_not_owner(self, monkeypatch, db_session: Session) -> None:
+        hid = _ensure_household(db_session)
+        jid, sid = _create_schedule(db_session, hid)
+        rid, aid, lease = _create_run_lease(db_session, hid, jid, "ws9b")
+
+        calls = []
+
+        def fake_finalize(session, **kwargs):
+            calls.append(kwargs)
+            return 0
+
+        monkeypatch.setattr(
+            "apps.api.services.orchestration_worker.finalize_run", fake_finalize,
+        )
+
+        result = reconcile_after_child_exit(
+            db_session, rid, aid, lease["lease_id"], "ws9b",
+            lease["fencing_token"],
+            finalize_status="failed", attempt_status="failed",
+        )
+
+        assert len(calls) == 1, f"finalize_run called {len(calls)} times"
+        assert result.outcome == "not_owner"
+        r = db_session.execute(
+            text("SELECT status FROM runs WHERE id=:r"), {"r": rid}
+        ).fetchone()
+        assert r[0] == "running"
+        a = db_session.execute(
+            text("SELECT status FROM attempts WHERE id=:a"), {"a": aid}
+        ).fetchone()
+        assert a[0] == "running"
+        lr = db_session.execute(
+            text("SELECT released_at FROM leases WHERE id=:l"),
+            {"l": lease["lease_id"]},
+        ).fetchone()
+        assert lr[0] is None
+        db_session.rollback()
 
 
 # ============================================================================
@@ -117,27 +188,24 @@ class TestGuardianPhaseBDeadlock:
         db_url = db_session.get_bind().url.render_as_string(hide_password=False)
         actual_url = os.environ.get("TEST_DATABASE_URL", db_url)
 
-        # 1. Observer connection for pg_stat_activity/pg_locks
         e_obs = create_engine(actual_url)
         s_obs = sessionmaker(bind=e_obs)()
         s_obs.execute(text("SET statement_timeout = '30s'"))
 
-        # 2. Reverse transaction: lock lease row
         e2 = create_engine(actual_url)
-        s2 = sessionmaker(bind=e2)()
+        s2_factory = sessionmaker(bind=e2)
+        s2 = s2_factory()
         s2.execute(text("SET statement_timeout = '20s'"))
         s2.execute(text("SET deadlock_timeout = '1s'"))
         s2.execute(
-            text("SELECT id FROM leases WHERE run_id=:r FOR UPDATE"),
-            {"r": rid},
+            text("SELECT id FROM leases WHERE run_id=:r FOR UPDATE"), {"r": rid}
         )
         blocker_pid = s2.execute(text("SELECT pg_backend_pid()")).fetchone()[0]
 
-        # 3. Start production child
         ctx = multiprocessing.get_context("spawn")
         q = ctx.Queue()
         proc = ctx.Process(
-            target=_child_for_deadlock_with_backend_pid,
+            target=_child_instrumented,
             args=(
                 actual_url, "guardian.evaluate_all", {}, hid, rid, aid,
                 lease["lease_id"], "wg1", lease["fencing_token"], q,
@@ -145,74 +213,75 @@ class TestGuardianPhaseBDeadlock:
         )
         proc.start()
 
-        # 4. Get child's backend PID from its first diagnostic
+        # 1. Receive ready diagnostic while child is alive
         try:
-            diag = q.get(timeout=15)
+            ready = q.get(timeout=15)
         except Empty:
-            _cleanup(proc)
-            s2.rollback()
-            s2.close()
-            e2.dispose()
-            s_obs.close()
-            e_obs.dispose()
-            pytest.fail("Child sent no diagnostic")
-        assert diag.get("stage") in ("ready", "phase_a", "phase_b"), (
-            f"Unexpected stage: {diag}"
-        )
-        diag["pid"]
-        backend_pid = diag.get("backend_pid")
-        assert backend_pid is not None, "No backend_pid in child diagnostic"
+            _bounded_cleanup(proc, s2, e2, s_obs, e_obs)
+            pytest.fail("Child sent no ready diagnostic")
+        assert ready["stage"] == "ready", f"Expected stage=ready, got {ready}"
+        child_pid = ready["pid"]
+        backend_pid = ready["backend_pid"]
+        assert backend_pid is not None
 
-        # 5. Poll pg_locks until child holds run and waits for lease
+        # 2. Poll pg_locks + pg_blocking_pids
         deadline = time.time() + 15
-        child_owns_run = False
-        child_waits_lease = False
+        proved = False
         while time.time() < deadline:
-            locks = s_obs.execute(
+            s_obs.rollback()
+            lock_check = s_obs.execute(
                 text(
-                    "SELECT l.pid, l.relation::regclass::text, l.mode, l.granted"
-                    " FROM pg_locks l WHERE l.pid IN (:bp, :cp) AND l.granted = true"
-                ),
-                {"bp": backend_pid, "cp": blocker_pid},
-            ).fetchall()
-            wait_info = s_obs.execute(
-                text(
-                    "SELECT wait_event_type, wait_event"
-                    " FROM pg_stat_activity WHERE pid = :bp"
+                    "SELECT 1 FROM pg_locks"
+                    " WHERE pid = :bp AND relation::regclass::text = 'runs'"
+                    " AND granted = true AND mode = 'RowExclusiveLock'"
                 ),
                 {"bp": backend_pid},
             ).fetchone()
 
-            child_locks = [r for r in locks if r[0] == backend_pid]
-            child_owns_run = any("runs" in str(r[1]) for r in child_locks)
-            child_waits_lease = (
-                wait_info
-                and wait_info[0] == "Lock"
-                and wait_info[1] == "transactionid"
+            wait_check = s_obs.execute(
+                text(
+                    "SELECT wait_event_type, wait_event FROM pg_stat_activity"
+                    " WHERE pid = :bp"
+                ),
+                {"bp": backend_pid},
+            ).fetchone()
+
+            blocking = s_obs.execute(
+                text("SELECT unnest(pg_blocking_pids(:bp))"),
+                {"bp": backend_pid},
+            ).fetchall()
+
+            if lock_check and wait_check and wait_check[0] == "Lock":
+                blockers = [r[0] for r in blocking]
+                if blocker_pid in blockers:
+                    proved = True
+                    break
+            time.sleep(0.15)
+
+        if not proved:
+            _bounded_cleanup(proc, s2, e2, s_obs, e_obs)
+            pytest.fail(
+                f"Could not prove child {backend_pid} holds runs lock"
+                f" and blocked by {blocker_pid}"
             )
 
-            if child_owns_run and child_waits_lease:
-                break
-            s_obs.rollback()
-            time.sleep(0.1)
-
-        assert child_owns_run, "Child never acquired run lock"
-        assert child_waits_lease, "Child never waited for lease lock"
-
-        # 6. Now reverse transaction requests run lock → deadlock
+        # 3. Reverse transaction requests run lock → deadlock
         try:
-            s2.execute(text("SELECT id FROM runs WHERE id=:r FOR UPDATE"), {"r": rid})
-        except Exception:
+            s2.execute(
+                text("SELECT id FROM runs WHERE id=:r FOR UPDATE"), {"r": rid}
+            )
+        except Exception as exc:
             s2.rollback()
-        finally:
-            s2.close()
-            e2.dispose()
+            orig = getattr(exc, "orig", None)
+            if orig:
+                str(
+                    getattr(orig, "sqlstate", "")
+                    or getattr(orig, "pgcode", "")
+                )
 
-        _cleanup(proc)
-        s_obs.close()
-        e_obs.dispose()
+        _bounded_cleanup(proc, s2, e2, s_obs, e_obs)
 
-        # 7. Collect child's final diagnostic
+        # 4. Collect child's final diagnostic
         final = None
         while True:
             try:
@@ -220,12 +289,14 @@ class TestGuardianPhaseBDeadlock:
             except Empty:
                 break
 
-        assert final is not None, "Child produced no result"
+        assert final is not None, "Child produced no final diagnostic"
         sqlstate = str(final.get("sqlstate", ""))
         assert sqlstate == "40P01", (
             f"Expected SQLSTATE 40P01, got '{sqlstate}'"
             f" status={final.get('status')}"
         )
+        assert final.get("pid") == child_pid
+        assert proc.exitcode is not None, "Child must exit naturally"
         r = db_session.execute(
             text("SELECT status FROM runs WHERE id=:r"), {"r": rid}
         ).fetchone()
@@ -247,26 +318,26 @@ class TestGuardianPhaseANoRetry:
         db_url = db_session.get_bind().url.render_as_string(hide_password=False)
         actual_url = os.environ.get("TEST_DATABASE_URL", db_url)
 
-        # Observer
         e_obs = create_engine(actual_url)
         s_obs = sessionmaker(bind=e_obs)()
         s_obs.execute(text("SET statement_timeout = '30s'"))
 
-        # Reverse transaction
         e2 = create_engine(actual_url)
-        s2 = sessionmaker(bind=e2)()
+        s2_factory = sessionmaker(bind=e2)
+        s2 = s2_factory()
         s2.execute(text("SET statement_timeout = '20s'"))
-        s2.execute(text("SET deadlock_timeout = '1s'"))
+        s2.execute("SET deadlock_timeout = '1s'")
         s2.execute(
             text("SELECT id FROM leases WHERE run_id=:r FOR UPDATE"), {"r": rid}
         )
+        blocker_pid = s2.execute(text("SELECT pg_backend_pid()")).fetchone()[0]
 
         ctx = multiprocessing.get_context("spawn")
         q = ctx.Queue()
         mgr = ctx.Manager()
         count = mgr.Value("i", 0)
         proc = ctx.Process(
-            target=_child_counted_with_backend_pid,
+            target=_child_counted,
             args=(
                 actual_url, "guardian.evaluate_all", {}, hid, rid, aid,
                 lease["lease_id"], "wg2", lease["fencing_token"], q, count,
@@ -275,18 +346,20 @@ class TestGuardianPhaseANoRetry:
         proc.start()
 
         try:
-            diag = q.get(timeout=15)
+            ready = q.get(timeout=15)
         except Empty:
-            _cleanup(proc)
-            pytest.fail("No child diagnostic")
-        backend_pid = diag.get("backend_pid")
+            _bounded_cleanup(proc, s2, e2, s_obs, e_obs)
+            mgr.shutdown()
+            pytest.fail("Child sent no ready diagnostic")
+        assert ready["stage"] == "ready"
+        backend_pid = ready["backend_pid"]
         assert backend_pid is not None
 
-        # Poll until child block state
         deadline = time.time() + 15
-        child_owns_run = False
+        proved = False
         while time.time() < deadline:
-            locks = s_obs.execute(
+            s_obs.rollback()
+            lock_check = s_obs.execute(
                 text(
                     "SELECT 1 FROM pg_locks"
                     " WHERE pid = :bp AND relation::regclass::text = 'runs'"
@@ -294,31 +367,40 @@ class TestGuardianPhaseANoRetry:
                 ),
                 {"bp": backend_pid},
             ).fetchone()
-            wait_info = s_obs.execute(
+
+            wait_check = s_obs.execute(
                 text(
-                    "SELECT wait_event_type FROM pg_stat_activity WHERE pid = :bp"
+                    "SELECT wait_event_type FROM pg_stat_activity"
+                    " WHERE pid = :bp"
                 ),
                 {"bp": backend_pid},
             ).fetchone()
-            if locks and wait_info and wait_info[0] == "Lock":
-                child_owns_run = True
-                break
-            s_obs.rollback()
-            time.sleep(0.1)
 
-        assert child_owns_run, "Child never blocked"
+            blocking = s_obs.execute(
+                text("SELECT unnest(pg_blocking_pids(:bp))"),
+                {"bp": backend_pid},
+            ).fetchall()
+
+            if lock_check and wait_check and wait_check[0] == "Lock":
+                blockers = [r[0] for r in blocking]
+                if blocker_pid in blockers:
+                    proved = True
+                    break
+            time.sleep(0.15)
+
+        if not proved:
+            _bounded_cleanup(proc, s2, e2, s_obs, e_obs)
+            mgr.shutdown()
+            pytest.fail("Could not prove child lock state")
 
         try:
-            s2.execute(text("SELECT id FROM runs WHERE id=:r FOR UPDATE"), {"r": rid})
+            s2.execute(
+                text("SELECT id FROM runs WHERE id=:r FOR UPDATE"), {"r": rid}
+            )
         except Exception:
             s2.rollback()
-        finally:
-            s2.close()
-            e2.dispose()
 
-        _cleanup(proc)
-        s_obs.close()
-        e_obs.dispose()
+        _bounded_cleanup(proc, s2, e2, s_obs, e_obs)
 
         final = None
         while True:
@@ -326,74 +408,28 @@ class TestGuardianPhaseANoRetry:
                 final = q.get_nowait()
             except Empty:
                 break
-        assert final is not None
+        assert final is not None, "Child produced no final diagnostic"
         sqlstate = str(final.get("sqlstate", ""))
         assert sqlstate == "40P01", (
             f"Expected SQLSTATE 40P01, got '{sqlstate}'"
         )
-        assert count.value == 1, f"Phase A called {count.value} times"
+        assert count.value == 1, f"evaluate_core called {count.value} times"
+        assert proc.exitcode is not None, "Child must exit naturally"
+        mgr.shutdown()
 
 
 # ============================================================================
-# Test 9B — Reconciliation monkeypatch (finalize_run → 0)
-# ============================================================================
-
-
-class TestStaleOwnershipReconciliation:
-    def test_finalize_run_zero_causes_not_owner(self, db_session: Session) -> None:
-        hid = _ensure_household(db_session)
-        jid, sid = _create_schedule(db_session, hid)
-        rid, aid, lease = _create_run_lease(db_session, hid, jid, "ws9b")
-
-        import apps.api.services.orchestration_worker as ow
-
-        call_count = [0]
-        orig_finalize = ow.finalize_run
-
-        def fake_finalize(session, *args, **kwargs):
-            call_count[0] += 1
-            return 0
-
-        ow.finalize_run = fake_finalize
-        try:
-            result = reconcile_after_child_exit(
-                db_session, rid, aid, lease["lease_id"], "ws9b",
-                lease["fencing_token"],
-                finalize_status="failed", attempt_status="failed",
-            )
-        finally:
-            ow.finalize_run = orig_finalize
-
-        assert call_count[0] == 1, f"finalize_run called {call_count[0]} times"
-        assert result.outcome == "not_owner"
-        r = db_session.execute(
-            text("SELECT status FROM runs WHERE id=:r"), {"r": rid}
-        ).fetchone()
-        assert r[0] == "running"
-        a = db_session.execute(
-            text("SELECT status FROM attempts WHERE id=:a"), {"a": aid}
-        ).fetchone()
-        assert a[0] == "running"
-        lr = db_session.execute(
-            text("SELECT released_at FROM leases WHERE id=:l"),
-            {"l": lease["lease_id"]},
-        ).fetchone()
-        assert lr[0] is None
-        db_session.rollback()
-
-
-# ============================================================================
-# Deferred notification regression (unnumbered)
+# Deferred notification regression
 # ============================================================================
 
 
 class TestDeferredNotification:
-    def test_reconciliation_deferred_no_fallback(self, db_session: Session) -> None:
+    def test_reconciliation_deferred_no_fallback(
+        self, monkeypatch, db_session: Session
+    ) -> None:
         hid = _ensure_household(db_session)
         jid, sid = _create_schedule(db_session, hid)
         rid, aid, lease = _create_run_lease(db_session, hid, jid, "wdef")
-
-        import apps.api.services.orchestration_worker as ow
 
         def fake_deferred(*args, **kwargs):
             return ReconciliationResult(
@@ -401,19 +437,14 @@ class TestDeferredNotification:
                 message="Deadlock retry exhausted",
             )
 
-        orig = ow.reconcile_after_child_exit
-        ow.reconcile_after_child_exit = fake_deferred
-        try:
-            # Simulate _execute_scheduled calling reconcile
-            result = ow.reconcile_after_child_exit(
-                db_session, rid, aid, lease["lease_id"], "wdef",
-                lease["fencing_token"],
-            )
-        finally:
-            ow.reconcile_after_child_exit = orig
+        monkeypatch.setattr(
+            "apps.api.services.orchestration_worker.reconcile_after_child_exit",
+            fake_deferred,
+        )
 
+        result = fake_deferred()
         assert result.outcome == "reconciliation_deferred"
-        # No state change
+        # Verify no state change — reconciliation_deferred returns None
         r = db_session.execute(
             text("SELECT status FROM runs WHERE id=:r"), {"r": rid}
         ).fetchone()
@@ -431,40 +462,58 @@ class TestDeferredNotification:
 
 
 # ============================================================================
+# Helpers
+# ============================================================================
+
+
+def _bounded_cleanup(proc, s2, e2, s_obs, e_obs):
+    proc.join(timeout=10)
+    if proc.is_alive():
+        proc.terminate()
+        proc.join(timeout=5)
+        if proc.is_alive():
+            proc.kill()
+            proc.join()
+    try:
+        s2.rollback()
+    except Exception:
+        pass
+    try:
+        s2.close()
+    except Exception:
+        pass
+    e2.dispose()
+    try:
+        s_obs.rollback()
+    except Exception:
+        pass
+    try:
+        s_obs.close()
+    except Exception:
+        pass
+    e_obs.dispose()
+
+
+# ============================================================================
 # Module-level child targets (picklable for spawn)
 # ============================================================================
 
 
-def _child_for_deadlock_with_backend_pid(
+def _child_instrumented(
     db_url, job_type, job_params, hid, rid, aid, lid, wid, token, q
 ):
+    """Pass parent Queue directly to _run_job_in_child for live diagnostics."""
     from apps.api.services.orchestration_executor import _run_job_in_child
 
-    inner_q = multiprocessing.Queue()
-    pid = os.getpid()
-
-    # Run production _run_job_in_child
-    _run_job_in_child(db_url, job_type, job_params, hid, rid, aid, lid, wid, token, inner_q)
-
-    # Forward both ready and result messages
-    try:
-        ready_msg = inner_q.get(timeout=5)
-        q.put(ready_msg)  # Forward ready with backend_pid
-    except Exception:
-        pass
-    try:
-        result = inner_q.get(timeout=5)
-    except Exception:
-        result = {"status": "unknown"}
-    result["pid"] = pid
-    result["stage"] = result.get("stage", "phase_b")
-    q.put(result)
+    _run_job_in_child(
+        db_url, job_type, job_params, hid, rid, aid, lid, wid, token, q,
+    )
 
 
-def _child_counted_with_backend_pid(
+def _child_counted(
     db_url, job_type, job_params, hid, rid, aid, lid, wid, token, q, count
 ):
-
+    """Instrument evaluate_core, pass parent Queue to _run_job_in_child."""
     from apps.api.services import guardian as guardian_mod
     from apps.api.services.orchestration_executor import _run_job_in_child
 
@@ -475,24 +524,9 @@ def _child_counted_with_backend_pid(
         return orig_eval(*args, **kwargs)
 
     guardian_mod.evaluate_core = counting_eval
-    inner_q = multiprocessing.Queue()
-    pid = os.getpid()
-
     try:
-        _run_job_in_child(db_url, job_type, job_params, hid, rid, aid, lid, wid, token, inner_q)
-        # Forward ready message
-        try:
-            ready_msg = inner_q.get(timeout=5)
-            q.put(ready_msg)
-        except Exception:
-            pass
-        try:
-            result = inner_q.get(timeout=5)
-        except Exception:
-            result = {"status": "unknown"}
+        _run_job_in_child(
+            db_url, job_type, job_params, hid, rid, aid, lid, wid, token, q,
+        )
     finally:
         guardian_mod.evaluate_core = orig_eval
-
-    result["pid"] = pid
-    result["stage"] = result.get("stage", "phase_b")
-    q.put(result)
