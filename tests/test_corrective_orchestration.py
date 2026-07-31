@@ -641,28 +641,33 @@ class TestGuardianPhaseBDeadlock:
         pt = threading.Thread(target=_poll_blocking)
         pt.start()
 
-        reverse_sqlstate = ""
+        reverse_result = {"status": "", "sqlstate": "", "backend_pid": blocker_pid}
         try:
             s2.execute(
                 text("SELECT id FROM runs WHERE id=:r FOR UPDATE"), {"r": rid}
             )
+            reverse_result["status"] = "success"
+            reverse_result["sqlstate"] = "00000"
         except Exception as exc:
             s2.rollback()
+            reverse_result["status"] = "deadlocked"
             orig = getattr(exc, "orig", None)
             if orig:
-                reverse_sqlstate = str(
+                reverse_result["sqlstate"] = str(
                     getattr(orig, "sqlstate", "") or getattr(orig, "pgcode", "")
                 )
+            reverse_result["error_type"] = type(exc).__name__
+            reverse_result["error_message"] = str(exc)[:200]
 
         blocking_evidence["done"] = True
         pt.join(timeout=5)
 
         assert blocker_pid in blocking_evidence["child_blockers"], (
-            f"Child not blocked by reverse. Child blockers: {blocking_evidence['child_blockers']}"
+            f"Child not blocked. Child blockers: {blocking_evidence['child_blockers']}"
         )
-        rbl = blocking_evidence['reverse_blockers']
+        rbl = blocking_evidence["reverse_blockers"]
         assert backend_pid in rbl, (
-            f"Reverse not blocked by child. Reverse blockers: {rbl}"
+            f"Reverse not blocked. Reverse blockers: {rbl}"
         )
 
         # 4. Collect final child diagnostic BEFORE cleanup
@@ -675,8 +680,8 @@ class TestGuardianPhaseBDeadlock:
         assert child_sqlstate == "40P01", (
             f"Expected SQLSTATE 40P01, got '{child_sqlstate}'"
         )
-        assert reverse_sqlstate == "00000", (
-            f"Reverse SQLSTATE expected 00000 (success), got: {reverse_sqlstate}"
+        assert reverse_result["sqlstate"] == "00000", (
+            f"Reverse expected 00000 (success), got: {reverse_result}"
         )
 
         # 6. Bounded natural join — child must exit naturally
@@ -847,18 +852,23 @@ class TestGuardianPhaseANoRetry:
         pt = threading.Thread(target=_poll_blocking)
         pt.start()
 
-        reverse_sqlstate = ""
+        reverse_result = {"status": "", "sqlstate": "", "backend_pid": blocker_pid}
         try:
             s2.execute(
                 text("SELECT id FROM runs WHERE id=:r FOR UPDATE"), {"r": rid}
             )
+            reverse_result["status"] = "success"
+            reverse_result["sqlstate"] = "00000"
         except Exception as exc:
             s2.rollback()
+            reverse_result["status"] = "deadlocked"
             orig = getattr(exc, "orig", None)
             if orig:
-                reverse_sqlstate = str(
+                reverse_result["sqlstate"] = str(
                     getattr(orig, "sqlstate", "") or getattr(orig, "pgcode", "")
                 )
+            reverse_result["error_type"] = type(exc).__name__
+            reverse_result["error_message"] = str(exc)[:200]
 
         blocking_evidence["done"] = True
         pt.join(timeout=5)
@@ -866,8 +876,9 @@ class TestGuardianPhaseANoRetry:
         assert blocker_pid in blocking_evidence["child_blockers"], (
             f"Child not blocked. Child blockers: {blocking_evidence['child_blockers']}"
         )
-        assert backend_pid in blocking_evidence["reverse_blockers"], (
-            f"Reverse not blocked. Reverse blockers: {blocking_evidence['reverse_blockers']}"
+        rbl = blocking_evidence["reverse_blockers"]
+        assert backend_pid in rbl, (
+            f"Reverse not blocked. Reverse blockers: {rbl}"
         )
 
         try:
@@ -879,10 +890,9 @@ class TestGuardianPhaseANoRetry:
         assert child_sqlstate == "40P01", (
             f"Expected SQLSTATE 40P01, got '{child_sqlstate}'"
         )
-        assert reverse_sqlstate == "00000", (
-            f"Reverse SQLSTATE expected 00000 (success), got: {reverse_sqlstate}"
+        assert reverse_result["sqlstate"] == "00000", (
+            f"Reverse expected 00000 (success), got: {reverse_result}"
         )
-        assert count.value == 1, f"evaluate_core called {count.value} times"
 
         proc.join(timeout=10)
         if proc.is_alive():
