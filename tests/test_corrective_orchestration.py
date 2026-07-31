@@ -36,6 +36,7 @@ from apps.api.services.orchestration_worker import (
     reconcile_after_child_exit,
 )
 
+pytestmark = pytest.mark.postgres
 UTC = timezone.utc
 
 
