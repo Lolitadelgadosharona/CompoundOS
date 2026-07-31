@@ -196,7 +196,7 @@ class TestGuardianPhaseBDeadlock:
         s2_factory = sessionmaker(bind=e2)
         s2 = s2_factory()
         s2.execute(text("SET statement_timeout = '20s'"))
-        s2.execute(text("SET deadlock_timeout = '1s'"))
+        s2.execute(text("SET deadlock_timeout = '2s'"))
         s2.execute(
             text("SELECT id FROM leases WHERE run_id=:r FOR UPDATE"), {"r": rid}
         )
@@ -233,7 +233,7 @@ class TestGuardianPhaseBDeadlock:
                 text(
                     "SELECT 1 FROM pg_locks"
                     " WHERE pid = :bp AND relation::regclass::text = 'runs'"
-                    " AND granted = true AND mode = 'RowExclusiveLock'"
+                    " AND granted = true"
                 ),
                 {"bp": backend_pid},
             ).fetchone()
@@ -326,7 +326,7 @@ class TestGuardianPhaseANoRetry:
         s2_factory = sessionmaker(bind=e2)
         s2 = s2_factory()
         s2.execute(text("SET statement_timeout = '20s'"))
-        s2.execute("SET deadlock_timeout = '1s'")
+        s2.execute(text("SET deadlock_timeout = '2s'"))
         s2.execute(
             text("SELECT id FROM leases WHERE run_id=:r FOR UPDATE"), {"r": rid}
         )

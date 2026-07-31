@@ -106,6 +106,11 @@ def _run_job_in_child(
     try:
         session = session_factory()
 
+        # Capture backend_pid BEFORE any optional marker write
+        backend_pid = session.execute(
+            text("SELECT pg_backend_pid()")
+        ).fetchone()[0]
+
         if marker_table and marker_key:
             try:
                 session.execute(text(
@@ -114,14 +119,16 @@ def _run_job_in_child(
                     f" ON CONFLICT DO NOTHING"
                 ), {"id": marker_key})
             except Exception:
-                pass
+                session.rollback()
+                session = session_factory()
+                backend_pid = session.execute(
+                    text("SELECT pg_backend_pid()")
+                ).fetchone()[0]
 
         result_queue.put({
             "stage": "ready",
             "pid": os.getpid(),
-            "backend_pid": session.execute(
-                text("SELECT pg_backend_pid()")
-            ).fetchone()[0],
+            "backend_pid": backend_pid,
         })
 
         try:
