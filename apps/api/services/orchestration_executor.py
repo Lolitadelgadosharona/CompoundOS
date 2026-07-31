@@ -13,6 +13,7 @@ Sprint 005 Orchestration Corrective:
 from __future__ import annotations
 
 import multiprocessing
+import os
 from datetime import datetime, timezone
 from typing import Any, Callable
 from uuid import UUID
@@ -115,7 +116,13 @@ def _run_job_in_child(
             except Exception:
                 pass
 
-        result_queue.put({"stage": "ready"})
+        result_queue.put({
+            "stage": "ready",
+            "pid": os.getpid(),
+            "backend_pid": session.execute(
+                text("SELECT pg_backend_pid()")
+            ).fetchone()[0],
+        })
 
         try:
             # Phase A: Business operation (NO orchestration locks)
