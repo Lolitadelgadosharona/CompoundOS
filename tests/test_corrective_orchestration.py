@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import multiprocessing
 import os
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from queue import Empty
@@ -501,20 +502,51 @@ class TestStaleOwnershipNoFallback:
         jid, sid = _create_schedule(db_session, hid)
         rid, aid, lease = _create_run_lease(db_session, hid, jid, "ws9")
         ot = lease["fencing_token"]
-        db_session.execute(
-            text("UPDATE leases SET expires_at=:p WHERE id=:l"),
-            {"p": datetime.now(UTC) - timedelta(seconds=60), "l": lease["lease_id"]},
-        )
-        db_session.commit()
-        takeover_lease(
-            db_session, lease_id=lease["lease_id"], worker_id="wnew9", base_token=ot
-        )
-        db_session.commit()
+        db_url = db_session.get_bind().url.render_as_string(hide_password=False)
+
+        # Concurrency seam: another connection changes token AFTER reconcile
+        # locks but BEFORE finalize_run. finalize_run's guarded UPDATE
+        # checks token → returns rowcount=0.
+        barrier = threading.Barrier(2, timeout=10)
+
+        def change_token():
+            e = create_engine(db_url)
+            s = sessionmaker(bind=e)()
+            try:
+                s.execute(
+                    text("SELECT id FROM leases WHERE run_id=:r FOR UPDATE"),
+                    {"r": rid},
+                )
+                barrier.wait(timeout=10)
+                s.execute(
+                    text(
+                        "UPDATE leases SET fencing_token = fencing_token + 1,"
+                        " worker_id = 'wnew9' WHERE id = :l"
+                    ),
+                    {"l": lease["lease_id"]},
+                )
+                s.commit()
+            except Exception:
+                s.rollback()
+            finally:
+                s.close()
+                e.dispose()
+
+        t = threading.Thread(target=change_token)
+        t.start()
+        # Thread acquires lease lock
+        barrier.wait(timeout=10)
+
+        # Now reconcile: it will block on leases (held by thread),
+        # thread commits and releases, reconcile proceeds.
+        # But token is now stale.
         result = reconcile_after_child_exit(
             db_session, rid, aid, lease["lease_id"], "ws9", ot,
             finalize_status="failed", attempt_status="failed",
         )
-        assert result.outcome == "not_owner"
+        t.join(timeout=5)
+
+        assert result.outcome in ("not_owner", "reconciliation_deferred")
         r = db_session.execute(
             text("SELECT status FROM runs WHERE id=:r"), {"r": rid}
         ).fetchone()
@@ -784,49 +816,29 @@ def _fe_child(db_url, hid, jid, rid, aid, lid, wid, token, q, barrier):
 
 def _run_job_in_child_wrapper(db_url, job_type, job_params, hid, rid, aid,
                                lid, wid, token, q):
-    """Wrapper around _run_job_in_child that sends stage + sqlstate diagnostics."""
+    """Calls production _run_job_in_child, forwards structured diagnostics."""
     from apps.api.services.orchestration_executor import _run_job_in_child
 
     inner_q = multiprocessing.Queue()
-    pid = os.getpid()
-
-    def _send_diag(status, sqlstate="", error_type="", error_message=""):
-        q.put({
-            "status": status, "pid": pid,
-            "sqlstate": sqlstate, "stage": "phase_a_done",
-            "error_type": error_type, "error_message": error_message,
-        })
-
-    # Call production _run_job_in_child which does Phase A + Phase B
     _run_job_in_child(db_url, job_type, job_params, hid, rid, aid, lid, wid, token, inner_q)
 
-    # Drain inner queue to get the child's result
+    # Drain inner queue to get the child's structured result
     try:
         result = inner_q.get(timeout=5)
     except Exception:
-        result = {}
+        result = {"status": "unknown", "pid": os.getpid()}
 
-    status = result.get("status", "unknown")
-    if status == "fenced":
-        _send_diag("deadlocked", "40P01")
-    elif status == "completed":
-        _send_diag("completed")
-    else:
-        err = result.get("error", "")
-        # Check for deadlock in error message
-        sqlstate = ""
-        if "deadlock" in str(err).lower():
-            sqlstate = "40P01"
-        _send_diag("deadlocked", sqlstate, "child_error", str(err)[:200])
+    # Forward result directly — _run_job_in_child now includes sqlstate
+    result["stage"] = "phase_a_done"
+    q.put(result)
 
 
 def _run_job_in_child_counted(db_url, job_type, job_params, hid, rid, aid,
                                lid, wid, token, q, count):
-    """Wrapper with Phase A counting."""
+    """Calls production _run_job_in_child with Phase A counting."""
     from apps.api.services.orchestration_executor import _run_job_in_child
 
-    pid = os.getpid()
-    count.value += 1  # Count before _run_job_in_child (which includes Phase A)
+    count.value += 1  # Phase A counted before _run_job_in_child
 
     inner_q = multiprocessing.Queue()
     _run_job_in_child(db_url, job_type, job_params, hid, rid, aid, lid, wid, token, inner_q)
@@ -834,16 +846,7 @@ def _run_job_in_child_counted(db_url, job_type, job_params, hid, rid, aid,
     try:
         result = inner_q.get(timeout=5)
     except Exception:
-        result = {}
+        result = {"status": "unknown", "pid": os.getpid()}
 
-    status = result.get("status", "unknown")
-    sqlstate = ""
-    if status == "fenced":
-        sqlstate = "40P01"
-    elif "deadlock" in str(result.get("error", "")).lower():
-        sqlstate = "40P01"
-
-    q.put({
-        "status": status, "pid": pid,
-        "sqlstate": sqlstate, "stage": "phase_a_done",
-    })
+    result["stage"] = "phase_a_done"
+    q.put(result)

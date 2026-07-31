@@ -476,7 +476,15 @@ class OrchestrationWorker:
         if rec_result.outcome == "not_owner":
             return None
 
-        session.commit()
+        if rec_result.outcome == "reconciliation_deferred":
+            # Leave state unchanged — legitimate owner or reaper handles it.
+            # No notification, no fallback write.
+            return None
+
+        if rec_result.outcome in ("terminal_consistent", "invariant_repaired",
+                                  "parent_finalized"):
+            session.commit()
+
         eval_status = result.get("evaluation_run", {}).get("status", "")
         if is_guardian and eval_status.startswith(("completed", "skipped")):
             return result

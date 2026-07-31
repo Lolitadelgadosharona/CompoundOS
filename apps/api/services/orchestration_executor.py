@@ -203,18 +203,55 @@ def _run_job_in_child(
 
         except _FencedError as e:
             session.rollback()
-            result_queue.put({"status": "fenced", "error": str(e)})
+            import os as _os
 
-        except Exception:
+            result_queue.put({
+                "status": "fenced",
+                "pid": _os.getpid(),
+                "error_type": "_FencedError",
+                "error_message": str(e),
+            })
+
+        except Exception as exc:
             session.rollback()
-            raise
+            import os as _os2
+
+            diag = {
+                "status": "failed",
+                "pid": _os2.getpid(),
+                "error_type": type(exc).__name__,
+                "error_message": str(exc)[:500],
+                "sqlstate": "",
+            }
+            orig = getattr(exc, "orig", None)
+            if orig:
+                diag["sqlstate"] = str(
+                    getattr(orig, "sqlstate", "")
+                    or getattr(orig, "pgcode", "")
+                )
+            result_queue.put(diag)
 
         finally:
             session.close()
 
     except Exception as exc:
         try:
-            result_queue.put({"status": "failed", "error": str(exc)[:500]})
+            import os as _os3
+
+            diag2 = {
+                "status": "failed",
+                "pid": _os3.getpid(),
+                "error_type": type(exc).__name__,
+                "error_message": str(exc)[:500],
+                "sqlstate": "",
+            }
+            orig2 = getattr(exc, "orig", None)
+            if orig2:
+                diag2["sqlstate"] = str(
+                    getattr(orig2, "sqlstate", "")
+                    or getattr(orig2, "pgcode", "")
+                )
+            result_queue.put(diag2)
         except Exception:
             pass
     finally:
