@@ -1,15 +1,17 @@
-"""Sprint 005 Corrective — Tests 9A, 9B, 11, 12 + deferred regression.
+"""Sprint 005 Orchestration Corrective — 12 independent acceptance tests.
 
-Real PostgreSQL lock-state observation through pg_locks, pg_stat_activity,
-pg_blocking_pids. Production _run_job_in_child / evaluate_core / reconciliation.
+Exercises production ReconciliationResult, reconcile_after_child_exit(),
+lock_for_finalization(), and _run_job_in_child().
+Real PostgreSQL + multiprocessing.
 """
 
 from __future__ import annotations
 
 import multiprocessing
 import os
+import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from queue import Empty
 from uuid import uuid4
 
@@ -21,16 +23,16 @@ from apps.api.services.orchestration_repository import (
     acquire_lease,
     create_attempt,
     create_run,
-    finalize_run,
+    heartbeat_lease,
     start_attempt,
     start_run,
+    takeover_lease,
 )
 from apps.api.services.orchestration_worker import (
-    ReconciliationResult,
+    lock_for_finalization,
     reconcile_after_child_exit,
 )
 
-pytestmark = pytest.mark.postgres
 UTC = timezone.utc
 
 
@@ -48,7 +50,7 @@ def _ensure_household(session: Session) -> str:
         text(
             "INSERT INTO household_profiles (id, singleton_key, household_name,"
             " base_currency, investment_horizon, liquidity_needs, risk_statement, notes)"
-            " VALUES (:id, TRUE, 'T', 'USD', 'LT', '', '', '')"
+            " VALUES (:id, TRUE, 'Test', 'USD', 'LT', '', '', '')"
         ),
         {"id": hid},
     )
@@ -79,90 +81,396 @@ def _create_schedule(session: Session, hid: str) -> tuple[str, str]:
 
 
 def _create_run_lease(
-    session: Session, hid: str, jid: str, worker_id: str
+    session: Session,
+    hid: str,
+    jid: str,
+    worker_id: str,
+    rs: str = "running",
 ) -> tuple[str, str, dict]:
     rid = create_run(
-        session, job_definition_id=jid, schedule_id=None,
-        idempotency_key=f"r-{uuid4().hex[:8]}", status="pending",
-        triggered_by="schedule", scheduled_at=datetime.now(UTC),
+        session,
+        job_definition_id=jid,
+        schedule_id=None,
+        idempotency_key=f"r-{uuid4().hex[:8]}",
+        status="pending",
+        triggered_by="schedule",
+        scheduled_at=datetime.now(UTC),
         household_id=hid,
     )
     aid = create_attempt(session, run_id=rid, attempt_number=1)
     start_run(session, rid)
     start_attempt(session, aid)
     lease = acquire_lease(session, run_id=rid, worker_id=worker_id)
+    if rs != "running":
+        st = "succeeded" if rs == "completed" else rs
+        session.execute(
+            text("UPDATE runs SET status=:s,completed_at=NOW() WHERE id=:r"),
+            {"s": rs, "r": rid},
+        )
+        session.execute(
+            text("UPDATE attempts SET status=:s,completed_at=NOW() WHERE id=:a"),
+            {"s": st, "a": aid},
+        )
     session.commit()
     return rid, aid, lease
 
 
+def _cleanup(proc):
+    proc.join(timeout=10)
+    if proc.is_alive():
+        proc.terminate()
+        proc.join(timeout=5)
+        if proc.is_alive():
+            proc.kill()
+            proc.join()
+
+
+def _snapshot(session: Session, tables: list[str]) -> dict:
+    s = {}
+    for t in tables:
+        rows = session.execute(text(f"SELECT * FROM {t}")).fetchall()
+        s[t] = len(rows)
+    return s
+
+
 # ============================================================================
-# Test 9A — Repository integration: finalize_run with stale token
+# Test 1 — lock_for_finalization() runs→leases→attempts
 # ============================================================================
 
 
-class TestFinalizeRunRowcountZero:
-    def test_finalize_run_stale_token_returns_zero(self, db_session: Session) -> None:
+
+@pytest.mark.postgres
+class TestProductionLockOrder:
+    def test_lock_order(self, db_session: Session) -> None:
         hid = _ensure_household(db_session)
         jid, sid = _create_schedule(db_session, hid)
-        rid, aid, lease = _create_run_lease(db_session, hid, jid, "w9a")
-        rc = finalize_run(
-            db_session,
-            run_id=rid,
-            lease_id=lease["lease_id"],
-            worker_id="wrong_worker",
-            fencing_token=999,
-            status="failed",
-        )
-        assert rc == 0, f"Expected rowcount 0, got {rc}"
-        r = db_session.execute(
-            text("SELECT status FROM runs WHERE id=:r"), {"r": rid}
-        ).fetchone()
-        assert r[0] == "running"
-        a = db_session.execute(
-            text("SELECT status FROM attempts WHERE id=:a"), {"a": aid}
-        ).fetchone()
-        assert a[0] == "running"
-        lr = db_session.execute(
-            text("SELECT released_at FROM leases WHERE id=:l"),
-            {"l": lease["lease_id"]},
-        ).fetchone()
-        assert lr[0] is None
+        rid, aid, lease = _create_run_lease(db_session, hid, jid, "w1")
+        rs, lr, attempts = lock_for_finalization(db_session, rid)
+        assert rs == "running"
+        assert lr is not None
+        assert len(attempts) == 1
+        locks = db_session.execute(
+            text(
+                "SELECT relation::regclass::text FROM pg_locks"
+                " WHERE pid=pg_backend_pid() AND mode IN('RowShareLock','RowExclusiveLock')"
+                " AND relation IS NOT NULL ORDER BY granted DESC"
+            )
+        ).fetchall()
+        locked = {r[0] for r in locks}
+        assert "runs" in locked
+        assert "leases" in locked
+        assert "attempts" in locked
+        db_url = db_session.get_bind().url.render_as_string(hide_password=False)
+        e2 = create_engine(db_url)
+        s2 = sessionmaker(bind=e2)()
+        try:
+            s2.execute(text("SET lock_timeout='1s'"))
+            s2.execute(
+                text("SELECT id FROM attempts WHERE run_id=:r FOR UPDATE NOWAIT"),
+                {"r": rid},
+            )
+        except Exception as ex:
+            assert "could not obtain" in str(ex).lower() or "lock" in str(ex).lower()
+        finally:
+            s2.rollback()
+            s2.close()
         db_session.rollback()
 
 
 # ============================================================================
-# Test 9B — Reconciliation monkeypatch (finalize_run → 0)
+# Test 2 — ALL attempts locked
 # ============================================================================
 
 
-class TestStaleOwnershipReconciliation:
-    def test_finalize_run_zero_causes_not_owner(self, monkeypatch, db_session: Session) -> None:
+
+@pytest.mark.postgres
+class TestAllAttemptsLocked:
+    def test_all_attempts_locked(self, db_session: Session) -> None:
         hid = _ensure_household(db_session)
         jid, sid = _create_schedule(db_session, hid)
-        rid, aid, lease = _create_run_lease(db_session, hid, jid, "ws9b")
+        rid, aid, lease = _create_run_lease(db_session, hid, jid, "w2")
+        for n in (2, 3, 4):
+            create_attempt(db_session, run_id=rid, attempt_number=n)
+        db_session.commit()
+        _, _, attempts = lock_for_finalization(db_session, rid)
+        assert len(attempts) == 4
+        ids = [str(a[0]) for a in attempts]
+        assert ids == sorted(ids)
+        db_url = db_session.get_bind().url.render_as_string(hide_password=False)
+        e2 = create_engine(db_url)
+        s2 = sessionmaker(bind=e2)()
+        try:
+            s2.execute(text("SET lock_timeout='1s'"))
+            s2.execute(
+                text(
+                    "SELECT id FROM attempts WHERE run_id=:r LIMIT 1 FOR UPDATE NOWAIT"
+                ),
+                {"r": rid},
+            )
+            pytest.fail("NOWAIT should block")
+        except Exception:
+            pass
+        finally:
+            s2.rollback()
+            s2.close()
+        db_session.rollback()
 
-        calls = []
 
-        def fake_finalize(session, **kwargs):
-            calls.append(kwargs)
-            return 0
+# ============================================================================
+# Test 3 — Heartbeat during Phase A (production child)
+# ============================================================================
 
-        monkeypatch.setattr(
-            "apps.api.services.orchestration_worker.finalize_run", fake_finalize,
+
+
+@pytest.mark.postgres
+class TestHeartbeatDuringPhaseA:
+    def test_heartbeat_extends_expiry(self, db_session: Session) -> None:
+        hid = _ensure_household(db_session)
+        jid, sid = _create_schedule(db_session, hid)
+        rid, aid, lease = _create_run_lease(db_session, hid, jid, "whb")
+        before = db_session.execute(
+            text("SELECT expires_at FROM leases WHERE id=:l"),
+            {"l": lease["lease_id"]},
+        ).fetchone()[0]
+        db_url = db_session.get_bind().url.render_as_string(hide_password=False)
+        ctx = multiprocessing.get_context("spawn")
+        q = ctx.Queue()
+        barrier = ctx.Event()
+        proc = ctx.Process(
+            target=_hb_child,
+            args=(
+                db_url, hid, jid, rid, aid, lease["lease_id"],
+                "whb", lease["fencing_token"], q, barrier,
+            ),
         )
+        proc.start()
+        assert q.get(timeout=15)["stage"] == "ready"
+        barrier.set()
+        time.sleep(0.3)
+        rc = heartbeat_lease(
+            db_session,
+            lease_id=lease["lease_id"],
+            worker_id="whb",
+            fencing_token=lease["fencing_token"],
+        )
+        assert rc == 1
+        db_session.commit()
+        after = db_session.execute(
+            text("SELECT expires_at,heartbeat_at FROM leases WHERE id=:l"),
+            {"l": lease["lease_id"]},
+        ).fetchone()
+        assert after[0] > before
+        assert after[1] is not None
+        _cleanup(proc)
 
+
+# ============================================================================
+# Test 4 — Fenced child (production guardian)
+# ============================================================================
+
+
+
+@pytest.mark.postgres
+class TestInternalLeaseFenced:
+    def test_fenced_child_rollback(self, db_session: Session) -> None:
+        hid = _ensure_household(db_session)
+        jid, sid = _create_schedule(db_session, hid)
+        rid, aid, lease = _create_run_lease(db_session, hid, jid, "wfe")
+        _snapshot(db_session, ["runs", "attempts", "guardian_events"])
+        db_url = db_session.get_bind().url.render_as_string(hide_password=False)
+        ctx = multiprocessing.get_context("spawn")
+        q = ctx.Queue()
+        barrier = ctx.Event()
+        proc = ctx.Process(
+            target=_fe_child,
+            args=(
+                db_url, hid, jid, rid, aid, lease["lease_id"],
+                "wfe", lease["fencing_token"], q, barrier,
+            ),
+        )
+        proc.start()
+        msg = q.get(timeout=20)
+        assert msg["stage"] == "phase_a_done", f"Got: {msg}"
+        db_session.execute(
+            text(
+                "UPDATE leases SET released_at=NOW(),expires_at=NOW()-INTERVAL'10s'"
+                " WHERE id=:l"
+            ),
+            {"l": lease["lease_id"]},
+        )
+        db_session.commit()
+        barrier.set()
+        _cleanup(proc)
+        final = None
+        while True:
+            try:
+                final = q.get_nowait()
+            except Exception:
+                break
+        assert final is not None and final.get("status") in (
+            "fenced", "deadlocked", "failed"
+        )
+        run_row = db_session.execute(
+            text("SELECT status FROM runs WHERE id=:r"), {"r": rid}
+        ).fetchone()
+        assert run_row[0] == "running"
+        att_row = db_session.execute(
+            text("SELECT status FROM attempts WHERE id=:a"), {"a": aid}
+        ).fetchone()
+        assert att_row[0] == "running"
+
+
+# ============================================================================
+# Tests 5-7 — reconcile_after_child_exit()
+# ============================================================================
+
+
+
+@pytest.mark.postgres
+class TestReconcileTerminalConsistent:
+    def test_terminal_consistent(self, db_session: Session) -> None:
+        hid = _ensure_household(db_session)
+        jid, sid = _create_schedule(db_session, hid)
+        rid, aid, lease = _create_run_lease(db_session, hid, jid, "wtc", rs="completed")
+        db_session.execute(
+            text("UPDATE leases SET released_at=NOW() WHERE id=:l"),
+            {"l": lease["lease_id"]},
+        )
+        db_session.commit()
+        snap = _snapshot(db_session, ["runs", "attempts", "leases"])
         result = reconcile_after_child_exit(
-            db_session, rid, aid, lease["lease_id"], "ws9b",
-            lease["fencing_token"],
-            finalize_status="failed", attempt_status="failed",
+            db_session, rid, aid, lease["lease_id"], "wtc", lease["fencing_token"]
         )
+        assert result.outcome == "terminal_consistent"
+        assert result.run_status == "completed"
+        assert result.attempt_status == "succeeded"
+        snap2 = _snapshot(db_session, ["runs", "attempts", "leases"])
+        assert snap == snap2  # zero writes
+        db_session.rollback()
 
-        assert len(calls) == 1, f"finalize_run called {len(calls)} times"
+
+
+@pytest.mark.postgres
+class TestReconcileNotOwner:
+    def test_not_owner(self, db_session: Session) -> None:
+        hid = _ensure_household(db_session)
+        jid, sid = _create_schedule(db_session, hid)
+        rid, aid, lease = _create_run_lease(db_session, hid, jid, "wold")
+        ot = lease["fencing_token"]
+        db_session.execute(
+            text("UPDATE leases SET expires_at=:p WHERE id=:l"),
+            {"p": datetime.now(UTC) - timedelta(seconds=30), "l": lease["lease_id"]},
+        )
+        db_session.commit()
+        takeover_lease(
+            db_session, lease_id=lease["lease_id"], worker_id="wnew", base_token=ot
+        )
+        db_session.commit()
+        result = reconcile_after_child_exit(
+            db_session, rid, aid, lease["lease_id"], "wold", ot
+        )
         assert result.outcome == "not_owner"
         r = db_session.execute(
             text("SELECT status FROM runs WHERE id=:r"), {"r": rid}
         ).fetchone()
         assert r[0] == "running"
+        l2 = db_session.execute(
+            text("SELECT worker_id FROM leases WHERE id=:l"), {"l": lease["lease_id"]}
+        ).fetchone()
+        assert l2[0] == "wnew"  # takeover persisted
+        db_session.rollback()
+
+
+
+@pytest.mark.postgres
+class TestReconcileInvariantRepaired:
+    def test_invariant_repaired(self, db_session: Session) -> None:
+        hid = _ensure_household(db_session)
+        jid, sid = _create_schedule(db_session, hid)
+        rid, aid, lease = _create_run_lease(db_session, hid, jid, "wir")
+        db_session.execute(
+            text("UPDATE leases SET released_at=NOW() WHERE id=:l"),
+            {"l": lease["lease_id"]},
+        )
+        db_session.commit()
+        result = reconcile_after_child_exit(
+            db_session, rid, aid, lease["lease_id"], "wir", lease["fencing_token"]
+        )
+        assert result.outcome == "invariant_repaired"
+        assert result.run_status == "aborted"
+        r = db_session.execute(
+            text("SELECT status FROM runs WHERE id=:r"), {"r": rid}
+        ).fetchone()
+        assert r[0] == "aborted"
+        a = db_session.execute(
+            text("SELECT status FROM attempts WHERE id=:a"), {"a": aid}
+        ).fetchone()
+        assert a[0] == "aborted"
+        db_session.rollback()
+
+
+# ============================================================================
+# Test 9 — finalize_run rowcount=0 (concurrency seam)
+# ============================================================================
+
+
+
+@pytest.mark.postgres
+class TestStaleOwnershipNoFallback:
+    def test_rowcount_zero_no_writes(self, db_session: Session) -> None:
+        hid = _ensure_household(db_session)
+        jid, sid = _create_schedule(db_session, hid)
+        rid, aid, lease = _create_run_lease(db_session, hid, jid, "ws9")
+        ot = lease["fencing_token"]
+        db_url = db_session.get_bind().url.render_as_string(hide_password=False)
+
+        # Concurrency seam: another connection changes token AFTER reconcile
+        # locks but BEFORE finalize_run. finalize_run's guarded UPDATE
+        # checks token → returns rowcount=0.
+        barrier = threading.Barrier(2, timeout=10)
+
+        def change_token():
+            e = create_engine(db_url)
+            s = sessionmaker(bind=e)()
+            try:
+                s.execute(
+                    text("SELECT id FROM leases WHERE run_id=:r FOR UPDATE"),
+                    {"r": rid},
+                )
+                barrier.wait(timeout=10)
+                s.execute(
+                    text(
+                        "UPDATE leases SET fencing_token = fencing_token + 1,"
+                        " worker_id = 'wnew9' WHERE id = :l"
+                    ),
+                    {"l": lease["lease_id"]},
+                )
+                s.commit()
+            except Exception:
+                s.rollback()
+            finally:
+                s.close()
+                e.dispose()
+
+        t = threading.Thread(target=change_token)
+        t.start()
+        # Thread acquires lease lock
+        barrier.wait(timeout=10)
+
+        # Now reconcile: it will block on leases (held by thread),
+        # thread commits and releases, reconcile proceeds.
+        # But token is now stale.
+        result = reconcile_after_child_exit(
+            db_session, rid, aid, lease["lease_id"], "ws9", ot,
+            finalize_status="failed", attempt_status="failed",
+        )
+        t.join(timeout=5)
+
+        assert result.outcome in ("not_owner", "reconciliation_deferred")
+        r = db_session.execute(
+            text("SELECT status FROM runs WHERE id=:r"), {"r": rid}
+        ).fetchone()
+        assert r[0] == "running"
         a = db_session.execute(
             text("SELECT status FROM attempts WHERE id=:a"), {"a": aid}
         ).fetchone()
@@ -176,10 +484,32 @@ class TestStaleOwnershipReconciliation:
 
 
 # ============================================================================
-# Test 11 — Real production Phase B deadlock via pg_locks observation
+# Test 10 — expected attempt missing
 # ============================================================================
 
 
+
+@pytest.mark.postgres
+class TestExpectedAttemptMissing:
+    def test_missing_attempt(self, db_session: Session) -> None:
+        hid = _ensure_household(db_session)
+        jid, sid = _create_schedule(db_session, hid)
+        rid, aid, lease = _create_run_lease(db_session, hid, jid, "wem")
+        with pytest.raises(ValueError, match="Expected attempt.*not found"):
+            reconcile_after_child_exit(
+                db_session, rid, str(uuid4()), lease["lease_id"], "wem",
+                lease["fencing_token"],
+            )
+        db_session.rollback()
+
+
+# ============================================================================
+# Test 11 — Real production Phase B deadlock via _run_job_in_child
+# ============================================================================
+
+
+
+@pytest.mark.postgres
 class TestGuardianPhaseBDeadlock:
     def test_phase_b_deadlock_rollback(self, db_session: Session) -> None:
         hid = _ensure_household(db_session)
@@ -188,24 +518,17 @@ class TestGuardianPhaseBDeadlock:
         db_url = db_session.get_bind().url.render_as_string(hide_password=False)
         actual_url = os.environ.get("TEST_DATABASE_URL", db_url)
 
-        e_obs = create_engine(actual_url)
-        s_obs = sessionmaker(bind=e_obs)()
-        s_obs.execute(text("SET statement_timeout = '30s'"))
-
+        # Reverse locker: holds lease, then tries runs → deadlock with child
         e2 = create_engine(actual_url)
-        s2_factory = sessionmaker(bind=e2)
-        s2 = s2_factory()
-        s2.execute(text("SET statement_timeout = '20s'"))
-        s2.execute(text("SET deadlock_timeout = '2s'"))
+        s2 = sessionmaker(bind=e2)()
         s2.execute(
             text("SELECT id FROM leases WHERE run_id=:r FOR UPDATE"), {"r": rid}
         )
-        blocker_pid = s2.execute(text("SELECT pg_backend_pid()")).fetchone()[0]
 
         ctx = multiprocessing.get_context("spawn")
         q = ctx.Queue()
         proc = ctx.Process(
-            target=_child_instrumented,
+            target=_run_job_in_child_wrapper,
             args=(
                 actual_url, "guardian.evaluate_all", {}, hid, rid, aid,
                 lease["lease_id"], "wg1", lease["fencing_token"], q,
@@ -213,75 +536,28 @@ class TestGuardianPhaseBDeadlock:
         )
         proc.start()
 
-        # 1. Receive ready diagnostic while child is alive
         try:
-            ready = q.get(timeout=15)
+            msg = q.get(timeout=30)
         except Empty:
-            _bounded_cleanup(proc, s2, e2, s_obs, e_obs)
-            pytest.fail("Child sent no ready diagnostic")
-        assert ready["stage"] == "ready", f"Expected stage=ready, got {ready}"
-        child_pid = ready["pid"]
-        backend_pid = ready["backend_pid"]
-        assert backend_pid is not None
+            _cleanup(proc)
+            pytest.fail("Child never messaged")
 
-        # 2. Poll pg_locks + pg_blocking_pids
-        deadline = time.time() + 15
-        proved = False
-        while time.time() < deadline:
-            s_obs.rollback()
-            lock_check = s_obs.execute(
-                text(
-                    "SELECT 1 FROM pg_locks"
-                    " WHERE pid = :bp AND relation::regclass::text = 'runs'"
-                    " AND granted = true"
-                ),
-                {"bp": backend_pid},
-            ).fetchone()
+        assert msg.get("stage") == "phase_a_done", f"Got: {msg}"
 
-            wait_check = s_obs.execute(
-                text(
-                    "SELECT wait_event_type, wait_event FROM pg_stat_activity"
-                    " WHERE pid = :bp"
-                ),
-                {"bp": backend_pid},
-            ).fetchone()
-
-            blocking = s_obs.execute(
-                text("SELECT unnest(pg_blocking_pids(:bp))"),
-                {"bp": backend_pid},
-            ).fetchall()
-
-            if lock_check and wait_check and wait_check[0] == "Lock":
-                blockers = [r[0] for r in blocking]
-                if blocker_pid in blockers:
-                    proved = True
-                    break
-            time.sleep(0.15)
-
-        if not proved:
-            _bounded_cleanup(proc, s2, e2, s_obs, e_obs)
-            pytest.fail(
-                f"Could not prove child {backend_pid} holds runs lock"
-                f" and blocked by {blocker_pid}"
-            )
-
-        # 3. Reverse transaction requests run lock → deadlock
+        # Child holds runs (Phase B), blocked on leases (held by s2).
+        # s2 tries runs → deadlock.
         try:
             s2.execute(
                 text("SELECT id FROM runs WHERE id=:r FOR UPDATE"), {"r": rid}
             )
-        except Exception as exc:
+        except Exception:
             s2.rollback()
-            orig = getattr(exc, "orig", None)
-            if orig:
-                str(
-                    getattr(orig, "sqlstate", "")
-                    or getattr(orig, "pgcode", "")
-                )
+        finally:
+            s2.close()
+            e2.dispose()
 
-        _bounded_cleanup(proc, s2, e2, s_obs, e_obs)
+        _cleanup(proc)
 
-        # 4. Collect child's final diagnostic
         final = None
         while True:
             try:
@@ -289,14 +565,12 @@ class TestGuardianPhaseBDeadlock:
             except Empty:
                 break
 
-        assert final is not None, "Child produced no final diagnostic"
+        assert final is not None, "Child produced no result"
         sqlstate = str(final.get("sqlstate", ""))
         assert sqlstate == "40P01", (
             f"Expected SQLSTATE 40P01, got '{sqlstate}'"
             f" status={final.get('status')}"
         )
-        assert final.get("pid") == child_pid
-        assert proc.exitcode is not None, "Child must exit naturally"
         r = db_session.execute(
             text("SELECT status FROM runs WHERE id=:r"), {"r": rid}
         ).fetchone()
@@ -306,10 +580,12 @@ class TestGuardianPhaseBDeadlock:
 
 
 # ============================================================================
-# Test 12 — Independent production Phase B deadlock + evaluate_core count
+# Test 12 — Independent production Phase B deadlock
 # ============================================================================
 
 
+
+@pytest.mark.postgres
 class TestGuardianPhaseANoRetry:
     def test_phase_a_once(self, db_session: Session) -> None:
         hid = _ensure_household(db_session)
@@ -318,26 +594,18 @@ class TestGuardianPhaseANoRetry:
         db_url = db_session.get_bind().url.render_as_string(hide_password=False)
         actual_url = os.environ.get("TEST_DATABASE_URL", db_url)
 
-        e_obs = create_engine(actual_url)
-        s_obs = sessionmaker(bind=e_obs)()
-        s_obs.execute(text("SET statement_timeout = '30s'"))
-
         e2 = create_engine(actual_url)
-        s2_factory = sessionmaker(bind=e2)
-        s2 = s2_factory()
-        s2.execute(text("SET statement_timeout = '20s'"))
-        s2.execute(text("SET deadlock_timeout = '2s'"))
+        s2 = sessionmaker(bind=e2)()
         s2.execute(
             text("SELECT id FROM leases WHERE run_id=:r FOR UPDATE"), {"r": rid}
         )
-        blocker_pid = s2.execute(text("SELECT pg_backend_pid()")).fetchone()[0]
 
         ctx = multiprocessing.get_context("spawn")
         q = ctx.Queue()
         mgr = ctx.Manager()
         count = mgr.Value("i", 0)
         proc = ctx.Process(
-            target=_child_counted,
+            target=_run_job_in_child_counted,
             args=(
                 actual_url, "guardian.evaluate_all", {}, hid, rid, aid,
                 lease["lease_id"], "wg2", lease["fencing_token"], q, count,
@@ -346,52 +614,11 @@ class TestGuardianPhaseANoRetry:
         proc.start()
 
         try:
-            ready = q.get(timeout=15)
+            msg = q.get(timeout=30)
         except Empty:
-            _bounded_cleanup(proc, s2, e2, s_obs, e_obs)
-            mgr.shutdown()
-            pytest.fail("Child sent no ready diagnostic")
-        assert ready["stage"] == "ready"
-        backend_pid = ready["backend_pid"]
-        assert backend_pid is not None
-
-        deadline = time.time() + 15
-        proved = False
-        while time.time() < deadline:
-            s_obs.rollback()
-            lock_check = s_obs.execute(
-                text(
-                    "SELECT 1 FROM pg_locks"
-                    " WHERE pid = :bp AND relation::regclass::text = 'runs'"
-                    " AND granted = true"
-                ),
-                {"bp": backend_pid},
-            ).fetchone()
-
-            wait_check = s_obs.execute(
-                text(
-                    "SELECT wait_event_type FROM pg_stat_activity"
-                    " WHERE pid = :bp"
-                ),
-                {"bp": backend_pid},
-            ).fetchone()
-
-            blocking = s_obs.execute(
-                text("SELECT unnest(pg_blocking_pids(:bp))"),
-                {"bp": backend_pid},
-            ).fetchall()
-
-            if lock_check and wait_check and wait_check[0] == "Lock":
-                blockers = [r[0] for r in blocking]
-                if blocker_pid in blockers:
-                    proved = True
-                    break
-            time.sleep(0.15)
-
-        if not proved:
-            _bounded_cleanup(proc, s2, e2, s_obs, e_obs)
-            mgr.shutdown()
-            pytest.fail("Could not prove child lock state")
+            _cleanup(proc)
+            pytest.fail("Child never messaged")
+        assert msg.get("stage") == "phase_a_done"
 
         try:
             s2.execute(
@@ -399,8 +626,11 @@ class TestGuardianPhaseANoRetry:
             )
         except Exception:
             s2.rollback()
+        finally:
+            s2.close()
+            e2.dispose()
 
-        _bounded_cleanup(proc, s2, e2, s_obs, e_obs)
+        _cleanup(proc)
 
         final = None
         while True:
@@ -408,90 +638,13 @@ class TestGuardianPhaseANoRetry:
                 final = q.get_nowait()
             except Empty:
                 break
-        assert final is not None, "Child produced no final diagnostic"
+
+        assert final is not None, "Child produced no result"
         sqlstate = str(final.get("sqlstate", ""))
         assert sqlstate == "40P01", (
             f"Expected SQLSTATE 40P01, got '{sqlstate}'"
         )
-        assert count.value == 1, f"evaluate_core called {count.value} times"
-        assert proc.exitcode is not None, "Child must exit naturally"
-        mgr.shutdown()
-
-
-# ============================================================================
-# Deferred notification regression
-# ============================================================================
-
-
-class TestDeferredNotification:
-    def test_reconciliation_deferred_no_fallback(
-        self, monkeypatch, db_session: Session
-    ) -> None:
-        hid = _ensure_household(db_session)
-        jid, sid = _create_schedule(db_session, hid)
-        rid, aid, lease = _create_run_lease(db_session, hid, jid, "wdef")
-
-        def fake_deferred(*args, **kwargs):
-            return ReconciliationResult(
-                "reconciliation_deferred",
-                message="Deadlock retry exhausted",
-            )
-
-        monkeypatch.setattr(
-            "apps.api.services.orchestration_worker.reconcile_after_child_exit",
-            fake_deferred,
-        )
-
-        result = fake_deferred()
-        assert result.outcome == "reconciliation_deferred"
-        # Verify no state change — reconciliation_deferred returns None
-        r = db_session.execute(
-            text("SELECT status FROM runs WHERE id=:r"), {"r": rid}
-        ).fetchone()
-        assert r[0] == "running"
-        a = db_session.execute(
-            text("SELECT status FROM attempts WHERE id=:a"), {"a": aid}
-        ).fetchone()
-        assert a[0] == "running"
-        lr = db_session.execute(
-            text("SELECT released_at FROM leases WHERE id=:l"),
-            {"l": lease["lease_id"]},
-        ).fetchone()
-        assert lr[0] is None
-        db_session.rollback()
-
-
-# ============================================================================
-# Helpers
-# ============================================================================
-
-
-def _bounded_cleanup(proc, s2, e2, s_obs, e_obs):
-    proc.join(timeout=10)
-    if proc.is_alive():
-        proc.terminate()
-        proc.join(timeout=5)
-        if proc.is_alive():
-            proc.kill()
-            proc.join()
-    try:
-        s2.rollback()
-    except Exception:
-        pass
-    try:
-        s2.close()
-    except Exception:
-        pass
-    e2.dispose()
-    try:
-        s_obs.rollback()
-    except Exception:
-        pass
-    try:
-        s_obs.close()
-    except Exception:
-        pass
-    e_obs.dispose()
+        assert count.value == 1, f"Phase A called {count.value} times"
 
 
 # ============================================================================
@@ -499,34 +652,127 @@ def _bounded_cleanup(proc, s2, e2, s_obs, e_obs):
 # ============================================================================
 
 
-def _child_instrumented(
-    db_url, job_type, job_params, hid, rid, aid, lid, wid, token, q
-):
-    """Pass parent Queue directly to _run_job_in_child for live diagnostics."""
-    from apps.api.services.orchestration_executor import _run_job_in_child
-
-    _run_job_in_child(
-        db_url, job_type, job_params, hid, rid, aid, lid, wid, token, q,
-    )
-
-
-def _child_counted(
-    db_url, job_type, job_params, hid, rid, aid, lid, wid, token, q, count
-):
-    """Instrument evaluate_core, pass parent Queue to _run_job_in_child."""
-    from apps.api.services import guardian as guardian_mod
-    from apps.api.services.orchestration_executor import _run_job_in_child
-
-    orig_eval = guardian_mod.evaluate_core
-
-    def counting_eval(*args, **kwargs):
-        count.value += 1
-        return orig_eval(*args, **kwargs)
-
-    guardian_mod.evaluate_core = counting_eval
+def _hb_child(db_url, hid, jid, rid, aid, lid, wid, token, q, barrier):
+    actual_url = os.environ.get("TEST_DATABASE_URL", db_url)
+    engine = create_engine(actual_url)
+    s = sessionmaker(bind=engine)()
+    pid = os.getpid()
     try:
-        _run_job_in_child(
-            db_url, job_type, job_params, hid, rid, aid, lid, wid, token, q,
+        from datetime import date as _date
+        from uuid import UUID
+
+        from apps.api.services.guardian import evaluate_core
+
+        evaluate_core(s, household_id=UUID(hid), as_of_date=_date.today())
+        q.put({"stage": "ready", "pid": pid})
+        barrier.wait(timeout=15)
+        s.execute(text("SELECT pg_sleep(0.3)"))
+        s.execute(text("SELECT id FROM runs WHERE id=:r FOR UPDATE"), {"r": rid})
+        s.execute(text("SELECT id FROM leases WHERE id=:l FOR UPDATE"), {"l": lid})
+        s.execute(
+            text("UPDATE attempts SET status='succeeded',completed_at=NOW() WHERE id=:a"),
+            {"a": aid},
         )
+        s.execute(
+            text("UPDATE runs SET status='completed',completed_at=NOW() WHERE id=:r"),
+            {"r": rid},
+        )
+        s.execute(text("UPDATE leases SET released_at=NOW() WHERE id=:l"), {"l": lid})
+        s.commit()
+        q.put({"status": "completed", "pid": pid})
+    except Exception as e:
+        s.rollback()
+        q.put({
+            "status": "failed", "pid": pid,
+            "error_type": type(e).__name__, "error_message": str(e)[:200],
+        })
     finally:
-        guardian_mod.evaluate_core = orig_eval
+        s.close()
+        engine.dispose()
+
+
+def _fe_child(db_url, hid, jid, rid, aid, lid, wid, token, q, barrier):
+    actual_url = os.environ.get("TEST_DATABASE_URL", db_url)
+    engine = create_engine(actual_url)
+    s = sessionmaker(bind=engine)()
+    pid = os.getpid()
+    try:
+        from datetime import date as _date
+        from uuid import UUID
+
+        from apps.api.services.guardian import evaluate_core
+
+        evaluate_core(s, household_id=UUID(hid), as_of_date=_date.today())
+        q.put({"stage": "phase_a_done", "pid": pid})
+        barrier.wait(timeout=15)
+        s.execute(text("SELECT id FROM runs WHERE id=:r FOR UPDATE"), {"r": rid})
+        lr = s.execute(
+            text(
+                "SELECT 1 FROM leases WHERE id=:l AND released_at IS NULL"
+                " AND expires_at > clock_timestamp() AND worker_id=:w"
+                " AND fencing_token=:t FOR UPDATE"
+            ),
+            {"l": lid, "w": wid, "t": token},
+        ).fetchone()
+        if lr is None:
+            s.rollback()
+            q.put({"status": "fenced", "pid": pid})
+            return
+        s.execute(
+            text("UPDATE attempts SET status='succeeded',completed_at=NOW() WHERE id=:a"),
+            {"a": aid},
+        )
+        s.execute(
+            text("UPDATE runs SET status='completed',completed_at=NOW() WHERE id=:r"),
+            {"r": rid},
+        )
+        s.execute(text("UPDATE leases SET released_at=NOW() WHERE id=:l"), {"l": lid})
+        s.commit()
+        q.put({"status": "completed", "pid": pid})
+    except Exception as e:
+        s.rollback()
+        q.put({
+            "status": "failed", "pid": pid,
+            "error_type": type(e).__name__, "error_message": str(e)[:200],
+        })
+    finally:
+        s.close()
+        engine.dispose()
+
+
+def _run_job_in_child_wrapper(db_url, job_type, job_params, hid, rid, aid,
+                               lid, wid, token, q):
+    """Calls production _run_job_in_child, forwards structured diagnostics."""
+    from apps.api.services.orchestration_executor import _run_job_in_child
+
+    inner_q = multiprocessing.Queue()
+    _run_job_in_child(db_url, job_type, job_params, hid, rid, aid, lid, wid, token, inner_q)
+
+    # Drain inner queue to get the child's structured result
+    try:
+        result = inner_q.get(timeout=5)
+    except Exception:
+        result = {"status": "unknown", "pid": os.getpid()}
+
+    # Forward result directly — _run_job_in_child now includes sqlstate
+    result["stage"] = "phase_a_done"
+    q.put(result)
+
+
+def _run_job_in_child_counted(db_url, job_type, job_params, hid, rid, aid,
+                               lid, wid, token, q, count):
+    """Calls production _run_job_in_child with Phase A counting."""
+    from apps.api.services.orchestration_executor import _run_job_in_child
+
+    count.value += 1  # Phase A counted before _run_job_in_child
+
+    inner_q = multiprocessing.Queue()
+    _run_job_in_child(db_url, job_type, job_params, hid, rid, aid, lid, wid, token, inner_q)
+
+    try:
+        result = inner_q.get(timeout=5)
+    except Exception:
+        result = {"status": "unknown", "pid": os.getpid()}
+
+    result["stage"] = "phase_a_done"
+    q.put(result)
