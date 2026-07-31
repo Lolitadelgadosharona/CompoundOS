@@ -477,19 +477,22 @@ class OrchestrationWorker:
             return None
 
         if rec_result.outcome == "reconciliation_deferred":
-            # Leave state unchanged — legitimate owner or reaper handles it.
-            # No notification, no fallback write.
             return None
 
         if rec_result.outcome in ("terminal_consistent", "invariant_repaired",
                                   "parent_finalized"):
             session.commit()
 
+        # Use authoritative run_status for notification decisions
+        authoritative_status = rec_result.run_status or finalize_status
+
         eval_status = result.get("evaluation_run", {}).get("status", "")
         if is_guardian and eval_status.startswith(("completed", "skipped")):
             return result
-        # Sprint 008 Slice B: return failure info for failed runs
-        if finalize_status == "failed":
+
+        # Sprint 008 Slice B: return failure info only for genuinely failed runs.
+        # A completed authoritative run must never generate run_failed.
+        if authoritative_status == "failed":
             return {"run_id": str(expected_run_id),
                     "household_id": str(household_id),
                     "finalize_status": "failed"}
