@@ -556,192 +556,228 @@ class TestGuardianPhaseBDeadlock:
         proc.start()
 
         forced = {"required": False}
-
-        # 1. Receive ready diagnostic while child is alive
+        pt = None
         try:
-            ready = q.get(timeout=15)
-        except Empty:
-            _bounded_cleanup(proc, s2, e2, s_obs, e_obs)
-            pytest.fail("Child sent no ready diagnostic")
-        assert ready["stage"] == "ready", f"Expected stage=ready, got {ready}"
-        child_pid = ready["pid"]
-        backend_pid = ready["backend_pid"]
-        assert backend_pid is not None
-
-        # 2. Poll pg_locks + pg_blocking_pids
-        deadline = time.time() + 15
-        proved = False
-        while time.time() < deadline:
-            s_obs.rollback()
-            lock_check = s_obs.execute(
-                text(
-                    "SELECT 1 FROM pg_locks"
-                    " WHERE pid = :bp AND relation::regclass::text = 'runs'"
-                    " AND granted = true"
-                ),
-                {"bp": backend_pid},
-            ).fetchone()
-
-            wait_check = s_obs.execute(
-                text(
-                    "SELECT wait_event_type, wait_event FROM pg_stat_activity"
-                    " WHERE pid = :bp"
-                ),
-                {"bp": backend_pid},
-            ).fetchone()
-
-            blocking = s_obs.execute(
-                text("SELECT unnest(pg_blocking_pids(:bp))"),
-                {"bp": backend_pid},
-            ).fetchall()
-
-            if lock_check and wait_check and wait_check[0] == "Lock":
-                blockers = [r[0] for r in blocking]
-                if blocker_pid in blockers:
-                    proved = True
-                    break
-            time.sleep(0.15)
-
-        if not proved:
-            _bounded_cleanup(proc, s2, e2, s_obs, e_obs)
-            pytest.fail(
-                f"Could not prove child {backend_pid} holds runs lock"
-                f" and blocked by {blocker_pid}"
-            )
-
-        # 3. s2 directly requests run lock → deadlock with child.
-        # A polling thread captures bidirectional pg_blocking_pids.
-        blocking_evidence = {"child_blockers": [], "reverse_blockers": [], "done": False}
-
-        def _poll_blocking():
-            e = create_engine(actual_url)
-            s = sessionmaker(bind=e)()
+            # 1. Receive ready diagnostic while child is alive
             try:
-                s.execute(text("SET statement_timeout = '30s'"))
-                deadline = time.time() + 5
-                while time.time() < deadline and not blocking_evidence["done"]:
-                    s.rollback()
-                    cb = s.execute(
-                        text("SELECT unnest(pg_blocking_pids(:bp))"), {"bp": backend_pid}
-                    ).fetchall()
-                    rb = s.execute(
-                        text("SELECT unnest(pg_blocking_pids(:bp))"), {"bp": blocker_pid}
-                    ).fetchall()
-                    blocking_evidence["child_blockers"] = [r[0] for r in cb]
-                    blocking_evidence["reverse_blockers"] = [r[0] for r in rb]
-                    if (blocking_evidence["child_blockers"]
-                            and blocking_evidence["reverse_blockers"]):
-                        blocking_evidence["done"] = True
-                        break
-                    time.sleep(0.05)
-            finally:
-                s.close()
-                e.dispose()
-
-        pt = threading.Thread(target=_poll_blocking)
-        pt.start()
-
-        reverse_result = {"status": "", "sqlstate": "", "backend_pid": blocker_pid}
-        try:
-            s2.execute(
-                text("SELECT id FROM runs WHERE id=:r FOR UPDATE"), {"r": rid}
-            )
-            reverse_result["status"] = "success"
-            reverse_result["sqlstate"] = "00000"
-        except Exception as exc:
-            s2.rollback()
-            reverse_result["status"] = "deadlocked"
-            orig = getattr(exc, "orig", None)
-            if orig:
-                reverse_result["sqlstate"] = str(
-                    getattr(orig, "sqlstate", "") or getattr(orig, "pgcode", "")
-                )
-            reverse_result["error_type"] = type(exc).__name__
-            reverse_result["error_message"] = str(exc)[:200]
-
-        blocking_evidence["done"] = True
-        pt.join(timeout=5)
-
-        assert blocker_pid in blocking_evidence["child_blockers"], (
-            f"Child not blocked. Child blockers: {blocking_evidence['child_blockers']}"
-        )
-        rbl = blocking_evidence["reverse_blockers"]
-        assert backend_pid in rbl, (
-            f"Reverse not blocked. Reverse blockers: {rbl}"
-        )
-
-        # 4. Collect final child diagnostic BEFORE cleanup
-        try:
-            final = q.get(timeout=10)
-        except Empty:
-            final = None
-        assert final is not None, "Child produced no final diagnostic"
-        child_sqlstate = str(final.get("sqlstate", ""))
-        assert child_sqlstate == "40P01", (
-            f"Expected SQLSTATE 40P01, got '{child_sqlstate}'"
-        )
-        assert reverse_result["sqlstate"] == "00000", (
-            f"Reverse expected 00000 (success), got: {reverse_result}"
-        )
-
-        # 6. Bounded natural join — child must exit naturally
-        proc.join(timeout=10)
-        if proc.is_alive():
-            forced["required"] = True
-            proc.terminate()
-            proc.join(timeout=5)
-            if proc.is_alive():
-                proc.kill()
-                proc.join(timeout=5)
-        assert proc.exitcode == 0, (
-            f"Child must exit naturally, got exitcode={proc.exitcode}"
-        )
-
-        # 7. Cleanup only after diagnostic collected
-        try:
-            s2.rollback()
-        except Exception:
-            pass
-        try:
-            s2.close()
-        except Exception:
-            pass
-        e2.dispose()
-        try:
-            s_obs.rollback()
-        except Exception:
-            pass
-        try:
-            s_obs.close()
-        except Exception:
-            pass
-        e_obs.dispose()
-        q.close()
-        q.join_thread()
-
-        assert not forced["required"], "Test passed but forced cleanup was required"
-
-        # Verify no residual resources
-        _v = create_engine(actual_url)
-        _vs = sessionmaker(bind=_v)()
-        try:
-            for pid in [backend_pid, blocker_pid]:
-                row = _vs.execute(
-                    text("SELECT 1 FROM pg_stat_activity WHERE pid = :p"),
-                    {"p": pid},
+                ready = q.get(timeout=15)
+            except Empty:
+                _bounded_cleanup(proc, s2, e2, s_obs, e_obs)
+                pytest.fail("Child sent no ready diagnostic")
+            assert ready["stage"] == "ready", f"Expected stage=ready, got {ready}"
+            child_pid = ready["pid"]
+            backend_pid = ready["backend_pid"]
+            assert backend_pid is not None
+    
+            # 2. Poll pg_locks + pg_blocking_pids
+            deadline = time.time() + 15
+            proved = False
+            while time.time() < deadline:
+                s_obs.rollback()
+                lock_check = s_obs.execute(
+                    text(
+                        "SELECT 1 FROM pg_locks"
+                        " WHERE pid = :bp AND relation::regclass::text = 'runs'"
+                        " AND granted = true"
+                    ),
+                    {"bp": backend_pid},
                 ).fetchone()
-                assert row is None, f"Backend {pid} still active"
-            locks = _vs.execute(
-                text(
-                    "SELECT 1 FROM pg_locks"
-                    " WHERE pid IN (:bp, :cp) LIMIT 1"
-                ),
-                {"bp": backend_pid, "cp": blocker_pid},
-            ).fetchone()
-            assert locks is None, "Residual locks remain"
+    
+                wait_check = s_obs.execute(
+                    text(
+                        "SELECT wait_event_type, wait_event FROM pg_stat_activity"
+                        " WHERE pid = :bp"
+                    ),
+                    {"bp": backend_pid},
+                ).fetchone()
+    
+                blocking = s_obs.execute(
+                    text("SELECT unnest(pg_blocking_pids(:bp))"),
+                    {"bp": backend_pid},
+                ).fetchall()
+    
+                if lock_check and wait_check and wait_check[0] == "Lock":
+                    blockers = [r[0] for r in blocking]
+                    if blocker_pid in blockers:
+                        proved = True
+                        break
+                time.sleep(0.15)
+    
+            if not proved:
+                _bounded_cleanup(proc, s2, e2, s_obs, e_obs)
+                pytest.fail(
+                    f"Could not prove child {backend_pid} holds runs lock"
+                    f" and blocked by {blocker_pid}"
+                )
+    
+            # 3. s2 directly requests run lock → deadlock with child.
+            # A polling thread captures bidirectional pg_blocking_pids.
+            blocking_evidence = {"child_blockers": [], "reverse_blockers": [], "done": False}
+    
+            def _poll_blocking():
+                e = create_engine(actual_url)
+                s = sessionmaker(bind=e)()
+                try:
+                    s.execute(text("SET statement_timeout = '30s'"))
+                    deadline = time.time() + 5
+                    while time.time() < deadline and not blocking_evidence["done"]:
+                        s.rollback()
+                        cb = s.execute(
+                            text("SELECT unnest(pg_blocking_pids(:bp))"), {"bp": backend_pid}
+                        ).fetchall()
+                        rb = s.execute(
+                            text("SELECT unnest(pg_blocking_pids(:bp))"), {"bp": blocker_pid}
+                        ).fetchall()
+                        blocking_evidence["child_blockers"] = [r[0] for r in cb]
+                        blocking_evidence["reverse_blockers"] = [r[0] for r in rb]
+                        if (blocking_evidence["child_blockers"]
+                                and blocking_evidence["reverse_blockers"]):
+                            blocking_evidence["done"] = True
+                            break
+                        time.sleep(0.05)
+                finally:
+                    s.close()
+                    e.dispose()
+    
+            pt = threading.Thread(target=_poll_blocking)
+            pt.start()
+    
+            reverse_result = {"status": "", "sqlstate": "", "backend_pid": blocker_pid}
+            try:
+                s2.execute(
+                    text("SELECT id FROM runs WHERE id=:r FOR UPDATE"), {"r": rid}
+                )
+                reverse_result["status"] = "success"
+                reverse_result["sqlstate"] = "00000"
+            except Exception as exc:
+                s2.rollback()
+                reverse_result["status"] = "deadlocked"
+                orig = getattr(exc, "orig", None)
+                if orig:
+                    reverse_result["sqlstate"] = str(
+                        getattr(orig, "sqlstate", "") or getattr(orig, "pgcode", "")
+                    )
+                reverse_result["error_type"] = type(exc).__name__
+                reverse_result["error_message"] = str(exc)[:200]
+    
+            blocking_evidence["done"] = True
+            pt.join(timeout=5)
+    
+            assert blocker_pid in blocking_evidence["child_blockers"], (
+                f"Child not blocked. Child blockers: {blocking_evidence['child_blockers']}"
+            )
+            rbl = blocking_evidence["reverse_blockers"]
+            assert backend_pid in rbl, (
+                f"Reverse not blocked. Reverse blockers: {rbl}"
+            )
+    
+            # 4. Collect final child diagnostic BEFORE cleanup
+            try:
+                final = q.get(timeout=10)
+            except Empty:
+                final = None
+            assert final is not None, "Child produced no final diagnostic"
+            child_sqlstate = str(final.get("sqlstate", ""))
+            assert child_sqlstate == "40P01", (
+                f"Expected SQLSTATE 40P01, got '{child_sqlstate}'"
+            )
+            assert reverse_result["sqlstate"] == "00000", (
+                f"Reverse expected 00000 (success), got: {reverse_result}"
+            )
+    
+            # 6. Bounded natural join — child must exit naturally
+            proc.join(timeout=10)
+            if proc.is_alive():
+                forced["required"] = True
+                proc.terminate()
+                proc.join(timeout=5)
+                if proc.is_alive():
+                    proc.kill()
+                    proc.join(timeout=5)
+            assert proc.exitcode == 0, (
+                f"Child must exit naturally, got exitcode={proc.exitcode}"
+            )
+    
+            # 7. Cleanup only after diagnostic collected
+            try:
+                s2.rollback()
+            except Exception:
+                pass
+            try:
+                s2.close()
+            except Exception:
+                pass
+            e2.dispose()
+            try:
+                s_obs.rollback()
+            except Exception:
+                pass
+            try:
+                s_obs.close()
+            except Exception:
+                pass
+            e_obs.dispose()
+            q.close()
+            q.join_thread()
+    
+            assert not forced["required"], "Test passed but forced cleanup was required"
+    
+            # Verify no residual resources
+            _v = create_engine(actual_url)
+            _vs = sessionmaker(bind=_v)()
+            try:
+                for pid in [backend_pid, blocker_pid]:
+                    row = _vs.execute(
+                        text("SELECT 1 FROM pg_stat_activity WHERE pid = :p"),
+                        {"p": pid},
+                    ).fetchone()
+                    assert row is None, f"Backend {pid} still active"
+                locks = _vs.execute(
+                    text(
+                        "SELECT 1 FROM pg_locks"
+                        " WHERE pid IN (:bp, :cp) LIMIT 1"
+                    ),
+                    {"bp": backend_pid, "cp": blocker_pid},
+                ).fetchone()
+                assert locks is None, "Residual locks remain"
+            finally:
+                _vs.close()
+                _v.dispose()
+    
         finally:
-            _vs.close()
-            _v.dispose()
+            # Cleanup regardless of success or failure
+            if pt is not None and pt.is_alive():
+                pt.join(timeout=2)
+            if proc.is_alive():
+                forced["required"] = True
+                proc.terminate()
+                proc.join(timeout=5)
+                if proc.is_alive():
+                    proc.kill()
+                    proc.join(timeout=3)
+            try:
+                s2.rollback()
+            except Exception:
+                pass
+            try:
+                s2.close()
+            except Exception:
+                pass
+            e2.dispose()
+            try:
+                s_obs.rollback()
+            except Exception:
+                pass
+            try:
+                s_obs.close()
+            except Exception:
+                pass
+            e_obs.dispose()
+            try:
+                q.close()
+                q.join_thread()
+            except Exception:
+                pass
 
         assert final.get("pid") == child_pid
         r = db_session.execute(
@@ -794,156 +830,196 @@ class TestGuardianPhaseANoRetry:
         proc.start()
 
         forced = {"required": False}
-
+        pt = None
         try:
-            ready = q.get(timeout=15)
-        except Empty:
-            _bounded_cleanup(proc, s2, e2, s_obs, e_obs)
-            mgr.shutdown()
-            pytest.fail("Child sent no ready diagnostic")
-        assert ready["stage"] == "ready"
-        backend_pid = ready["backend_pid"]
-        assert backend_pid is not None
-
-        deadline = time.time() + 15
-        proved = False
-        while time.time() < deadline:
-            s_obs.rollback()
-            lock_check = s_obs.execute(
-                text(
-                    "SELECT 1 FROM pg_locks"
-                    " WHERE pid = :bp AND relation::regclass::text = 'runs'"
-                    " AND granted = true"
-                ),
-                {"bp": backend_pid},
-            ).fetchone()
-
-            wait_check = s_obs.execute(
-                text(
-                    "SELECT wait_event_type FROM pg_stat_activity"
-                    " WHERE pid = :bp"
-                ),
-                {"bp": backend_pid},
-            ).fetchone()
-
-            blocking = s_obs.execute(
-                text("SELECT unnest(pg_blocking_pids(:bp))"),
-                {"bp": backend_pid},
-            ).fetchall()
-
-            if lock_check and wait_check and wait_check[0] == "Lock":
-                blockers = [r[0] for r in blocking]
-                if blocker_pid in blockers:
-                    proved = True
-                    break
-            time.sleep(0.15)
-
-        if not proved:
-            _bounded_cleanup(proc, s2, e2, s_obs, e_obs)
-            mgr.shutdown()
-            pytest.fail("Could not prove child lock state")
-
-        # 3. s2 directly + polling thread captures bidirectional evidence
-        blocking_evidence = {"child_blockers": [], "reverse_blockers": [], "done": False}
-
-        def _poll_blocking():
-            e = create_engine(actual_url)
-            s = sessionmaker(bind=e)()
             try:
-                s.execute(text("SET statement_timeout = '30s'"))
-                deadline = time.time() + 5
-                while time.time() < deadline and not blocking_evidence["done"]:
-                    s.rollback()
-                    cb = s.execute(
-                        text("SELECT unnest(pg_blocking_pids(:bp))"), {"bp": backend_pid}
-                    ).fetchall()
-                    rb = s.execute(
-                        text("SELECT unnest(pg_blocking_pids(:bp))"), {"bp": blocker_pid}
-                    ).fetchall()
-                    blocking_evidence["child_blockers"] = [r[0] for r in cb]
-                    blocking_evidence["reverse_blockers"] = [r[0] for r in rb]
-                    if (blocking_evidence["child_blockers"]
-                            and blocking_evidence["reverse_blockers"]):
-                        blocking_evidence["done"] = True
+                ready = q.get(timeout=15)
+            except Empty:
+                _bounded_cleanup(proc, s2, e2, s_obs, e_obs)
+                mgr.shutdown()
+                pytest.fail("Child sent no ready diagnostic")
+            assert ready["stage"] == "ready"
+            backend_pid = ready["backend_pid"]
+            assert backend_pid is not None
+    
+            deadline = time.time() + 15
+            proved = False
+            while time.time() < deadline:
+                s_obs.rollback()
+                lock_check = s_obs.execute(
+                    text(
+                        "SELECT 1 FROM pg_locks"
+                        " WHERE pid = :bp AND relation::regclass::text = 'runs'"
+                        " AND granted = true"
+                    ),
+                    {"bp": backend_pid},
+                ).fetchone()
+    
+                wait_check = s_obs.execute(
+                    text(
+                        "SELECT wait_event_type FROM pg_stat_activity"
+                        " WHERE pid = :bp"
+                    ),
+                    {"bp": backend_pid},
+                ).fetchone()
+    
+                blocking = s_obs.execute(
+                    text("SELECT unnest(pg_blocking_pids(:bp))"),
+                    {"bp": backend_pid},
+                ).fetchall()
+    
+                if lock_check and wait_check and wait_check[0] == "Lock":
+                    blockers = [r[0] for r in blocking]
+                    if blocker_pid in blockers:
+                        proved = True
                         break
-                    time.sleep(0.05)
-            finally:
-                s.close()
-                e.dispose()
-
-        pt = threading.Thread(target=_poll_blocking)
-        pt.start()
-
-        reverse_result = {"status": "", "sqlstate": "", "backend_pid": blocker_pid}
-        try:
-            s2.execute(
-                text("SELECT id FROM runs WHERE id=:r FOR UPDATE"), {"r": rid}
-            )
-            reverse_result["status"] = "success"
-            reverse_result["sqlstate"] = "00000"
-        except Exception as exc:
-            s2.rollback()
-            reverse_result["status"] = "deadlocked"
-            orig = getattr(exc, "orig", None)
-            if orig:
-                reverse_result["sqlstate"] = str(
-                    getattr(orig, "sqlstate", "") or getattr(orig, "pgcode", "")
+                time.sleep(0.15)
+    
+            if not proved:
+                _bounded_cleanup(proc, s2, e2, s_obs, e_obs)
+                mgr.shutdown()
+                pytest.fail("Could not prove child lock state")
+    
+            # 3. s2 directly + polling thread captures bidirectional evidence
+            blocking_evidence = {"child_blockers": [], "reverse_blockers": [], "done": False}
+    
+            def _poll_blocking():
+                e = create_engine(actual_url)
+                s = sessionmaker(bind=e)()
+                try:
+                    s.execute(text("SET statement_timeout = '30s'"))
+                    deadline = time.time() + 5
+                    while time.time() < deadline and not blocking_evidence["done"]:
+                        s.rollback()
+                        cb = s.execute(
+                            text("SELECT unnest(pg_blocking_pids(:bp))"), {"bp": backend_pid}
+                        ).fetchall()
+                        rb = s.execute(
+                            text("SELECT unnest(pg_blocking_pids(:bp))"), {"bp": blocker_pid}
+                        ).fetchall()
+                        blocking_evidence["child_blockers"] = [r[0] for r in cb]
+                        blocking_evidence["reverse_blockers"] = [r[0] for r in rb]
+                        if (blocking_evidence["child_blockers"]
+                                and blocking_evidence["reverse_blockers"]):
+                            blocking_evidence["done"] = True
+                            break
+                        time.sleep(0.05)
+                finally:
+                    s.close()
+                    e.dispose()
+    
+            pt = threading.Thread(target=_poll_blocking)
+            pt.start()
+    
+            reverse_result = {"status": "", "sqlstate": "", "backend_pid": blocker_pid}
+            try:
+                s2.execute(
+                    text("SELECT id FROM runs WHERE id=:r FOR UPDATE"), {"r": rid}
                 )
-            reverse_result["error_type"] = type(exc).__name__
-            reverse_result["error_message"] = str(exc)[:200]
-
-        blocking_evidence["done"] = True
-        pt.join(timeout=5)
-
-        assert blocker_pid in blocking_evidence["child_blockers"], (
-            f"Child not blocked. Child blockers: {blocking_evidence['child_blockers']}"
-        )
-        rbl = blocking_evidence["reverse_blockers"]
-        assert backend_pid in rbl, (
-            f"Reverse not blocked. Reverse blockers: {rbl}"
-        )
-
-        try:
-            final = q.get(timeout=10)
-        except Empty:
-            final = None
-        assert final is not None, "Child produced no final diagnostic"
-        child_sqlstate = str(final.get("sqlstate", ""))
-        assert child_sqlstate == "40P01", (
-            f"Expected SQLSTATE 40P01, got '{child_sqlstate}'"
-        )
-        assert reverse_result["sqlstate"] == "00000", (
-            f"Reverse expected 00000 (success), got: {reverse_result}"
-        )
-        assert count.value == 1, f"evaluate_core called {count.value} times"
-
-        proc.join(timeout=10)
-        if proc.is_alive():
-            forced["required"] = True
-            proc.terminate()
-            proc.join(timeout=5)
+                reverse_result["status"] = "success"
+                reverse_result["sqlstate"] = "00000"
+            except Exception as exc:
+                s2.rollback()
+                reverse_result["status"] = "deadlocked"
+                orig = getattr(exc, "orig", None)
+                if orig:
+                    reverse_result["sqlstate"] = str(
+                        getattr(orig, "sqlstate", "") or getattr(orig, "pgcode", "")
+                    )
+                reverse_result["error_type"] = type(exc).__name__
+                reverse_result["error_message"] = str(exc)[:200]
+    
+            blocking_evidence["done"] = True
+            pt.join(timeout=5)
+    
+            assert blocker_pid in blocking_evidence["child_blockers"], (
+                f"Child not blocked. Child blockers: {blocking_evidence['child_blockers']}"
+            )
+            rbl = blocking_evidence["reverse_blockers"]
+            assert backend_pid in rbl, (
+                f"Reverse not blocked. Reverse blockers: {rbl}"
+            )
+    
+            try:
+                final = q.get(timeout=10)
+            except Empty:
+                final = None
+            assert final is not None, "Child produced no final diagnostic"
+            child_sqlstate = str(final.get("sqlstate", ""))
+            assert child_sqlstate == "40P01", (
+                f"Expected SQLSTATE 40P01, got '{child_sqlstate}'"
+            )
+            assert reverse_result["sqlstate"] == "00000", (
+                f"Reverse expected 00000 (success), got: {reverse_result}"
+            )
+            assert count.value == 1, f"evaluate_core called {count.value} times"
+    
+            proc.join(timeout=10)
             if proc.is_alive():
-                proc.kill()
+                forced["required"] = True
+                proc.terminate()
                 proc.join(timeout=5)
-        assert proc.exitcode == 0
-        try:
-            s2.rollback()
-        except Exception:
-            pass
-        try:
-            s2.close()
-        except Exception:
-            pass
-        e2.dispose()
-        try:
-            s_obs.rollback()
-        except Exception:
-            pass
-        try:
-            s_obs.close()
-        except Exception:
-            pass
-        e_obs.dispose()
+                if proc.is_alive():
+                    proc.kill()
+                    proc.join(timeout=5)
+            assert proc.exitcode == 0
+            try:
+                s2.rollback()
+            except Exception:
+                pass
+            try:
+                s2.close()
+            except Exception:
+                pass
+            e2.dispose()
+            try:
+                s_obs.rollback()
+            except Exception:
+                pass
+            try:
+                s_obs.close()
+            except Exception:
+                pass
+            e_obs.dispose()
+        finally:
+            # Cleanup regardless of success or failure
+            if pt is not None and pt.is_alive():
+                pt.join(timeout=2)
+            if proc.is_alive():
+                forced["required"] = True
+                proc.terminate()
+                proc.join(timeout=5)
+                if proc.is_alive():
+                    proc.kill()
+                    proc.join(timeout=3)
+            try:
+                s2.rollback()
+            except Exception:
+                pass
+            try:
+                s2.close()
+            except Exception:
+                pass
+            e2.dispose()
+            try:
+                s_obs.rollback()
+            except Exception:
+                pass
+            try:
+                s_obs.close()
+            except Exception:
+                pass
+            e_obs.dispose()
+            try:
+                q.close()
+                q.join_thread()
+            except Exception:
+                pass
+            try:
+                mgr.shutdown()
+            except Exception:
+                pass
+
         q.close()
         q.join_thread()
         mgr.shutdown()
