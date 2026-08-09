@@ -55,6 +55,12 @@ def create_schedule(
 @router.get("/schedules", response_model=list[ScheduleResponse])
 def list_schedules(session: Session = Depends(get_session)) -> list[ScheduleResponse]:
     household_id = _require_household_id(session)
+    # Sprint 008 Slice C: ensure daily schedules exist (idempotent)
+    try:
+        from apps.api.services.orchestration_seed import seed_daily_schedules
+        seed_daily_schedules(session)
+    except Exception:
+        pass  # Seed failure must not block schedule listing
     results = svc.list_schedules(session, household_id)
     return [ScheduleResponse(**r) for r in results]
 

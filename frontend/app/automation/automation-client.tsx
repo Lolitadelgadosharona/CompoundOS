@@ -26,7 +26,7 @@ import {
 // Constants
 // ═══════════════════════════════════════════════════════════════════════════
 
-const JOB_TYPES: JobType[] = ["guardian.evaluate_all", "guardian.evaluate_one"];
+const JOB_TYPES: JobType[] = ["guardian.evaluate_all", "guardian.evaluate_one", "backup.daily"];
 const NON_ADVISORY =
   "Automation manages local task scheduling and run history. Nothing here is advice.";
 const DEFAULT_TIMEZONE = "UTC";

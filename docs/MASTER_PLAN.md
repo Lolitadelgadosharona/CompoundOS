@@ -97,6 +97,16 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
     - Dedicated notification sessions per Technical Design §3.2, §3.4
   - Slice C — Daily Schedules + Schedule UI: **In Review** (PR #74, NOT AUTHORIZED to merge)
     - Branch: sprint/008-slice-c-daily-schedules-ui
+    - Migration 0017: CREATE OR REPLACE FUNCTION expanding job_type allowlist
+    - Guardian daily schedule: default disabled, guardian.evaluate_all
+    - Backup daily schedule: default disabled, backup.daily
+    - Idempotency: schedule_id + schedule-local date + ON CONFLICT DO NOTHING
+    - Schedule UI: enable/disable + time/timezone in /automation workspace
+    - COS-008-C-HARDEN: fail-closed execution dispatch
+      - backup.daily execution: NOT YET IMPLEMENTED (raises _JobTypeExecutionNotSupported)
+      - Unknown job types: fail closed — never silently fall through to Guardian
+      - Production gate: backup.daily must not be enabled until dedicated execution
+        path is implemented and independently reviewed
 
 ## Backlog
 

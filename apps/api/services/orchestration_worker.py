@@ -411,20 +411,47 @@ class OrchestrationWorker:
         job_def_id = schedule_info["job_definition_id"]
         validate_job_params(job_type, job_params)
         now = self._clock()
-        ikey = compute_idempotency_key(job_type, job_params, now.date())
-        from sqlalchemy.exc import IntegrityError
+
+        # Compute schedule-local date from the schedule's IANA timezone
+        # per Technical Design §6.1 — not UTC now.date()
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
         try:
-            run_id = create_run(session, job_definition_id=job_def_id,
-                schedule_id=schedule_id, idempotency_key=ikey,
-                status="pending", triggered_by="schedule",
-                scheduled_at=now, household_id=household_id)
-        except IntegrityError:
-            logger.debug("Run already claimed for schedule %s", schedule_id)
-            return
+            tz = ZoneInfo(schedule_info.get("timezone", "UTC"))
+        except (ZoneInfoNotFoundError, KeyError):
+            tz = ZoneInfo("UTC")
+        local_now = now.astimezone(tz)
+        scheduled_date = local_now.date()
+
+        ikey = compute_idempotency_key(
+            job_type, job_params, scheduled_date,
+            schedule_id=str(schedule_id),
+        )
+
+        run_id = create_run(
+            session,
+            job_definition_id=job_def_id,
+            schedule_id=schedule_id,
+            idempotency_key=ikey,
+            status="pending",
+            triggered_by="schedule",
+            scheduled_at=now,
+            household_id=household_id,
+        )
+
         new_next = compute_next_daily_run(
             schedule_info["execution_time"], schedule_info["timezone"],
             after=now, clock=self._clock)
         advance_next_run_at(session, schedule_id, new_next, clock=self._clock)
+
+        if run_id is None:
+            # Duplicate idempotency_key — run already exists for this
+            # schedule+local-date. next_run_at was still advanced above.
+            logger.debug(
+                "Run already exists for schedule %s on %s",
+                schedule_id, scheduled_date,
+            )
+            return None
+
         aid = create_attempt(session, run_id=run_id, attempt_number=1)
         start_run(session, run_id, clock=self._clock)
         start_attempt(session, aid, clock=self._clock)

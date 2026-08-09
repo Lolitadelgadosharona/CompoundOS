@@ -4,7 +4,7 @@
 // Types
 // ═══════════════════════════════════════════════════════════════════════════
 
-export type JobType = "guardian.evaluate_all" | "guardian.evaluate_one";
+export type JobType = "guardian.evaluate_all" | "guardian.evaluate_one" | "backup.daily";
 
 export interface ScheduleCreatePayload {
   job_type: JobType;
