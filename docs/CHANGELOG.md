@@ -1,5 +1,37 @@
 # Changelog
 
+## Sprint 005 Orchestration Corrective — Done (2026-08-09)
+
+### Review and Merge
+- PR #75: `fix(orchestration): harden fenced worker finalization`
+- Reviewed HEAD: `8551acf4e306315d07703bba86ca92204ec7dd9e`
+- Squash merged as: `16aa86b853a20afc532a5f3144c2f8eb539ef0da`
+- Independent review gate: **APPROVE** — 0 BLOCKER, 0 HIGH, 2 MEDIUM, 4 LOW
+- Post-merge CI 31318099840: backend SUCCESS (608 PG, 138 non-PG)
+
+### Root Causes Fixed
+- Child `return` inside context manager committed on fenced; now uses explicit commit/rollback + `_FencedError`
+- Parent didn't commit before spawn — child couldn't see lease rows; now commits run/attempt/lease before `proc.start()`
+- Heartbeat only updated `heartbeat_at`, never extended `expires_at`; now extends via `clock_timestamp()`
+- Parent overwrote child's successful finalization with 'failed'; now reads DB for terminal state
+- `finalize_run` rowcount=0 triggered fallback writes; now does `session.rollback()` and returns None
+- Lock order undefined; now consistently `runs → leases → ALL attempts ORDER BY id`
+
+### Production Changes
+- `apps/api/services/orchestration_executor.py`: Phase A/B separation, `_FencedError`, structured diagnostics with sqlstate
+- `apps/api/services/orchestration_worker.py`: `ReconciliationResult` frozen dataclass, `reconcile_after_child_exit()` with 40P01 retry, `_reconcile_attempt()` terminal-first logic, authoritative notification status
+- `apps/api/services/orchestration_repository.py`: heartbeat extends `expires_at` via `clock_timestamp()`, removed application clock parameter
+
+### Test Coverage
+- `tests/test_corrective_orchestration.py`: 1285 lines, 12 tests exercising real PostgreSQL + multiprocessing
+- `tests/test_retry_exhaustion.py`: 4 deterministic non-PG retry exhaustion tests
+- `tests/test_reconciliation_outcomes.py`: table-driven 5-outcome + completed-no-run_failed regression
+- Bidirectional `pg_blocking_pids` AND assertions, residual resource verification, forced-cleanup tracking
+- `tests/test_slice_b_notifications.py`: updated stale-token assertion to v17 no-fallback-write contract
+
+### Follow-up
+- OM-001: MEDIUM/LOW cleanup items from independent review
+
 ## Sprint 007 — Personal V1 Hardening + Notification — Done (2026-07-22)
 
 ### Technical Design Gate (PR #50 follow-up)
