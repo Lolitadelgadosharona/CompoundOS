@@ -412,13 +412,31 @@ class TestFailClosedDispatch:
             " execution_time, timezone, enabled, next_run_at)"
             " VALUES (:id, :jid, '09:00', 'UTC', true, NOW())"
         ), {"id": sid, "jid": jid})
+
+        from apps.api.services.orchestration_repository import (
+            acquire_lease,
+            create_attempt,
+            create_run,
+            start_attempt,
+            start_run,
+        )
+        rid = create_run(
+            db_session, job_definition_id=jid, schedule_id=sid,
+            idempotency_key=f"guardian-ok-{uuid4().hex[:8]}",
+            status="pending", triggered_by="schedule",
+            scheduled_at=datetime.now(timezone.utc),
+            household_id=hid,
+        )
+        assert rid is not None
+        aid = create_attempt(db_session, run_id=rid, attempt_number=1)
+        start_run(db_session, rid)
+        start_attempt(db_session, aid)
+        lease = acquire_lease(db_session, run_id=rid, worker_id="test-guardian-ok")
         db_session.commit()
 
         db_url = db_session.get_bind().url.render_as_string(hide_password=False)
         ctx = multiprocessing.get_context("spawn")
         q = ctx.Queue()
-        rid = str(uuid4())
-        aid = str(uuid4())
         proc = ctx.Process(
             target=_run_job_in_child,
             kwargs={
@@ -428,9 +446,9 @@ class TestFailClosedDispatch:
                 "household_id": hid,
                 "run_id": rid,
                 "attempt_id": aid,
-                "lease_id": str(uuid4()),
+                "lease_id": lease["lease_id"],
                 "worker_id": "test-guardian-ok",
-                "fencing_token": 1,
+                "fencing_token": lease["fencing_token"],
                 "result_queue": q,
             },
         )
