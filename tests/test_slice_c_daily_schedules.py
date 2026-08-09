@@ -391,7 +391,7 @@ class TestFailClosedDispatch:
         assert msg.get("status") == "failed", (
             f"Expected status='failed', got {msg}"
         )
-        err = msg.get("error", "")
+        err = msg.get("error_message") or msg.get("error", "")
         assert "backup.daily" in err, (
             f"Error must mention backup.daily: {err}"
         )
@@ -505,8 +505,9 @@ class TestFailClosedDispatch:
         assert msg.get("status") == "failed", (
             f"Unknown job type must fail. Got: {msg}"
         )
-        assert "unknown.fake_job" in msg.get("error", ""), (
-            f"Error must mention unknown job type: {msg}"
+        err = msg.get("error_message") or msg.get("error", "")
+        assert "unknown.fake_job" in err, (
+            f"Error must mention unknown job type: {err}"
         )
 
     def test_backup_daily_guardian_side_effects_absent(
