@@ -3,6 +3,7 @@
 Real PostgreSQL, real migration, exact assertions.
 """
 
+import multiprocessing
 from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -10,6 +11,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from apps.api.services.orchestration_executor import _run_job_in_child
 from apps.api.services.orchestration_scheduling import (
     ALLOWED_JOB_TYPES,
     compute_idempotency_key,
@@ -309,10 +311,6 @@ def _create_job_definition(
 # COS-008-C-HARDEN — execution dispatch regression tests
 # ═══════════════════════════════════════════════════════════════════════════
 
-import multiprocessing as _mp
-
-from apps.api.services.orchestration_executor import _run_job_in_child
-
 
 class TestFailClosedDispatch:
     """backup.daily and unknown types must NOT execute Guardian logic."""
@@ -332,7 +330,7 @@ class TestFailClosedDispatch:
         monkeypatch.setattr(guardian_mod, "evaluate_core", spy_evaluate)
 
         db_url = db_session.get_bind().url.render_as_string(hide_password=False)
-        ctx = _mp.get_context("spawn")
+        ctx = multiprocessing.get_context("spawn")
         q = ctx.Queue()
         _ensure_household(db_session)
         hid = _get_household_id(db_session)
@@ -362,7 +360,7 @@ class TestFailClosedDispatch:
     ) -> None:
         """B: backup.daily execution fails with clear unsupported error."""
         db_url = db_session.get_bind().url.render_as_string(hide_password=False)
-        ctx = _mp.get_context("spawn")
+        ctx = multiprocessing.get_context("spawn")
         q = ctx.Queue()
         _ensure_household(db_session)
         hid = _get_household_id(db_session)
@@ -417,7 +415,7 @@ class TestFailClosedDispatch:
         db_session.commit()
 
         db_url = db_session.get_bind().url.render_as_string(hide_password=False)
-        ctx = _mp.get_context("spawn")
+        ctx = multiprocessing.get_context("spawn")
         q = ctx.Queue()
         rid = str(uuid4())
         aid = str(uuid4())
@@ -458,7 +456,7 @@ class TestFailClosedDispatch:
     ) -> None:
         """F: Unknown job types fail closed — no silent fallthrough."""
         db_url = db_session.get_bind().url.render_as_string(hide_password=False)
-        ctx = _mp.get_context("spawn")
+        ctx = multiprocessing.get_context("spawn")
         q = ctx.Queue()
         _ensure_household(db_session)
         hid = _get_household_id(db_session)
@@ -507,7 +505,7 @@ class TestFailClosedDispatch:
         )).scalar()
 
         db_url = db_session.get_bind().url.render_as_string(hide_password=False)
-        ctx = _mp.get_context("spawn")
+        ctx = multiprocessing.get_context("spawn")
         q = ctx.Queue()
         proc = ctx.Process(
             target=_run_job_in_child,
@@ -570,7 +568,7 @@ class TestFailClosedDispatch:
         db_session.commit()
 
         db_url = db_session.get_bind().url.render_as_string(hide_password=False)
-        ctx = _mp.get_context("spawn")
+        ctx = multiprocessing.get_context("spawn")
         q = ctx.Queue()
         proc = ctx.Process(
             target=_run_job_in_child,
