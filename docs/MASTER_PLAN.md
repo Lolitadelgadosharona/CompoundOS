@@ -39,6 +39,17 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   - Migrations 0008–0011: job_definitions, schedules, runs, attempts, leases
   - 9 Automation endpoints, /automation workspace, Worker status
   - 431 PG / 136 non-PG / 217 frontend test baseline
+  - Sprint 005 Orchestration Corrective: Done (2026-08-09)
+    - PR #75 squash-merged as 16aa86b853a20afc532a5f3144c2f8eb539ef0da
+    - Independent review: 0 BLOCKER / 0 HIGH / 2 MEDIUM / 4 LOW
+    - Reviewed HEAD: 8551acf4e306315d07703bba86ca92204ec7dd9e
+    - Post-merge CI 31318099840: backend SUCCESS (608 PG, 138 non-PG)
+    - Fixes: fenced rollback, pre-spawn commit, heartbeat expiry extension,
+      authoritative reconciliation, lock ordering (runs→leases→ALL attempts),
+      rowcount=0 no-fallback
+    - 3 new test modules: test_corrective_orchestration (1285 lines),
+      test_retry_exhaustion, test_reconciliation_outcomes
+    - Follow-up backlog: OM-001
 - Sprint 006: AI Investment Committee Foundation — Done ✓
   - Technical Design Gate: Done (PR #50)
   - Slice A — Persistence + Evidence Contracts: Done (PR #51, migration 0012)
@@ -64,7 +75,7 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   next 16.2.10→16.2.12, eslint-config-next→16.2.12, postcss 8.5.10→8.5.18.
   npm audit --omit=dev: 0 vulnerabilities. Resolved 11 CVEs (9 Next.js +
   2 PostCSS).
-- Sprint 008: In Progress — Slice A Done (2026-07-28); Slice B In Review
+- Sprint 008: In Progress — Slice A Done (2026-07-28); Slice B Done (2026-08-01); Slice C In Review
   - Direction: Notification Source Wiring + Daily Operations (Candidate A)
   - Proposal: docs/sprints/SPRINT_008_PROPOSAL.md
   - Open Questions: docs/sprints/SPRINT_008_OPEN_QUESTIONS.md (8/8 resolved)
@@ -77,15 +88,26 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
     - Backup: all completion/failure paths dispatch
     - Dedicated notification sessions per Technical Design
     - Deterministic FakeAdapter dedup tests with explicit assertions
-  - Slice B — Committee + Automation Notification Source Wiring: **Authorized / In Review** (2026-07-28)
-    - Draft PR #73
+  - Slice B — Committee + Automation Notification Source Wiring: **Done** (2026-08-01)
+    - PR #73 squash-merged as a7a01ca1552ad43618177ceac9580643fd6c8d48
+    - Main CI 30415134394: 3/3 SUCCESS
+    - Independent Review: 0 BLOCKER / 0 HIGH / 0 MEDIUM / 0 LOW
     - Committee: dispatch session_complete info after run_committee() completion
     - Automation: dispatch run_failed warning from worker after terminal run failure
     - Dedicated notification sessions per Technical Design §3.2, §3.4
-  - Slice C: NOT AUTHORIZED (Daily schedules + UI)
+  - Slice C — Daily Schedules + Schedule UI: **In Review** (PR #74, NOT AUTHORIZED to merge)
+    - Branch: sprint/008-slice-c-daily-schedules-ui
 
 ## Backlog
 
+- OM-001 — Orchestration corrective review cleanup (MEDIUM/LOW follow-ups from Sprint 005 Corrective independent review):
+  - M1: Remove or document the unused `clock` parameter in `validate_lease_for_commit()` — `clock_timestamp()` is authoritative.
+  - M2: Update deferred notification test to exercise monkeypatched production call path.
+  - L1-L4: Clean up repeated `os` imports, pool_pre_ping in one-shot engine, StaleRunReaper lock-order docs, ReconciliationResult formatting.
+- SEC-001 — Make CompoundOS private before real financial account integration.
+  - Repository is currently PUBLIC.
+  - Must be completed before any real broker/bank credential or personal financial-account integration is authorized.
+  - Do not put actual secrets into documentation.
 - Complete Docker runtime verification in a Docker-enabled environment
 - Align `NEXT_PUBLIC_API_URL` with the Docker build-time public environment model
 - Split Python runtime and development dependencies before production hardening
