@@ -1,5 +1,42 @@
 # Changelog
 
+## Sprint 008 Slice C — Daily Schedules — Done (2026-08-09)
+
+### Merge
+- PR #74: `feat(automation): complete Sprint 008 Slice C daily schedules`
+- Squash merged as: `49e3a2258d6f9063c28e7133eee5f60734f5e2b7`
+- Independent review: APPROVE WITH NON-BLOCKING FOLLOW-UP (0 BLOCKER, 1 HIGH fixed, 3 MEDIUM, 2 LOW)
+
+### Daily Schedule Infrastructure
+- Migration 0017: CREATE OR REPLACE FUNCTION expanding job_type allowlist for `backup.daily`
+- Lazy seed: Guardian + Backup daily schedules, default disabled, idempotent
+- Idempotency: `schedule_id` + schedule-local IANA timezone date in SHA-256 key
+- Duplicate prevention: `ON CONFLICT (idempotency_key) DO NOTHING RETURNING id`
+- Schedule-local date: worker computes from schedule's IANA timezone, not `UTC now.date()`
+- `next_run_at` always advances, even on duplicate detection
+
+### COS-008-C-HARDEN
+- `_JobTypeExecutionNotSupported`: fail-closed guard before Phase A
+- `backup.daily` execution: NOT YET IMPLEMENTED (raises explicit error)
+- Unknown job types: fail closed (never fall through to Guardian)
+- 6 regression tests: spy, explicit error, guardian ok, unknown fail-closed, side effects absent, run not completed
+
+### Test Coverage
+- `tests/test_slice_c_daily_schedules.py`: 617 lines, 18 tests (12 original + 6 COS-008-C-HARDEN)
+- Allowlist, idempotency key, seed idempotency, ON CONFLICT transaction safety, timezone correctness
+- All tests pass in CI with real PostgreSQL
+
+### Frontend
+- JobType union expanded: `backup.daily`
+- Schedule UI: enable/disable + time/timezone picker in `/automation`
+
+### Remaining Follow-ups
+- M1: DELETE /schedules/{id} confirmation guard
+- M2: Lazy seed on GET couples read with write
+- M3: `validate_lease_for_commit` clock parameter cleanup
+- L1: Allowlist drift test (Python vs DB trigger)
+- TECH-001: Frontend audit cleanup (pre-existing npm audit failures)
+
 ## Sprint 005 Orchestration Corrective — Done (2026-08-09)
 
 ### Review and Merge

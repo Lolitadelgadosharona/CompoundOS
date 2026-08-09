@@ -75,7 +75,7 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   next 16.2.10→16.2.12, eslint-config-next→16.2.12, postcss 8.5.10→8.5.18.
   npm audit --omit=dev: 0 vulnerabilities. Resolved 11 CVEs (9 Next.js +
   2 PostCSS).
-- Sprint 008: In Progress — Slice A Done (2026-07-28); Slice B Done (2026-08-01); Slice C In Review
+- Sprint 008: Done — Slice A Done (2026-07-28); Slice B Done (2026-08-01); Slice C Done (2026-08-09)
   - Direction: Notification Source Wiring + Daily Operations (Candidate A)
   - Proposal: docs/sprints/SPRINT_008_PROPOSAL.md
   - Open Questions: docs/sprints/SPRINT_008_OPEN_QUESTIONS.md (8/8 resolved)
@@ -95,8 +95,9 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
     - Committee: dispatch session_complete info after run_committee() completion
     - Automation: dispatch run_failed warning from worker after terminal run failure
     - Dedicated notification sessions per Technical Design §3.2, §3.4
-  - Slice C — Daily Schedules + Schedule UI: **In Review** (PR #74, NOT AUTHORIZED to merge)
-    - Branch: sprint/008-slice-c-daily-schedules-ui
+  - Slice C — Daily Schedules + Schedule UI: **Done** (2026-08-09)
+    - PR #74 squash-merged as 49e3a2258d6f9063c28e7133eee5f60734f5e2b7
+    - Independent review: APPROVE WITH NON-BLOCKING FOLLOW-UP (0 BLOCKER, 1 HIGH fixed, 3 MEDIUM, 2 LOW)
     - Migration 0017: CREATE OR REPLACE FUNCTION expanding job_type allowlist
     - Guardian daily schedule: default disabled, guardian.evaluate_all
     - Backup daily schedule: default disabled, backup.daily
@@ -105,8 +106,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
     - COS-008-C-HARDEN: fail-closed execution dispatch
       - backup.daily execution: NOT YET IMPLEMENTED (raises _JobTypeExecutionNotSupported)
       - Unknown job types: fail closed — never silently fall through to Guardian
-      - Production gate: backup.daily must not be enabled until dedicated execution
-        path is implemented and independently reviewed
+    - 18 tests: 12 original + 6 COS-008-C-HARDEN regression
+    - Remaining follow-ups: M1 DELETE, M2 lazy seed, M3 clock, L1 allowlist drift, TECH-001 frontend audit
 
 ## Backlog
 
