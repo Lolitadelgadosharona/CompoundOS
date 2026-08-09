@@ -32,6 +32,18 @@ class _FencedError(Exception):
     """
 
 
+class _JobTypeExecutionNotSupported(Exception):
+    """Raised when a job_type has no execution dispatcher.
+
+    backup.daily is defined in the schedule allowlist but its dedicated
+    execution path is not yet implemented.  Until it exists, any attempt
+    to execute backup.daily must fail explicitly — never silently fall
+    through to Guardian evaluation.
+
+    Unknown / unrecognised job types also fail closed through this guard.
+    """
+
+
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -96,6 +108,12 @@ def _run_job_in_child(
     2. Phase B: runs→leases→ALL attempts FOR UPDATE
     3. If lease invalid: raise _FencedError → rollback
     4. Finalize attempt + run + release lease → commit
+
+    COS-008-C-HARDEN: Only guardian.* job types may execute through this
+    path.  backup.daily and any unrecognised job type raise
+    _JobTypeExecutionNotSupported — fail-closed, no silent fallthrough.
+    backup.daily scheduling definition is AVAILABLE; execution is
+    NOT YET IMPLEMENTED.
     """
     from sqlalchemy import create_engine, text
     from sqlalchemy.orm import sessionmaker
@@ -130,6 +148,16 @@ def _run_job_in_child(
             "pid": os.getpid(),
             "backend_pid": backend_pid,
         })
+
+        # ── COS-008-C-HARDEN: fail-closed dispatch ──
+        # Only guardian.* job types have an execution path.
+        # backup.daily is defineable but NOT YET IMPLEMENTED.
+        # Unknown types must also fail closed.
+        if not job_type.startswith("guardian."):
+            raise _JobTypeExecutionNotSupported(
+                f"Job type '{job_type}' has no execution dispatcher."
+                f" backup.daily execution is not yet implemented."
+            )
 
         try:
             # Phase A: Business operation (NO orchestration locks)
