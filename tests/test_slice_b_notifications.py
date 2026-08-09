@@ -344,15 +344,19 @@ class TestAutomationNotification:
         ), {"sid": sid}).fetchone()
         assert run_row is not None
         run_id = run_row[0]
-        # Run stays 'started' — never finalized by stale-token path
+        # Run stays 'running' — never finalized by stale-token path
+        # v17 contract: no fallback write on rowcount=0
+        assert run_row[1] == "running", f"Run should be running: {run_row[1]}"
         attempt = db_session.execute(text(
             "SELECT status FROM attempts WHERE run_id = :rid"
         ), {"rid": run_id}).fetchone()
-        assert attempt is not None and attempt[0] == "failed"
+        assert attempt is not None and attempt[0] == "running", (
+            f"Attempt should be running: {attempt[0]}")
         lease = db_session.execute(text(
             "SELECT released_at FROM leases WHERE run_id = :rid"
         ), {"rid": run_id}).fetchone()
-        assert lease is not None
+        assert lease is not None and lease[0] is None, (
+            "Lease must remain unreleased")
 
     def test_non_final_status_no_notification(
         self, db_session: Session,
