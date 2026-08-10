@@ -108,16 +108,23 @@ def upgrade() -> None:
         CREATE OR REPLACE FUNCTION fn_research_run_immutability()
         RETURNS TRIGGER AS $$
         BEGIN
-            IF OLD.status = 'completed' THEN
+            IF TG_OP = 'DELETE' AND OLD.status = 'completed' THEN
                 RAISE EXCEPTION 'Completed research runs are immutable'
                     USING ERRCODE = '55000';
+            END IF;
+            IF TG_OP = 'UPDATE' AND OLD.status = 'completed' THEN
+                RAISE EXCEPTION 'Completed research runs are immutable'
+                    USING ERRCODE = '55000';
+            END IF;
+            IF TG_OP = 'DELETE' THEN
+                RETURN OLD;
             END IF;
             RETURN OLD;
         END;
         $$ LANGUAGE plpgsql;
 
         CREATE TRIGGER trg_research_runs_immutability
-        BEFORE UPDATE ON research_runs
+        BEFORE UPDATE OR DELETE ON research_runs
         FOR EACH ROW EXECUTE FUNCTION fn_research_run_immutability();
     """)
 

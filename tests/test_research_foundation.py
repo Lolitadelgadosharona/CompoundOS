@@ -115,6 +115,38 @@ class TestMigration:
             db_session.commit()
         db_session.rollback()
 
+    def test_run_delete_protection(self, db_session):
+        """Completed research runs cannot be deleted (err 55000)."""
+        rr = _create_review_request(db_session)
+        req_id = uuid4()
+        run_id = uuid4()
+        db_session.execute(
+            text(
+                "INSERT INTO research_requests"
+                " (id, review_request_id, status, created_at, updated_at)"
+                " VALUES (:id, :rrid, 'completed', :now, :now)"
+            ),
+            {"id": req_id, "rrid": rr, "now": _now()},
+        )
+        db_session.execute(
+            text(
+                "INSERT INTO research_runs"
+                " (id, request_id, run_number, status, completed_at,"
+                " created_at, updated_at)"
+                " VALUES (:id, :req, 1, 'completed', :now, :now, :now)"
+            ),
+            {"id": run_id, "req": req_id, "now": _now()},
+        )
+        db_session.commit()
+
+        with pytest.raises((IntegrityError, OperationalError)):
+            db_session.execute(
+                text("DELETE FROM research_runs WHERE id = :id"),
+                {"id": run_id},
+            )
+            db_session.commit()
+        db_session.rollback()
+
     def test_migration_head(self, db_session):
         r = db_session.execute(
             text("SELECT version_num FROM alembic_version"),
