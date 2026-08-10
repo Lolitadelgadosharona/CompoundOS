@@ -166,13 +166,12 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
       - guardian_intelligence.py: 5 evaluation functions + BLOCK_RECOMMENDATION
       - 20 PostgreSQL integration tests
       - Design doc: docs/sprints/SPRINT_010_SLICE_B_TECHNICAL_DESIGN.md
-    - Slice C: DESIGN PHASE — Technical Design authored
-      - Design document: docs/sprints/SPRINT_010_SLICE_C_TECHNICAL_DESIGN.md
-      - Dashboard API: net worth, allocation, compliance, risks, ideas, decisions, activity
-      - Learning Loop: decision_reviews table + auto-scheduling
-      - 4 Owner Decisions pending (OD-10-C-1 through OD-10-C-4)
-      - Owner decisions: docs/sprints/SPRINT_010_SLICE_C_OWNER_DECISIONS.md
-      - NOT AUTHORIZED FOR IMPLEMENTATION
+    - Slice C: IN PROGRESS (PR #84)
+      - Migration 0024_dashboard_learning: decision_reviews + snapshot columns
+      - Dashboard API: GET /api/dashboard (net worth, allocation, compliance, risks, ideas)
+      - Learning Loop: is_high_impact(), decision_reviews table
+      - 10 PostgreSQL integration tests
+      - Design doc: docs/sprints/SPRINT_010_SLICE_C_TECHNICAL_DESIGN.md
 
 ## Backlog
 
