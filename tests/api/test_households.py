@@ -286,4 +286,5 @@ def test_migration_contains_only_approved_product_tables(postgres_engine) -> Non
         "policy_capital_buckets", "policy_rules",
         "investment_ideas", "idea_status_history",
         "committee_review_requests",
+        "decision_reviews",
     }

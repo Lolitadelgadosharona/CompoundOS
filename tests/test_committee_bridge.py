@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 pytestmark = pytest.mark.postgres
 
-HEAD_REVISION = "0023_guardian_intelligence"
+HEAD_REVISION = "0024_dashboard_learning"
 
 
 def _now() -> datetime:
