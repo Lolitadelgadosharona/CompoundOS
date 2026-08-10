@@ -1,11 +1,11 @@
 # Sprint 012 — Owner Decisions
 
-> **STATUS: DESIGN COMPLETE — AWAITING OWNER APPROVAL**
+> **STATUS: DESIGN COMPLETE — ALL SLICES DESIGNED**
 >
 > Sprint 011: COMPLETE (Slices A-D all implemented)
-> Sprint 012 Slice A: DONE (59d137e) · Slice B: DONE (b5444ac) · Slice C: DESIGN AWAITING APPROVAL
+> Sprint 012 Slice A: DONE (59d137e) · Slice B: DONE (b5444ac) · Slice C: DONE (1d73f84) · Slice D: DESIGN APPROVED
 >
-> 5 Slice C decisions added (OD-12-C-1 through OD-12-C-5).
+> 5 Slice C decisions + 4 Slice D decisions = 9 total. All resolved.
 > All decisions preserve: AI advisory-only, no trading, no broker, no credentials.
 
 ---
