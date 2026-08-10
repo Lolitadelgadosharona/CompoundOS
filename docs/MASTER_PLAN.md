@@ -199,7 +199,7 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   - Run immutability trigger (err 55000)
   - 10 PostgreSQL integration tests
   - Slice B: DONE — merged as a9099d5 (PR #87)
-  - Slice C: IN PROGRESS (PR #88)
+  - Slice C: DONE — merged as 09598cd (PR #88)
     - Migration 0029_perspective_analyses: 6 perspectives, immutability trigger
 
 ## Backlog

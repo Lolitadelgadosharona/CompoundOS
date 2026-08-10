@@ -291,4 +291,5 @@ def test_migration_contains_only_approved_product_tables(postgres_engine) -> Non
         "research_requests", "research_runs",
         "market_data_cache", "investment_knowledge_memory",
         "perspective_analyses",
+        "investment_memos",
     }
