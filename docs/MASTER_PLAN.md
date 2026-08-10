@@ -207,7 +207,9 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 ### Sprint 012: IN PROGRESS
 - Slice A: DONE — merged as 59d137e (PR #90)
   - LLM Runtime: prompt_templates + llm_execution_log
-- Slice B: DESIGN PHASE — NOT AUTHORIZED FOR IMPLEMENTATION
+- Slice B: IN PROGRESS (PR #91)
+  - Research Pipeline: WorkerQueue, EvidenceCollector, PerspectiveExecutor,
+    ConfidenceEngine, ResearchPipeline orchestrator
 
 ## Backlog
 
