@@ -122,9 +122,51 @@ market_data_cache
 ├── symbol (TEXT, NOT NULL)
 ├── data_type (TEXT)
 ├── data (JSONB, NOT NULL)
-├── fetched_at (TIMESTAMPTZ)
-├── expires_at (TIMESTAMPTZ)           — 24h price, 7d fundamentals
+├── source (TEXT, NOT NULL)            — provider identifier
+├── source_timestamp (TIMESTAMPTZ)     — when provider says data is from
+├── fetched_at (TIMESTAMPTZ)           — when we retrieved it
+├── expires_at (TIMESTAMPTZ)
 ├── created_at (TIMESTAMPTZ)
+```
+
+### 1.4 Market Data Provenance
+
+`market_data_cache` is a **cache, not a source of truth**. Every data
+point must preserve its origin chain:
+
+```
+External Provider (Alpha Vantage)
+        │ source='alpha_vantage'
+        │ source_timestamp='2026-08-10T14:30:00Z'
+        ▼
+market_data_cache (local cache)
+        │ fetched_at='2026-08-10T14:31:22Z'
+        │ expires_at='2026-08-11T14:31:22Z'
+        ▼
+Evidence Collection (reads from cache or fetches fresh)
+        │ creates committee_evidence_item
+        │   provenance='ai_generated'
+        │   source_title='Market Data: AAPL Overview'
+        │   citation_ref='Alpha Vantage API, retrieved 2026-08-10'
+        ▼
+Research Run (consumes evidence)
+```
+
+**Provenance fields on market_data_cache**:
+
+| Field | Purpose |
+|---|---|
+| `source` | Provider identifier — 'alpha_vantage' |
+| `source_timestamp` | Provider's timestamp for the data |
+| `fetched_at` | When CompoundOS retrieved it |
+| `expires_at` | When cache entry should be refreshed |
+
+**Rules**:
+- ALWAYS prefer `source_timestamp` from provider over `fetched_at`
+- If provider doesn't supply a timestamp, use `fetched_at`
+- Cache staleness is determined by `expires_at`, not `source_timestamp`
+- Evidence items cite the provider, not the cache
+
 ```
 
 **Constraints**:
@@ -240,6 +282,10 @@ class InvestmentMemo(BaseModel):
     # ── Committee ──
     committee_summary: CommitteeDeliberation
 
+    # ── Sprint 011 Final Review additions ──
+    decision_context: DecisionContext
+    invalidation_conditions: InvalidationConditions
+
 
 class EvidenceSummary(BaseModel):
     sources_count: int
@@ -281,9 +327,36 @@ class CommitteeDeliberation(BaseModel):
     perspectives: dict[str, PerspectiveVote]
 
 class PerspectiveVote(BaseModel):
-    vote: str                   # 'BUY','HOLD','PASS'
-    conviction: int             # 1-10
+    vote: str
+    conviction: int
     rationale: str
+
+
+class DecisionContext(BaseModel):
+    """Why this research was requested — context for future review."""
+    reason: str           # 'portfolio_allocation','market_event','valuation_review',
+                          # 'policy_consideration','new_opportunity','periodic_review'
+    description: str      # Human-readable explanation of the trigger
+    portfolio_snapshot: str | None  # Snapshot of key metrics at time of research
+    triggered_by: str     # 'owner','scheduled','guardian_event'
+
+
+class InvalidationConditions(BaseModel):
+    """Conditions that would invalidate the investment thesis.
+
+    Used by the Learning Loop at 30d/90d/1yr review checkpoints
+    to determine whether the original thesis still holds.
+    """
+    conditions: list[InvalidationCondition]
+    monitoring_frequency: str  # 'monthly','quarterly','annually'
+
+
+class InvalidationCondition(BaseModel):
+    condition: str        # e.g. "Revenue growth < 5% YoY"
+    metric: str           # e.g. "revenue_growth"
+    threshold: str        # e.g. "<5%"
+    current_value: str | None  # Value at time of memo
+    category: str         # 'financial','market','regulatory','valuation','operational'
 ```
 
 ### 3.2 Reuse Targets
@@ -291,8 +364,9 @@ class PerspectiveVote(BaseModel):
 | Consumer | Uses |
 |---|---|
 | Dashboard | Recommendation + confidence embedded in idea view |
-| Decision Journal | Memo attached to confirmed decision via evidence ref |
-| Learning Loop | prediction_accuracy computed from memo recommendation vs actual outcome |
+| Decision Journal | Memo attached to confirmed decision via evidence ref; decision_context explains trigger |
+| Learning Loop | prediction_accuracy from recommendation vs outcome; invalidation_conditions checked at 30d/90d/1yr reviews |
+| Future reviews | Re-run research with same decision_context; compare invalidation_conditions against current data |
 
 ---
 
