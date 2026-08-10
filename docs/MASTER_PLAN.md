@@ -116,14 +116,22 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
     connector architecture
   - Slices: A (Core Portfolio Schema), B (Policy Enrichment), C (Ideas + Decision Bridge),
     D (Manual Import + Data Source Foundation)
-  - Slice A: IN PROGRESS
+  - Slice A: DONE — merged as 9f0ed00 (PR #78)
     - Migration 0018_portfolio_foundation
     - Tables: assets, positions, cash_balances, transactions, fx_rates, data_sources
     - Account extension: account_type, capital_bucket, currency, provider, provider_account_id
     - 50 PostgreSQL integration tests covering all constraints and provenance
+    - Provenance: source + source_record_id + observed_at + imported_at on every datum
+    - Import idempotency: partial unique indexes on (source, source_record_id)
+  - Follow-ups (COS-009-A-FU):
+    - H1: Transaction immutability trigger before first financial connector
+    - M1: Atomic position upsert contract
+    - L1: cash_balances imported_at naming consistency
+    - L3: transactions(executed_at) index when volume warrants
   - 7 Owner Decisions pending (OD-9-1 through OD-9-7)
   - 5 proposed ADRs (0007–0011)
   - NO broker integrations. NO credentials. NO trading.
+  - Slice B: NOT AUTHORIZED
 
 ## Backlog
 

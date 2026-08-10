@@ -1,5 +1,40 @@
 # Changelog
 
+## Sprint 009 Slice A — Core Portfolio Schema — Done (2026-08-10)
+
+### Merge
+- PR #78: `feat(portfolio): add core wealth data foundation`
+- Squash merged as: `9f0ed00dc7126285f1cbbaaa9a0089a607085212`
+- Independent review: APPROVE WITH NON-BLOCKING FOLLOW-UP (1 HIGH, 1 MEDIUM, 3 LOW)
+
+### Wealth Data Foundation
+- Migration 0018: 6 new tables + 5 account extension columns
+- `assets`: canonical instrument identity (ISIN, symbol/exchange/currency unique)
+- `positions`: account × asset with source provenance, is_latest point-in-time history
+- `cash_balances`: per-account per-currency cash with provenance
+- `transactions`: 11 financial event types (BUY/SELL/DIVIDEND/DEPOSIT…)
+- `fx_rates`: exchange rates with timestamped observations
+- `data_sources`: lightweight provider registry
+- Account extension: account_type, capital_bucket, currency, provider, provider_account_id
+
+### Design Invariants
+- Every external datum: source + source_record_id + observed_at + imported_at
+- Provider facts never silently mixed with CompoundOS calculations
+- Import idempotency: partial UNIQUE indexes on (source, source_record_id)
+- NULL source_record_id allows multiple manual entries without blocking
+- is_latest semantics: supersede-before-create preserves point-in-time history
+- All FKs RESTRICT: financial history cannot silently disappear
+
+### Test Coverage
+- 50 PostgreSQL integration tests: constraints, FKs, provenance, idempotency, schemas
+- Pydantic schemas with field validators for all 7 entities
+
+### Follow-ups
+- COS-009-A-FU-H1: Transaction immutability trigger before first connector
+- COS-009-A-FU-M1: Atomic position upsert contract
+- COS-009-A-FU-L1: cash_balances imported_at naming consistency
+- COS-009-A-FU-L3: transactions(executed_at) index for large volumes
+
 ## Sprint 008 Slice C — Daily Schedules — Done (2026-08-09)
 
 ### Merge
