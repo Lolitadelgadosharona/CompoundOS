@@ -197,8 +197,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   - Migration 0026_research_foundation: research_requests + research_runs
   - API: POST /api/research/request + GET /status + GET /runs
   - Run immutability trigger (err 55000)
-  - 9 PostgreSQL integration tests
-  - Slice B NOT STARTED
+  - 10 PostgreSQL integration tests
+  - Slice B: IN PROGRESS (PR #87)
 
 ## Backlog
 
