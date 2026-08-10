@@ -1,6 +1,39 @@
 # Changelog
 
-## Sprint 012 Slice C — Tool Interface Foundation — Done (2026-08-10)
+## Sprint 013 Slice A — Real LLM Provider Runtime — Done (2026-08-10)
+
+### Implementation
+- PR #94: `feat(llm-runtime): add real LLM provider runtime`
+- Squash merged as: `82bb43e9ae3799e73451a5fb4a9081101ee8d44b`
+- Architecture review: CHANGES REQUIRED → hardening applied → APPROVED
+
+### Provider Abstraction
+- `LLMProvider` Protocol: provider-neutral interface, zero SDK coupling
+- `AnthropicAdapter`: wraps `anthropic.Anthropic`, lazy import, fail-closed
+- `OpenAIAdapter`: wraps `openai.OpenAI`, lazy import, fail-closed
+- `GeminiAdapter`: wraps `google-genai` (new SDK), per-instance Client, no global state
+
+### Governance Chain (7 steps)
+- PermissionGate → PromptGovernor → ProviderRouter → Provider → ResponseValidator → Logger → (Store: caller)
+- `ResponseValidator`: JSON schema, required fields, conviction_score [1-10]
+- Hard enforcement: auth 401/403 fail fast, transient retry 3× (1s/4s/16s), provider fallback
+
+### Provenance
+- `ExecutionResult`: validated dict, actual provider/model, retries, fallback_used
+- Fallback provenance: `llm_execution_log` records actual_model (not primary)
+- Failed executions: `_log_failure` writes failure log with error detail
+
+### Credential Security
+- All keys from environment variables only
+- `repr()` redacts keys, never logged, never in DB
+- No committed `.env` files
+
+### Tests
+- 27 mock tests (CI-safe, no real API calls)
+- Covers: routing, governance chain, validation 7×, retry+fallback, auth fail-fast,
+  fallback provenance, failure logging, credential isolation, AI authority
+
+## Sprint 012 — AI Runtime + Research Execution Engine — COMPLETE (2026-08-10)
 
 ### Implementation
 - PR #92: `feat(tools): add tool interface foundation`
