@@ -17,7 +17,6 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from apps.api.database import get_session
-from apps.api.middleware.auth import verify_api_key
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -40,9 +39,36 @@ def _hash_key(api_key: str) -> str:
     return hashlib.sha256(api_key.encode()).hexdigest()
 
 
+def _log_audit(
+    session: Session,
+    *,
+    event_type: str,
+    action: str = "",
+    resource: Optional[str] = None,
+    outcome: str = "success",
+) -> None:
+    from datetime import datetime, timezone
+    from uuid import uuid4
+
+    session.execute(
+        text(
+            "INSERT INTO audit_log (id, event_type, actor_role, action,"
+            " resource, outcome, occurred_at)"
+            " VALUES (:id, :et, 'owner', :act, :res, :out, :now)"
+        ),
+        {
+            "id": uuid4(),
+            "et": event_type,
+            "act": action,
+            "res": resource,
+            "out": outcome,
+            "now": datetime.now(timezone.utc),
+        },
+    )
+
+
 @router.post(
     "/keys", response_model=ApiKeyCreateResponse,
-    dependencies=[Depends(verify_api_key)],
 )
 def create_api_key(
     label: str = "default",
@@ -59,13 +85,16 @@ def create_api_key(
         ),
         {"id": kid, "kh": key_hash, "label": label, "created_by": "owner"},
     )
+    _log_audit(
+        session, event_type="owner.mutation",
+        action="create_api_key", resource=str(kid), outcome="success",
+    )
     session.commit()
     return ApiKeyCreateResponse(id=str(kid), label=label, api_key=api_key)
 
 
 @router.get(
     "/keys", response_model=list[ApiKeyResponse],
-    dependencies=[Depends(verify_api_key)],
 )
 def list_api_keys(
     session: Session = Depends(get_session),
@@ -87,7 +116,7 @@ def list_api_keys(
 
 
 @router.delete(
-    "/keys/{key_id}", dependencies=[Depends(verify_api_key)],
+    "/keys/{key_id}",
 )
 def revoke_api_key(
     key_id: str,
@@ -110,5 +139,10 @@ def revoke_api_key(
     )
     if result.rowcount == 0:
         raise HTTPException(404, "Key not found or already revoked")
+    # Audit: key revocation
+    _log_audit(
+        session, event_type="owner.mutation",
+        action="revoke_api_key", resource=key_id, outcome="success",
+    )
     session.commit()
     return {"status": "revoked"}

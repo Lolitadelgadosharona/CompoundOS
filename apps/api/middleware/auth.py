@@ -1,8 +1,12 @@
 """Auth middleware — X-API-Key authentication.
 
-Sprint 010 Slice D.
-Environment-based bypass for dev/test per OD-10-D-1.
-Audit writes are committed atomically with auth outcome.
+Sprint 010 Slice D — SECURITY HARDENING.
+
+FAIL-CLOSED (H2): Authentication is REQUIRED unless ENVIRONMENT is explicitly
+set to 'development' or 'test'. Missing, unknown, or production ENVIRONMENT
+values require authentication.
+
+Environment-based bypass per OD-10-D-1, hardened per COS-010-D-H2.
 """
 
 from __future__ import annotations
@@ -17,6 +21,9 @@ from sqlalchemy.orm import Session
 
 from apps.api.database import get_session
 
+# FAIL-CLOSED: only these explicit values bypass auth
+DEV_BYPASS_ENVIRONMENTS = {"development", "test"}
+
 
 def _hash_key(api_key: str) -> str:
     return hashlib.sha256(api_key.encode()).hexdigest()
@@ -26,12 +33,13 @@ async def verify_api_key(
     request: Request,
     session: Session = Depends(get_session),
 ) -> None:
-    """Validate X-API-Key header. Bypassed in dev/test per OD-10-D-1."""
-    env = os.getenv("ENVIRONMENT", "development")
-    if env in ("development", "test"):
+    """Validate X-API-Key header. Environment-based bypass only for dev/test."""
+    env = os.getenv("ENVIRONMENT", "").strip().lower()
+    if env in DEV_BYPASS_ENVIRONMENTS:
         request.state.role = "owner"
         return
 
+    # FAIL-CLOSED: missing/invalid/unknown ENVIRONMENT → auth required
     api_key = request.headers.get("X-API-Key")
     if not api_key:
         raise HTTPException(401, "X-API-Key header required")
@@ -54,7 +62,6 @@ async def verify_api_key(
         session.commit()
         raise HTTPException(401, "Invalid API key")
 
-    # Update last_used_at
     session.execute(
         text(
             "UPDATE owner_api_keys SET last_used_at = NOW()"
