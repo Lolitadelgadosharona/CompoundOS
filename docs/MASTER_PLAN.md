@@ -144,9 +144,13 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
     - Decision bridge: decision_drafts + confirmed_snapshots gain investment_idea_id FK
     - 27 PostgreSQL integration tests
     - Follow-ups: COS-009-C-FU-M1 (lifecycle transition enforcement), FU-L1 (soft-delete), FU-L2 (unused ALLOWED_TRANSITIONS)
-  - Slice D: DESIGN PHASE — Technical Design authored
-    - Design document: docs/sprints/SPRINT_009_SLICE_D_TECHNICAL_DESIGN.md
-    - NOT AUTHORIZED FOR IMPLEMENTATION
+  - Slice D: IN PROGRESS (PR #81)
+    - Migration 0021_manual_import_foundation: assets.confidence + transaction immutability
+    - CSV import pipeline: parse → validate → resolve → store
+    - Asset resolution: ISIN → (symbol,exchange,currency) → create unverified
+    - Import idempotency: upsert positions/balances, skip duplicate transactions
+    - Provider interfaces: AccountImporter, PositionImporter, TransactionImporter, BalanceImporter
+    - 30 PostgreSQL integration tests
 
 ## Backlog
 
