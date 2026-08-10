@@ -1701,6 +1701,9 @@ class Asset(Base):
     sub_asset_class: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     region: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     sector: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    confidence: Mapped[str] = mapped_column(
+        Text, nullable=False, default="verified", server_default="verified",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

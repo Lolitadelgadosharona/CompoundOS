@@ -11,6 +11,7 @@ from apps.api.routers.decisions import router as decisions_router
 from apps.api.routers.guardian import router as guardian_router
 from apps.api.routers.health import router as health_router
 from apps.api.routers.households import router as households_router
+from apps.api.routers.imports import router as imports_router
 from apps.api.routers.notifications import router as notifications_router
 from apps.api.routers.policies import router as policies_router
 from apps.api.routers.portfolios import router as portfolios_router
@@ -60,3 +61,4 @@ app.include_router(committee_router)
 app.include_router(backup_router)
 app.include_router(health_router)
 app.include_router(notifications_router)
+app.include_router(imports_router)

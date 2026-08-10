@@ -24,7 +24,7 @@ from apps.api.models import (
 
 pytestmark = pytest.mark.postgres
 
-HEAD_REVISION = "0020_investment_idea_bridge"
+HEAD_REVISION = "0021_manual_import_foundation"
 PREVIOUS_REVISION = "0011_fencing_closure"
 
 COMMITTEE_TABLES = {
