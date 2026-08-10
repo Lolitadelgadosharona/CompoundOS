@@ -161,12 +161,12 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
       - Migration 0022_committee_bridge: committee_review_requests + evidence types
       - Bridge: investment_ideas → committee_sessions via Owner-controlled workflow
       - 18 PostgreSQL integration tests
-    - Slice B: DESIGN PHASE — Technical Design authored
-      - Design document: docs/sprints/SPRINT_010_SLICE_B_TECHNICAL_DESIGN.md
-      - 5 new Guardian check types, policy-backed thresholds, notification wiring
-      - 4 Owner Decisions pending (OD-10-B-1 through OD-10-B-4)
-      - Owner decisions: docs/sprints/SPRINT_010_SLICE_B_OWNER_DECISIONS.md
-      - NOT AUTHORIZED FOR IMPLEMENTATION
+    - Slice B: IN PROGRESS (PR #83)
+      - Migration 0023_guardian_intelligence: extended check_type CHECK (+5 types)
+      - guardian_intelligence.py: 5 evaluation functions + BLOCK_RECOMMENDATION
+      - 14 PostgreSQL integration tests
+      - Design doc: docs/sprints/SPRINT_010_SLICE_B_TECHNICAL_DESIGN.md
+    - Slice C: NOT AUTHORIZED
 
 ## Backlog
 
