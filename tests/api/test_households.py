@@ -283,4 +283,5 @@ def test_migration_contains_only_approved_product_tables(postgres_engine) -> Non
         "notification_events", "notification_preferences",
         "assets", "positions", "cash_balances", "transactions",
         "fx_rates", "data_sources",
+        "policy_capital_buckets", "policy_rules",
     }
