@@ -165,6 +165,7 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
       - Design document: docs/sprints/SPRINT_010_SLICE_B_TECHNICAL_DESIGN.md
       - 5 new Guardian check types, policy-backed thresholds, notification wiring
       - 4 Owner Decisions pending (OD-10-B-1 through OD-10-B-4)
+      - Owner decisions: docs/sprints/SPRINT_010_SLICE_B_OWNER_DECISIONS.md
       - NOT AUTHORIZED FOR IMPLEMENTATION
 
 ## Backlog
