@@ -202,6 +202,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   - Slice C: IN PROGRESS (PR #88)
     - Migration 0029_perspective_analyses: 6 perspectives, immutability trigger
 
+- **SM-001 Authorized (2026-07-27):** Security-maintenance Sprint authorized by Owner. Upgrade next 16.2.10→16.2.12, eslint-config-next→16.2.12, postcss 8.5.10→>=8.5.18 to resolve npm audit --omit=dev high-severity blocker (Next.js 9 CVEs + PostCSS 2 CVEs). Branch: security/frontend-next-postcss-audit from main d1c4589f. Minimum safe upgrade. Draft PR only. No force push. No merge. Target: 0 high/critical npm audit and 6/6 CI.
+
 ## Backlog
 
 - COS-009-D Follow-ups (from Slice D independent review):
