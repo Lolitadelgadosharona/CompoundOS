@@ -2,168 +2,244 @@
 
 > **STATUS: PENDING OWNER DECISIONS**
 >
-> Sprint 011: COMPLETE
-> Sprint 012: DESIGN DIRECTION ONLY
+> Sprint 011: COMPLETE (Slices A-D all implemented)
+> Sprint 012: DESIGN DIRECTION COMPLETE
 >
-> 6 decisions required before implementation.
+> 6 decisions required before implementation begins.
+> All decisions preserve: AI advisory-only, no trading, no broker, no credentials.
 
 ---
 
-## OD-12-1: LLM Provider Authorization
+## OD-12-1: Prompt Template Lifecycle
 
 ### Question
-Should Sprint 012 implement real LLM API calls or use mock providers?
+What lifecycle should prompt templates follow?
 
 ### Options
 
-| Option | Description | Pros | Cons |
-|---|---|---|---|
-| A: Real OpenRouter | Connect to OpenRouter API, make real LLM calls | Functional AI from day one; validates the pipeline end-to-end | Requires API key; costs money per test run |
-| B: Mock with real interface | Implement `LLMProvider` Protocol with mock backend; swap to real later | Tests are free; validates architecture without API dependency | Doesn't prove real LLM integration works |
-| C: Hybrid | Mock by default, real with env flag | Test in CI uses mock; manual testing uses real | Extra complexity |
+| Option | Lifecycle | Description |
+|---|---|---|
+| A: Versioned | draft → active → deprecated | Prompts are versioned; each perspective references a specific version. Draft prompts can be tested before activation. Deprecated prompts remain for audit but are not selectable for new runs. |
+| B: Single active | one active per perspective | Only one prompt per perspective at a time. Changing it overwrites. Simpler but no rollback or audit of prompt evolution. |
+| C: Git-managed | prompts in migration files | Prompts live in Alembic migrations or seed files, not in DB. Versioned via git history. Less flexible for runtime experimentation. |
+
+### Architecture Impact
+Option A requires `prompt_templates` table with `status` column and
+CHECK constraint on lifecycle states. Each `perspective_analyses` row
+links to a specific prompt version for audit.
 
 ### Recommendation
-**Option C — Hybrid.** CI tests use mock providers (zero cost, deterministic).
-Owner can set `COMPOUNDOS_LLM_MODE=live` to test with real OpenRouter.
-This validates the architecture while keeping CI costs at zero.
+**Option A — Versioned lifecycle.** Investment analysis prompts are as
+critical as code. They need versioning, testing, and rollback capability.
+The versioned lifecycle matches the policy version pattern already in
+CompoundOS (draft → sealed → superseded).
 
 ### Owner Decision
-- [ ] APPROVE — Option A (Real OpenRouter)
-- [ ] APPROVE — Option B (Mock with real interface)
-- [ ] APPROVE — Option C (Hybrid: mock CI + live dev)
+- [ ] APPROVE — Option A (Versioned: draft → active → deprecated)
+- [ ] APPROVE — Option B (Single active per perspective)
+- [ ] APPROVE — Option C (Git-managed in migrations)
 - [ ] OTHER: _______________
 
 ---
 
-## OD-12-2: Research Execution Concurrency
+## OD-12-2: LLM Model Routing Strategy
 
 ### Question
-Should perspective LLM calls run sequentially or in parallel?
-
-### Options
-
-| Option | Description |
-|---|---|
-| A: Sequential | Run 6 perspectives one after another |
-| B: Parallel | Run all 6 perspectives concurrently |
-| C: Configurable | Owner chooses per request |
-
-### Recommendation
-**Option B — Parallel.** 6 perspectives × 30s each = 3 minutes sequential
-vs 30 seconds parallel. The perspectives are independent LLM calls with
-no shared state. Parallel execution with `concurrent.futures` or `asyncio`
-is straightforward and dramatically improves user experience.
-
-### Owner Decision
-- [ ] APPROVE — Option A (Sequential)
-- [ ] APPROVE — Option B (Parallel)
-- [ ] APPROVE — Option C (Configurable)
-- [ ] OTHER: _______________
-
----
-
-## OD-12-3: LLM Execution Logging Detail
-
-### Question
-How detailed should the LLM execution log be?
+How should LLM model selection be managed?
 
 ### Options
 
 | Option | Description |
 |---|---|
-| A: Minimal | perspective, model, status, duration only |
-| B: Standard | + tokens_in, tokens_out, cost_estimate, prompt_version |
-| C: Full | + full prompt, full response, retry details |
+| A: Single model | One model for all perspectives (e.g. Claude Sonnet 4 for everything) |
+| B: Fixed routing per perspective | Each perspective has a designated model. Value→Claude, Macro→GPT-4o, etc. Configured in DB, changeable by Owner. |
+| C: Multi-model with A/B | Each perspective can route to one of several fallback models. If primary fails, try secondary. |
+
+### Architecture Impact
+Option B requires `prompt_templates` table with `default_model` column
+per perspective. Option C adds `fallback_models` array.
 
 ### Recommendation
-**Option B — Standard.** Tokens, cost, and prompt version are essential
-for cost tracking and debugging. Full prompt/response logging (Option C)
-adds significant storage and may include sensitive financial data.
+**Option B — Fixed routing per perspective.** Different models have
+different strengths (Claude for analytical reasoning, GPT-4o for broad
+knowledge). Fixed routing gives predictable quality per perspective while
+allowing Owner to experiment by changing the configured model.
 
 ### Owner Decision
-- [ ] APPROVE — Option A (Minimal)
-- [ ] APPROVE — Option B (Standard)
-- [ ] APPROVE — Option C (Full)
+- [ ] APPROVE — Option A (Single model)
+- [ ] APPROVE — Option B (Fixed routing per perspective)
+- [ ] APPROVE — Option C (Multi-model with fallback)
 - [ ] OTHER: _______________
 
 ---
 
-## OD-12-4: Token Budget Per Perspective
+## OD-12-3: LLM Execution Logging Detail Level
 
 ### Question
-What should be the max token budget per LLM perspective call?
+How detailed should the LLM execution audit log be?
+
+### Options
+
+| Option | Fields | Cost |
+|---|---|---|
+| A: Minimal | run_id, perspective, model, status, duration_ms | Lowest storage |
+| B: Standard | + tokens_in, tokens_out, cost_estimate, prompt_version, retry_count | Medium |
+| C: Audit-grade | + full prompt (sanitized), response summary, structured validation errors | Highest |
+
+### Architecture Impact
+All options require `llm_execution_log` table. Option C adds larger
+text columns for prompt/response storage.
+
+### Recommendation
+**Option B — Standard.** Tokens, cost, prompt version, and retry count
+are essential for cost tracking and debugging. Full prompt logging (C)
+adds significant storage and may include sensitive financial context.
+Prompt content is already versioned in `prompt_templates`.
+
+### Owner Decision
+- [ ] APPROVE — Option A (Minimal: status + duration)
+- [ ] APPROVE — Option B (Standard: + tokens, cost, version, retries)
+- [ ] APPROVE — Option C (Audit-grade: + prompt + response)
+- [ ] OTHER: _______________
+
+---
+
+## OD-12-4: Research Pipeline Execution Model
+
+### Question
+Should research execution be synchronous or asynchronous?
 
 ### Options
 
 | Option | Description |
 |---|---|
-| A: 2000 tokens | Compact; forces concise analysis |
-| B: 4000 tokens | Room for detailed analysis with citations |
-| C: 8000 tokens | Maximum depth; higher cost |
+| A: Synchronous | POST /api/research/start blocks until all perspectives + memo complete (2-5 minutes). Returns final result in HTTP response. |
+| B: Asynchronous worker | POST returns immediately. Background worker executes research. Owner polls GET /api/research/{id}/progress or receives notification on completion. |
+| C: Hybrid async with webhook | Same as B, plus optional webhook/notification on completion. |
+
+### Architecture Impact
+Option A is simpler (no worker infrastructure) but ties up HTTP connections
+for minutes. Option B requires a background execution model (similar to
+existing CompoundOS automation worker pattern). Option C adds notification
+wiring (existing infrastructure from Sprint 007/008).
 
 ### Recommendation
-**Option B — 4000 tokens.** 2000 is tight for structured JSON analysis
-with evidence citations. 4000 gives sufficient room without excessive cost.
-At $15/M output, a 4000-token analysis costs ~$0.06 per perspective.
+**Option B — Asynchronous worker.** AI research takes 2-5 minutes and
+involves 6+ sequential API calls. Synchronous HTTP is inappropriate for
+this duration. CompoundOS already has a proven automation worker pattern
+(Sprint 005). Research execution follows the same model: POST creates
+a run, worker processes it, Owner polls or is notified.
 
 ### Owner Decision
-- [ ] APPROVE — Option A (2000 tokens)
-- [ ] APPROVE — Option B (4000 tokens)
-- [ ] APPROVE — Option C (8000 tokens)
+- [ ] APPROVE — Option A (Synchronous: blocks until complete)
+- [ ] APPROVE — Option B (Asynchronous worker: poll progress)
+- [ ] APPROVE — Option C (Hybrid async with notification)
 - [ ] OTHER: _______________
 
 ---
 
-## OD-12-5: Prompt Template Governance
+## OD-12-5: AI Action Permission Matrix
 
 ### Question
-Who can create and modify prompt templates?
+What actions can the AI Runtime execute automatically vs require Owner approval?
 
-### Options
+### Proposed Matrix
 
-| Option | Description |
-|---|---|
-| A: Owner only | Owner creates/edits prompts via API |
-| B: Developer-managed | Prompts in migration files, version-controlled |
-| C: AI-suggested | AI proposes prompt improvements; Owner approves |
+| Action | Auto | Owner | Never | Notes |
+|---|---|---|---|---|
+| Fetch market data | ✓ | | | Read from Alpha Vantage cache |
+| Load portfolio data | ✓ | | | Internal DB reads |
+| Load policy/guardian data | ✓ | | | Internal DB reads |
+| Execute LLM perspective calls | ✓ | | | 6 perspectives |
+| Generate investment memo | ✓ | | | Synthesis from completed perspectives |
+| Calculate confidence score | ✓ | | | Formula from memo + evidence |
+| Store completed analysis | ✓ | | | Immutable DB writes |
+| Log execution metrics | ✓ | | | Audit trail |
+| Create investment idea | | ✓ | | Owner initiates research target |
+| Request committee review | | ✓ | | Owner triggers via bridge |
+| Approve investment | | ✓ | | Owner confirms recommendation |
+| Modify policy | | | ✓ | Never — policy mutation blocked |
+| Execute trade | | | ✓ | Never — no trade code paths |
+| Connect to broker | | | ✓ | Never — no broker integration |
 
 ### Recommendation
-**Option A — Owner only.** Investment analysis prompts directly influence
-recommendation quality. Owner should control prompt content. Prompts are
-stored in DB for runtime access, but creation/modification requires
-Owner authorization.
+**Approve the proposed matrix.** AI Runtime automates research execution
+(data gathering, LLM analysis, memo generation, scoring). All
+decision-making actions require Owner authorization.
 
 ### Owner Decision
-- [ ] APPROVE — Option A (Owner only)
-- [ ] APPROVE — Option B (Developer-managed)
-- [ ] APPROVE — Option C (AI-suggested)
-- [ ] OTHER: _______________
+- [ ] APPROVE — Proposed permission matrix as documented
+- [ ] OTHER (specify modifications): _______________
 
 ---
 
-## OD-12-6: Research Failure Handling
+## OD-12-6: Failure and Retry Policy
 
 ### Question
-What happens when a research run fails mid-execution?
+How should research execution handle failures?
 
-### Options
+### Sub-decisions
+
+#### 6a. LLM call failures
+What happens when an individual LLM call fails (timeout, 429, 5xx)?
 
 | Option | Description |
 |---|---|
-| A: Fail fast | Stop immediately; mark as failed; partial results discarded |
-| B: Partial results preserved | Perspectives that completed are kept; only failed ones are null |
-| C: Retry then fail | Retry failed perspectives × 3; if still failing, preserve partial |
+| A: Retry × 3 | Exponential backoff (1s, 4s, 16s). Still failing → perspective marked failed. |
+| B: Fail immediately | No retries. Perspective marked failed. |
+| C: Retry × 5 | More aggressive. Higher latency, better recovery. |
 
-### Recommendation
-**Option B — Partial results preserved.** A failed Macro perspective
-shouldn't discard completed Value, Growth, and Risk analyses. The Owner
-can review partial results and decide whether to re-run.
+**Recommendation: A — Retry × 3 with exponential backoff.**
+
+#### 6b. Partial run handling
+What happens when some perspectives succeed and others fail?
+
+| Option | Description |
+|---|---|
+| A: Discard all | If any perspective fails, discard all results. |
+| B: Partial preservation | Successful perspectives are kept as completed. Failed perspectives are null. Memo generation skipped. Owner reviews partial results. |
+| C: Retry all | Re-run all perspectives (including successful ones). |
+
+**Recommendation: B — Partial preservation.** A failed Macro perspective
+shouldn't discard completed Value, Growth, and Risk analyses.
+
+#### 6c. Research run timeout
+How long before a research run is considered failed?
+
+| Option | Timeout |
+|---|---|
+| A: 5 minutes | Tight; may fail with slow LLM responses |
+| B: 10 minutes | Balanced; allows 6 × ~60s perspectives |
+| C: 20 minutes | Generous; handles worst-case |
+
+**Recommendation: B — 10 minutes.**
 
 ### Owner Decision
-- [ ] APPROVE — Option A (Fail fast)
-- [ ] APPROVE — Option B (Partial results)
-- [ ] APPROVE — Option C (Retry then fail)
-- [ ] OTHER: _______________
+- [ ] APPROVE — Retry × 3 (A) + Partial preservation (B) + 10 min timeout (B)
+- [ ] OTHER (specify): _______________
+
+---
+
+## Architecture Requirements Confirmation
+
+All decisions preserve the following non-negotiable principles:
+
+| Principle | Enforcement |
+|---|---|
+| AI advisory only | AI analyzes + recommends; Owner decides |
+| No automatic investment approval | Decision creation requires Owner POST |
+| No trading capability | No trade/order execution code paths |
+| No broker integration | No broker connectors or API keys |
+| No credentials in DB | API keys only in environment variables |
+
+All completed AI artifacts preserve provenance:
+
+| Artifact | Provenance |
+|---|---|
+| perspective_analyses | model, prompt_version, started_at, completed_at |
+| investment_memos | synthesis_model, generated_at |
+| llm_execution_log | model, prompt_version, tokens_in, tokens_out, cost_estimate, duration_ms |
+| prompt_templates | version, status, created_at, deprecated_at |
 
 ---
 
@@ -171,9 +247,9 @@ can review partial results and decide whether to re-run.
 
 | ID | Topic | Recommendation |
 |---|---|---|
-| OD-12-1 | LLM authorization | Hybrid (mock CI + live dev) |
-| OD-12-2 | Execution concurrency | Parallel |
-| OD-12-3 | Logging detail | Standard (tokens, cost, version) |
-| OD-12-4 | Token budget | 4000 per perspective |
-| OD-12-5 | Prompt governance | Owner only |
-| OD-12-6 | Failure handling | Partial results preserved |
+| OD-12-1 | Prompt template lifecycle | Versioned: draft → active → deprecated (A) |
+| OD-12-2 | LLM model routing | Fixed routing per perspective (B) |
+| OD-12-3 | Execution logging | Standard: tokens, cost, version, retries (B) |
+| OD-12-4 | Pipeline execution model | Asynchronous worker (B) |
+| OD-12-5 | AI permission matrix | 8 auto actions, 4 Owner-only, 3 never |
+| OD-12-6 | Failure/retry policy | Retry × 3 + partial preservation + 10 min timeout |
