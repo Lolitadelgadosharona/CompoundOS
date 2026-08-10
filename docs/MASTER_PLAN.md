@@ -226,7 +226,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   - GovernedLLMExecutor: 7-step chain, ResponseValidator, retry + fallback
   - 27 mock tests (CI-safe, no real API calls)
 - Owner Decisions: docs/sprints/SPRINT_013_OWNER_DECISIONS_FINAL.md (all 8 APPROVED)
-- LLM: Claude + GPT-4o + Gemini | Market: Alpha Vantage V1
+- Slice B: DESIGN PHASE — NOT AUTHORIZED FOR IMPLEMENTATION
+  - Technical Design: docs/sprints/SPRINT_013_SLICE_B_TECHNICAL_DESIGN.md
 - Cost: log-only thresholds ($0.25/run, $2/day, $30/mo)
 
 
