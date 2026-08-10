@@ -204,7 +204,7 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 
 - **SM-001 Authorized (2026-07-27):** Security-maintenance Sprint authorized by Owner.
 
-### Sprint 012: IN PROGRESS
+### Sprint 012: COMPLETE — ALL 4 SLICES DONE
 - Slice A: DONE — merged as 59d137e (PR #90)
   - LLM Runtime: prompt_templates + llm_execution_log
 - Slice B: DONE — merged as b5444ac (PR #91)
@@ -214,10 +214,9 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   - Provider protocols: MarketData, CompanyData, Knowledge, Document
   - Enhanced EvidenceCollector: CacheService, graceful degradation
   - ProvenanceEnvelope: 6 mandatory fields
-  - 11 PostgreSQL integration tests
-- Slice D: DESIGN COMPLETE — Awaiting Implementation Authorization
-  - AI Governance: PermissionGate, prompt enforcement, cost tracking, audit
-  - Owner Decisions resolved (OD-12-D-1 through OD-12-D-4)
+- Slice D: APPROVED — awaiting merge (PR #93)
+  - ActionMatrix (15 actions), PermissionGate, PromptGovernor, CostTracker
+  - Hard prompt enforcement, log-only cost tracking
 
 ## Backlog
 
