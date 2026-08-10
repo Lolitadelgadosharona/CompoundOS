@@ -231,8 +231,10 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   - 24 mock tests (CI-safe, no real AV calls)
 - Slice C: DONE — merged as f7c46ef (PR #96)
   - ResearchIntelligencePipeline, MemoGenerator, ConfidenceEngine
-  - Slice D: DESIGN PHASE — NOT AUTHORIZED FOR IMPLEMENTATION
-  - Technical Design: docs/sprints/SPRINT_013_SLICE_D_TECHNICAL_DESIGN.md
+  - Slice D: IN PROGRESS (PR #97)
+  - CommitteeIntegrationService, OwnerDecisionService, LearningLoopService
+  - ProvenanceService: full chain from decision → memo → perspectives
+  - 5 tests pass; DB constraint follow-up: COS-013-D-FU-M1
 
 
 
