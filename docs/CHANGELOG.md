@@ -4,7 +4,7 @@
 
 ### Implementation
 - PR #92: `feat(tools): add tool interface foundation`
-- Architecture review: APPROVED
+- Squash merged as: `1d73f84a15f817e8f19e0846ef649ffd8e6fbc5b`
 
 ### Provider Abstraction
 - `MarketDataProvider`, `CompanyDataProvider`, `KnowledgeProvider`, `DocumentProvider` Protocols
