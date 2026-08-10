@@ -153,10 +153,11 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
     - 30 PostgreSQL integration tests
     - Follow-ups: COS-009-D-FU-L1 (atomic position upsert), FU-L2 (extend immutability fields), SEC-002 (global auth)
   - Sprint 009: COMPLETE — Slices A, B, C, D all done
-  - Sprint 010: DESIGN COMPLETE — Waiting for Owner Decisions
+  - Sprint 010: DESIGN COMPLETE — Owner Decisions Resolved
     - Design document: docs/sprints/SPRINT_010_TECHNICAL_DESIGN.md
-    - Owner decisions: docs/sprints/SPRINT_010_OWNER_DECISIONS.md (OD-10-1 through OD-10-5)
+    - Owner decisions: docs/sprints/SPRINT_010_OWNER_DECISIONS.md (OD-10-1 through OD-10-5 — all resolved)
     - 4 slices: Committee Bridge, Guardian Intelligence, Dashboard+Learning, Security+Notifications
+    - Slice A: AUTHORIZED TO START
     - NOT AUTHORIZED FOR IMPLEMENTATION
 
 ## Backlog

@@ -1,11 +1,9 @@
 # Sprint 010 — Owner Decisions
 
-> **STATUS: PENDING OWNER DECISIONS**
+> **STATUS: OWNER DECISIONS RESOLVED — READY FOR IMPLEMENTATION**
 >
 > Sprint 010 Design: APPROVED (3e1b73a)
-> 5 decisions require Owner review before implementation begins.
->
-> Once decisions are recorded, implementation proceeds in order:
+> All 5 decisions recorded. Implementation proceeds in order:
 > Slice A → Slice B → Slice C → Slice D.
 
 ---
@@ -34,9 +32,10 @@ invalidation is a common source of bugs. If performance becomes an issue,
 add caching later as a non-breaking optimization.
 
 ### Owner Decision
-- [ ] APPROVE — Option A (Compute live)
-- [ ] APPROVE — Option B (Cache with TTL)
-- [ ] OTHER (specify): _______________
+- [x] **APPROVED — Tiered approach**
+  - **Live computation** for: net worth, allocation, policy compliance, risk status
+  - **Cached analytics** for: historical reports, performance analytics, attribution
+  - Implementation: compute live in GET /api/dashboard; add cache layer for historical/analytics endpoints in future sprint
 
 ---
 
@@ -66,10 +65,10 @@ as a tool, not an obligation. The learning loop remains available for every
 decision; the Owner decides which ones merit formal review.
 
 ### Owner Decision
-- [ ] APPROVE — Option A (Optional)
-- [ ] APPROVE — Option B (Mandatory)
-- [ ] APPROVE — Option C (Tiered)
-- [ ] OTHER (specify): _______________
+- [x] **APPROVED — Tiered optional model**
+  - **Low impact decisions**: post-decision review is optional
+  - **High impact decisions**: required review schedule (30d, 90d, 1yr)
+  - Implementation: review columns nullable; scheduling API available for all decisions; high-impact decisions auto-schedule on confirmation
 
 ---
 
@@ -101,10 +100,11 @@ This closes SEC-002 before any real financial data enters the system.
 The compoundos-development skill already documents this as SEC-002.
 
 ### Owner Decision
-- [ ] APPROVE — Option A (Implement in Slice D)
-- [ ] APPROVE — Option B (Defer to Sprint 011)
-- [ ] APPROVE — Option C (Import endpoints only)
-- [ ] OTHER (specify): _______________
+- [x] **APPROVED — Implement in Sprint 010 Slice D**
+  - Owner API key authentication via X-API-Key header
+  - Authorization boundary: READ vs OWNER_MUTATION vs SYSTEM_INTERNAL
+  - Audit logging on all authenticated mutations
+  - Do NOT build full enterprise IAM — single-owner model only
 
 ---
 
@@ -137,10 +137,10 @@ Owner-initiated. The extra step is intentional friction — it ensures
 the Owner consciously requests AI assistance.
 
 ### Owner Decision
-- [ ] APPROVE — Option A (Manual trigger)
-- [ ] APPROVE — Option B (Auto-trigger)
-- [ ] APPROVE — Option C (Prompt)
-- [ ] OTHER (specify): _______________
+- [x] **APPROVED — Manual Owner trigger**
+  - AI Committee execution requires explicit Owner action
+  - AI cannot automatically create investment recommendations
+  - POST /api/ideas/{id}/request-review endpoint (OWNER_MUTATION)
 
 ---
 
@@ -173,10 +173,10 @@ handling, and testing complexity. The existing in-app notification system
 now so the schema is ready when delivery channels are implemented.
 
 ### Owner Decision
-- [ ] APPROVE — Option A (Design only)
-- [ ] APPROVE — Option B (Email implementation)
-- [ ] APPROVE — Option C (Both design, neither implemented)
-- [ ] OTHER (specify): _______________
+- [x] **APPROVED — Design only in Sprint 010**
+  - No email/phone implementation yet
+  - notification_escalation_rules table defined (schema only)
+  - Delivery channel implementation deferred to future sprint
 
 ---
 
@@ -184,11 +184,11 @@ now so the schema is ready when delivery channels are implemented.
 
 | ID | Topic | Recommendation | Owner Decision |
 |---|---|---|---|
-| OD-10-1 | Dashboard strategy | Compute live (A) | |
-| OD-10-2 | Review scheduling | Optional (A) | |
-| OD-10-3 | API key auth | Implement in Slice D (A) | |
-| OD-10-4 | Committee trigger | Manual trigger (A) | |
-| OD-10-5 | Notification escalation | Design only (A) | |
+| OD-10-1 | Dashboard strategy | Compute live | **Tiered**: live for real-time, cache for historical |
+| OD-10-2 | Review scheduling | Optional | **Tiered**: optional for low-impact, required for high-impact |
+| OD-10-3 | API key auth | Implement in Slice D | **Implement in Slice D** |
+| OD-10-4 | Committee trigger | Manual trigger | **Manual Owner trigger** |
+| OD-10-5 | Notification escalation | Design only | **Design only** |
 
 ---
 
