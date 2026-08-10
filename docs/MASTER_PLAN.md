@@ -205,9 +205,9 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - **SM-001 Authorized (2026-07-27):** Security-maintenance Sprint authorized by Owner.
 
 ### Sprint 012: IN PROGRESS
-- Slice A: IN PROGRESS (PR #90)
-  - Migration 0031_llm_runtime: prompt_templates + llm_execution_log
-  - 11 PostgreSQL integration tests
+- Slice A: DONE — merged as 59d137e (PR #90)
+  - LLM Runtime: prompt_templates + llm_execution_log
+- Slice B: DESIGN PHASE — NOT AUTHORIZED FOR IMPLEMENTATION
 
 ## Backlog
 
