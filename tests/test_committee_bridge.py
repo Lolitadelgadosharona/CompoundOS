@@ -61,10 +61,46 @@ class TestMigration:
         ), "committee_review_requests table not found"
 
     def test_evidence_source_types_extended(
-        self, postgres_test_isolation, postgres_engine: Engine,
+        self, db_session: Session,
     ):
-        with postgres_engine.connect():
-            pass  # Just verify migration applied — the CHECK was extended
+        """New source types (portfolio_position, policy_bucket, investment_idea)
+        are accepted by the extended CHECK constraint."""
+        from apps.api.models import (
+            CommitteeEvidenceItem,
+            CommitteeSession,
+            HouseholdProfile,
+        )
+
+        hh = HouseholdProfile(
+            id=uuid4(), household_name="Evidence Test", base_currency="USD",
+        )
+        db_session.add(hh)
+        db_session.flush()
+
+        session_obj = CommitteeSession(
+            id=uuid4(), household_id=hh.id,
+            title="Evidence Test", proposal_text="Test new source types",
+            status="completed",
+        )
+        db_session.add(session_obj)
+        db_session.flush()
+
+        item = CommitteeEvidenceItem(
+            id=uuid4(), session_id=session_obj.id,
+            source_type="portfolio_position",
+            source_title="Test position evidence",
+            as_of=_now(),
+            content_hash="test",
+            structured_facts={},
+            provenance="compoundos_internal",
+            confidence="high",
+            freshness="current",
+            citation_ref="test-ref",
+        )
+        db_session.add(item)
+        # Must not raise — proves CHECK was extended
+        db_session.commit()
+
     def test_migration_head(self, db_session: Session):
         result = db_session.execute(
             text("SELECT version_num FROM alembic_version")
