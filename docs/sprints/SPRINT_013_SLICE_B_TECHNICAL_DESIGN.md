@@ -369,3 +369,53 @@ Sprint 013 Owner Decisions (all 8 approved):
 All architectural decisions for Slice B are resolved by prior
 Owner approvals and the existing provider protocol design from
 Sprint 012-C.
+
+---
+
+## 14. Design Hardening Invariants
+
+### 14.1 Cache vs Evidence Snapshot
+
+`market_data_cache` is refreshable and disposable. `committee_evidence_items`
+are immutable research-time evidence snapshots. Once evidence is attached
+to a ResearchRun, later cache refreshes MUST NOT mutate or reinterpret
+the historical evidence used by that run. This is a tested invariant:
+insert evidence snapshot, refresh cache, verify snapshot unchanged.
+
+### 14.2 Data Quality → Confidence Mapping
+
+Data-quality impact must be deterministic. The LLM MUST NOT invent its
+own confidence penalty. The `ConfidenceEngine` (Sprint 012-B) owns the
+mapping:
+
+| Quality | evidence_quality multiplier |
+|---|---|
+| VALID | 1.0 (full score) |
+| STALE | 0.5 (halved) |
+| SUSPECT | 0.25 (quartered) |
+| FAILED/missing | 0.0 (zeroed) |
+
+Exact weights remain configurable, but calculation ownership belongs
+to system code, never to the LLM.
+
+### 14.3 Missing Sources as First-Class Output
+
+`missing_sources` is a first-class research output. When external data
+is unavailable: continue where allowed, never fabricate, record missing
+source/type, propagate into confidence, expose to downstream memo
+and research results.
+
+### 14.4 Provider Error Normalization
+
+`AlphaVantageProvider` translates provider/network behavior into
+CompoundOS-owned error categories. At minimum:
+
+| Category | CompoundOS Error | Trigger |
+|---|---|---|
+| Authentication | `ConfigurationError` | Missing/invalid API key |
+| Rate limit | `RateLimitError` | AV "rate limit" Note or 429 |
+| Transient | `ProviderTimeoutError` | Timeout, ConnectionError |
+| Malformed | `ProviderResponseError` | Unexpected response format |
+| Semantic | `ProviderResponseError` | AV "Error Message" field |
+
+No raw provider exception defines business behavior directly.
