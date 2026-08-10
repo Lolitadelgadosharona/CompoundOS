@@ -138,14 +138,20 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
     - 35 PostgreSQL integration tests covering constraints and triggers
     - No hardcoded allocations — policy remains configurable
     - Guardian compatibility: schema supports future drift detection
-  - Slice C: IN PROGRESS (PR #80)
+  - Slice C: DONE — merged as f87e4e8 (PR #80)
     - Migration 0020_investment_idea_bridge
     - Tables: investment_ideas, idea_status_history
     - Decision bridge: decision_drafts + confirmed_snapshots gain investment_idea_id FK
     - 27 PostgreSQL integration tests
+    - Follow-ups: COS-009-C-FU-M1 (lifecycle transition enforcement), FU-L1 (soft-delete), FU-L2 (unused ALLOWED_TRANSITIONS)
+  - Slice D: NOT STARTED
 
 ## Backlog
 
+- COS-009-C Follow-ups (from Slice C independent review):
+  - COS-009-C-FU-M1: Enforce investment idea lifecycle transitions before API exposure (ALLOWED_TRANSITIONS defined but not enforced at DB or repo level).
+  - COS-009-C-FU-L1: Consider archive instead of delete for investment ideas (Owner product decision).
+  - COS-009-C-FU-L2: Remove or integrate unused ALLOWED_TRANSITIONS dict in schemas.
 - OM-001 — Orchestration corrective review cleanup (MEDIUM/LOW follow-ups from Sprint 005 Corrective independent review):
   - M1: Remove or document the unused `clock` parameter in `validate_lease_for_commit()` — `clock_timestamp()` is authoritative.
   - M2: Update deferred notification test to exercise monkeypatched production call path.

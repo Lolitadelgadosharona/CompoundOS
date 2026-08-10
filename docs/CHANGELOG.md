@@ -1,5 +1,37 @@
 # Changelog
 
+## Sprint 009 Slice C — Investment Idea + Decision Bridge — Done (2026-08-10)
+
+### Merge
+- PR #80: `feat(investment): add investment idea decision bridge`
+- Squash merged as: `f87e4e8a9da738e0df9d94d2c6ae8dc06d73ec1d`
+- Independent review: APPROVE WITH NON-BLOCKING FOLLOW-UP (1 MEDIUM, 2 LOW)
+
+### Investment Ideas
+- Migration 0020_investment_idea_bridge: 2 tables + 1 trigger function
+- `investment_ideas`: 6-status lifecycle (draft→under_review→approved/rejected/deferred/cancelled)
+- `idea_status_history`: append-only audit via AFTER INSERT OR UPDATE trigger
+- Confidence: HIGH/MEDIUM/LOW/SPECULATIVE
+- Source: owner/committee/guardian/external
+
+### Decision Bridge
+- `decision_drafts` + `investment_idea_id` (nullable FK, SET NULL)
+- `decision_confirmed_snapshots` + `investment_idea_id` (nullable FK, SET NULL)
+- Chain preserved: Idea → Committee Review → Owner Decision → Snapshot
+
+### Design Invariants
+- No AI authority — Owner remains sole decision-maker
+- No automatic status transitions (enforcement deferred to FU-M1)
+- Decision journal immutability unaffected (additive column only)
+
+### Follow-ups
+- COS-009-C-FU-M1: Enforce lifecycle transitions before API exposure
+- COS-009-C-FU-L1: Consider soft-delete for investment ideas
+- COS-009-C-FU-L2: Remove or integrate unused ALLOWED_TRANSITIONS
+
+### Test Coverage
+- 27 PostgreSQL integration tests: creation, lifecycle, history, decision bridge, schema validation
+
 ## Sprint 009 Slice B — Investment Policy Enrichment — Done (2026-08-10)
 
 ### Merge
