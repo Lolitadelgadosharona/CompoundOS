@@ -184,6 +184,12 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
       - 22 PostgreSQL integration tests
       - Sprint 010: COMPLETE (all 4 slices merged)
 
+### Sprint 011: DESIGN PREPARATION
+- Architecture snapshot: docs/architecture/COMPOUNDOS_ARCHITECTURE_SNAPSHOT_V1_0.md
+- Design direction: docs/sprints/SPRINT_011_DESIGN_DIRECTION.md
+- Owner decisions: docs/sprints/SPRINT_011_OWNER_DECISIONS.md (7 pending)
+- NOT AUTHORIZED FOR IMPLEMENTATION
+
 ## Backlog
 
 - COS-009-D Follow-ups (from Slice D independent review):
