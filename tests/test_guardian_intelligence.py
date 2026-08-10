@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 pytestmark = pytest.mark.postgres
 
-HEAD_REVISION = "0025_auth_and_audit"
+HEAD_REVISION = "0026_research_foundation"
 
 # ── Helpers ──────────────────────────────────────────────────────────
 

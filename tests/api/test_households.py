@@ -288,4 +288,5 @@ def test_migration_contains_only_approved_product_tables(postgres_engine) -> Non
         "committee_review_requests",
         "decision_reviews",
         "owner_api_keys", "audit_log", "notification_escalation_rules",
+        "research_requests", "research_runs",
     }

@@ -18,6 +18,7 @@ from apps.api.routers.imports import router as imports_router
 from apps.api.routers.notifications import router as notifications_router
 from apps.api.routers.policies import router as policies_router
 from apps.api.routers.portfolios import router as portfolios_router
+from apps.api.routers.research import router as research_router
 
 app = FastAPI(title="CompoundOS API", version="0.1.0")
 
@@ -160,4 +161,5 @@ app.include_router(notifications_router)
 app.include_router(imports_router)
 app.include_router(committee_bridge_router)
 app.include_router(dashboard_router)
+app.include_router(research_router)
 app.include_router(auth_router)
