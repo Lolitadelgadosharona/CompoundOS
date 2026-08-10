@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from apps.api.mutation_gate import mutation_gate
+from apps.api.routers.auth import router as auth_router
 from apps.api.routers.automation import router as automation_router
 from apps.api.routers.backup import router as backup_router
 from apps.api.routers.committee import router as committee_router
@@ -21,6 +22,99 @@ from apps.api.routers.portfolios import router as portfolios_router
 app = FastAPI(title="CompoundOS API", version="0.1.0")
 
 app.middleware("http")(mutation_gate)
+
+
+# Sprint 010 Slice D — Global auth middleware (H1)
+# Applied to ALL requests. Bypasses only health endpoints and dev/test env.
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    import hashlib
+    import os
+
+    path = request.url.path
+
+    # PUBLIC: health endpoints never require auth
+    if path in ("/health", "/api/health"):
+        return await call_next(request)
+
+    env = os.getenv("ENVIRONMENT", "").strip().lower()
+    if env in ("development", "test"):
+        request.state.role = "owner"
+        return await call_next(request)
+
+    # All other endpoints require X-API-Key
+    api_key = request.headers.get("X-API-Key")
+    if not api_key:
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "X-API-Key header required"},
+        )
+
+    key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+    from sqlalchemy import text as _t
+
+    from apps.api.database import SessionLocal
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            _t(
+                "SELECT id FROM owner_api_keys"
+                " WHERE key_hash = :kh AND revoked_at IS NULL"
+            ),
+            {"kh": key_hash},
+        ).fetchone()
+        if row is None:
+            db.execute(
+                _t(
+                    "INSERT INTO audit_log"
+                    " (id, event_type, actor_id, action, outcome, occurred_at)"
+                    " VALUES (:id, 'authentication.failure', :aid, :act,"
+                    " 'failure', :now)"
+                ),
+                {
+                    "id": __import__("uuid").uuid4(),
+                    "aid": key_hash[:12],
+                    "act": path,
+                    "now": __import__("datetime").datetime.now(
+                        __import__("datetime").timezone.utc,
+                    ),
+                },
+            )
+            db.commit()
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Invalid API key"},
+            )
+        db.execute(
+            _t(
+                "UPDATE owner_api_keys SET last_used_at = NOW()"
+                " WHERE id = :kid"
+            ),
+            {"kid": row[0]},
+        )
+        db.execute(
+            _t(
+                "INSERT INTO audit_log"
+                " (id, event_type, actor_id, actor_role, action, outcome,"
+                " occurred_at)"
+                " VALUES (:id, 'authentication.success', :aid, 'owner',"
+                " :act, 'success', :now)"
+            ),
+            {
+                "id": __import__("uuid").uuid4(),
+                "aid": key_hash[:12],
+                "act": path,
+                "now": __import__("datetime").datetime.now(
+                    __import__("datetime").timezone.utc,
+                ),
+            },
+        )
+        db.commit()
+        request.state.role = "owner"
+    finally:
+        db.close()
+
+    return await call_next(request)
 
 app.add_middleware(
     CORSMiddleware,
@@ -66,3 +160,4 @@ app.include_router(notifications_router)
 app.include_router(imports_router)
 app.include_router(committee_bridge_router)
 app.include_router(dashboard_router)
+app.include_router(auth_router)

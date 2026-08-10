@@ -177,13 +177,11 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
     - COS-010-C-FU-L1: Avoid duplicate position loading in dashboard service
     - COS-010-C-FU-L2: Add review completion 409 boundary test
     - COS-010-C-FU-L3: Add positive high-impact review scheduling test
-    - Slice D: DESIGN COMPLETE — Owner Decisions Resolved
-      - Design document: docs/sprints/SPRINT_010_SLICE_D_TECHNICAL_DESIGN.md
-      - Owner decisions: docs/sprints/SPRINT_010_SLICE_D_OWNER_DECISIONS.md (5 resolved)
-      - Auth: API key (X-API-Key) + environment-based bypass + financial READ required
-      - Audit: immutable audit_log, indefinite retention
-      - Escalation: notification_escalation_rules schema only
-      - AUTHORIZED TO START
+    - Slice D: IN PROGRESS (PR #85)
+      - Migration 0025_auth_and_audit: owner_api_keys, audit_log, notification_escalation_rules
+      - Auth: X-API-Key middleware + environment-based bypass + key CRUD
+      - Audit: immutable audit_log with BEFORE UPDATE/DELETE trigger
+      - 7 PostgreSQL integration tests
 
 ## Backlog
 

@@ -16,6 +16,12 @@ _test_url = os.environ.get("TEST_DATABASE_URL", "").strip()
 if _test_url:
     os.environ["DATABASE_URL"] = _test_url
 
+# ── Sprint 010 Slice D: auth bypass for all tests ──
+# Global auth middleware requires ENVIRONMENT=development to skip X-API-Key.
+# Set this BEFORE the app import so the middleware sees the right value.
+if "ENVIRONMENT" not in os.environ:
+    os.environ["ENVIRONMENT"] = "development"
+
 from apps.api.database import get_session  # noqa: E402
 from apps.api.main import app  # noqa: E402
 
