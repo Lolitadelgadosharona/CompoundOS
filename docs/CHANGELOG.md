@@ -1,6 +1,34 @@
 # Changelog
 
-## Sprint 010 Slice D — Auth, Audit & Escalation — Done (2026-08-10)
+## Sprint 012 Slice C — Tool Interface Foundation — Done (2026-08-10)
+
+### Implementation
+- PR #92: `feat(tools): add tool interface foundation`
+- Architecture review: APPROVED
+
+### Provider Abstraction
+- `MarketDataProvider`, `CompanyDataProvider`, `KnowledgeProvider`, `DocumentProvider` Protocols
+- Zero SDK coupling — interfaces only, no provider implementations
+- No API keys or external connections
+
+### Evidence Collection
+- Enhanced `EvidenceCollector` with provider injection (dependency injection)
+- `CacheService`: TTL-based freshness checking via `market_data_cache`
+- Cache-before-provider: fresh cache hits skip provider calls
+
+### Provenance
+- `ProvenanceEnvelope`: 6 mandatory fields on every evidence artifact
+- Fields: source, provider, source_timestamp, retrieved_at, data_quality_status, provider_version
+
+### Graceful Degradation
+- External provider failure → `missing_sources` logged
+- Portfolio/policy/guardian data always available internally
+- No fabricated, guessed, or hallucinated data substitution
+
+### Tests
+- 11 PostgreSQL integration tests (cache hit/miss/expired, provider injection, graceful degradation, provenance)
+
+## Sprint 012 Slice B — Research Execution Pipeline — Done (2026-08-10)
 
 ### Merge
 - PR #85: `feat(security): add auth, audit and escalation foundation`

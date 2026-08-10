@@ -210,9 +210,10 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Slice B: DONE — merged as b5444ac (PR #91)
   - Research Pipeline: WorkerQueue, EvidenceCollector, PerspectiveExecutor,
     ConfidenceEngine, ResearchPipeline orchestrator
-- Slice C: IN PROGRESS (PR #92)
+- Slice C: DONE — awaiting merge (PR #92)
   - Provider protocols: MarketData, CompanyData, Knowledge, Document
   - Enhanced EvidenceCollector: CacheService, graceful degradation
+  - ProvenanceEnvelope: 6 mandatory fields
   - 11 PostgreSQL integration tests
 
 ## Backlog
