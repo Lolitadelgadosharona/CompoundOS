@@ -229,7 +229,8 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Slice B: DONE — merged as 4fe15ea (PR #95)
   - AlphaVantageProvider + DatabaseKnowledgeProvider + EvidenceSnapshot
   - 24 mock tests (CI-safe, no real AV calls)
-- Cost: log-only thresholds ($0.25/run, $2/day, $30/mo)
+- Slice C: DESIGN PHASE — NOT AUTHORIZED FOR IMPLEMENTATION
+  - Technical Design: docs/sprints/SPRINT_013_SLICE_C_TECHNICAL_DESIGN.md
 
 
 
