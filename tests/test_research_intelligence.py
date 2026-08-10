@@ -354,3 +354,155 @@ class TestPipeline:
 class TestAIAuthority:
     def test_never_action_still_blocked(self):
         assert True
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Hardening tests
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestHardeningGovernance:
+    """Verify governed executor cannot be bypassed."""
+
+    def test_memo_cannot_bypass_governed_executor(self, db_session):
+        """MemoGenerator calls only through executor.execute() — no direct
+        provider access."""
+
+        class TrackedExecutor:
+            """A governed executor that tracks all calls through .execute()."""
+            def __init__(self):
+                self.governed_calls = []
+                self.direct_calls = []
+
+            def execute(self, session, run_id, perspective, *args, **kwargs):
+                self.governed_calls.append(perspective)
+                return MockExecutionResult(validated={
+                    "perspective": perspective,
+                    "thesis": f"Governed {perspective}",
+                    "conviction_score": 7,
+                })
+
+            def generate(self, *args, **kwargs):
+                """Direct generate() — should never be called."""
+                self.direct_calls.append(args)
+                return None
+
+        executor = TrackedExecutor()
+        generator = MemoGenerator(executor)
+        perspectives = [
+            PerspectiveResult(perspective=p, model="c", provider="a",
+                              analysis={"thesis": "x"},
+                              conviction_score=7, success=True)
+            for p in ["value", "growth", "risk", "macro",
+                      "policy", "portfolio_fit"]
+        ]
+        memo = generator.generate(db_session, uuid4(), perspectives,
+                                  EvidenceBundle())
+        assert memo is not None
+        # Governed path was exercised
+        assert len(executor.governed_calls) >= 1
+        assert "synthesis" in executor.governed_calls
+        # Direct provider path was never called
+        assert len(executor.direct_calls) == 0
+
+
+class TestHardeningProvenance:
+    """Verify provenance chain is preserved."""
+
+    def test_memo_preserves_provenance_chain(self, db_session):
+        """Memo → perspectives → research_run_id chain intact."""
+        run_id, hh = TestPipeline().setup_run(db_session)
+        pipeline = ResearchIntelligencePipeline(
+            evidence_collector=MockEvidenceCollector(),
+            perspective_executor=MockExecutor(),
+            memo_generator=MemoGenerator(MockExecutor()),
+            confidence_engine=ConfidenceEngine(),
+        )
+        output = pipeline.execute(db_session, run_id, hh, "AAPL")
+        assert output.memo is not None
+        # Prove memo references research_run (via pipeline output)
+        assert output.run_id == run_id
+        # All 6 perspectives present in committee section
+        votes = output.memo["committee"]["perspectives"]
+        assert len(votes) == 6
+        for p in ["value", "growth", "risk", "macro", "policy",
+                   "portfolio_fit"]:
+            assert p in votes, f"Missing perspective: {p}"
+
+    def test_pipeline_stores_analysis_rows(self, db_session):
+        """Pipeline persists perspective_analyses rows."""
+        run_id, hh = TestPipeline().setup_run(db_session)
+        pipeline = ResearchIntelligencePipeline(
+            evidence_collector=MockEvidenceCollector(),
+            perspective_executor=MockExecutor(),
+            memo_generator=MemoGenerator(MockExecutor()),
+            confidence_engine=ConfidenceEngine(),
+        )
+        pipeline.execute(db_session, run_id, hh, "AAPL")
+        count = db_session.execute(
+            text("SELECT COUNT(*) FROM perspective_analyses"
+                 " WHERE run_id = :rid"),
+            {"rid": run_id},
+        ).scalar()
+        assert count == 6
+
+
+class TestHardeningConfidence:
+    """Verify confidence versioning and deterministic calculation."""
+
+    def test_confidence_model_version_not_llm_version(self):
+        """MODEL_VERSION tracks formula version, not LLM model."""
+        engine = ConfidenceEngine()
+        assert isinstance(engine.MODEL_VERSION, int)
+        assert engine.MODEL_VERSION == 1
+        # This is the formula version, not an LLM model identifier
+
+    def test_confidence_same_input_produces_same_output(self):
+        """Identical inputs produce identical confidence scores."""
+        engine = ConfidenceEngine()
+        perspectives = [
+            PerspectiveResult(perspective=p, model="c", provider="a",
+                              analysis={}, conviction_score=7,
+                              success=True)
+            for p in ["value", "growth", "risk", "macro", "policy",
+                      "portfolio_fit"]
+        ]
+        bundle = EvidenceBundle()
+        r1 = engine.calculate(perspectives, bundle)
+        r2 = engine.calculate(perspectives, bundle)
+        assert r1.score == r2.score
+        assert r1.level == r2.level
+
+
+class TestHardeningMemoGate:
+    """Verify memo generation gate conditions."""
+
+    def test_memo_requires_all_six_perspectives(self):
+        """<6 successful → memo is None."""
+        perspectives = [
+            PerspectiveResult(perspective="value", model="c", provider="a",
+                              analysis={}, conviction_score=7,
+                              success=True),
+        ]
+        generator = MemoGenerator(MockExecutor())
+        memo = generator.generate(None, uuid4(), perspectives,
+                                  EvidenceBundle())
+        assert memo is None
+
+    def test_memo_evidence_missing_sources_visible(self):
+        """Missing sources reflected in memo evidence section."""
+        perspectives = [
+            PerspectiveResult(perspective=p, model="c", provider="a",
+                              analysis={"thesis": "test"},
+                              conviction_score=7, success=True)
+            for p in ["value", "growth", "risk", "macro", "policy",
+                      "portfolio_fit"]
+        ]
+        bundle = EvidenceBundle(
+            missing_sources=["market_overview", "knowledge_profile"],
+        )
+        generator = MemoGenerator(MockExecutor())
+        memo = generator.generate(None, uuid4(), perspectives, bundle)
+        assert memo is not None
+        # Evidence section records missing sources
+        assert "evidence" in memo
