@@ -166,12 +166,18 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
       - guardian_intelligence.py: 5 evaluation functions + BLOCK_RECOMMENDATION
       - 20 PostgreSQL integration tests
       - Design doc: docs/sprints/SPRINT_010_SLICE_B_TECHNICAL_DESIGN.md
-    - Slice C: IN PROGRESS (PR #84)
+    - Slice C: DONE — merged as 558dbac (PR #84)
       - Migration 0024_dashboard_learning: decision_reviews + snapshot columns
-      - Dashboard API: GET /api/dashboard (net worth, allocation, compliance, risks, ideas)
-      - Learning Loop: is_high_impact(), decision_reviews table
+      - Dashboard API: GET /api/dashboard (net worth, allocation, compliance, risks)
+      - Learning Loop: decision_reviews, is_high_impact(), review completion
       - 10 PostgreSQL integration tests
-      - Design doc: docs/sprints/SPRINT_010_SLICE_C_TECHNICAL_DESIGN.md
+      - Follow-ups: COS-010-C-FU-M1/L1/L2/L3
+    ### Follow-ups (Non-blocking)
+    - COS-010-C-FU-M1: Replace dynamic sqlalchemy imports in dashboard router
+    - COS-010-C-FU-L1: Avoid duplicate position loading in dashboard service
+    - COS-010-C-FU-L2: Add review completion 409 boundary test
+    - COS-010-C-FU-L3: Add positive high-impact review scheduling test
+    - Slice D: NOT AUTHORIZED
 
 ## Backlog
 

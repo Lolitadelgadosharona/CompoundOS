@@ -1,5 +1,42 @@
 # Changelog
 
+## Sprint 010 Slice C — Wealth Dashboard + Learning Loop — Done (2026-08-10)
+
+### Merge
+- PR #84: `feat(dashboard): add wealth dashboard and learning loop`
+- Squash merged as: `558dbac0437ca62a819450cd5a9377828369e6c3`
+- Independent review: APPROVE WITH NON-BLOCKING FOLLOW-UP
+
+### Dashboard API
+- GET /api/dashboard: full wealth snapshot
+- Net worth: multi-currency with unconverted currency flagging
+- Allocation: by asset class, capital bucket, currency
+- Policy compliance: bucket drifts, rule violations from Guardian events
+- Risks: concentration risk, active Guardian events
+- Pending decisions, idea summary, activity feed (20 items)
+- Live computation — no caching
+
+### Learning Loop
+- Migration 0024_dashboard_learning: decision_reviews table
+- decision_confirmed_snapshots extended: +4 review columns
+- Review types: 30_day, 90_day, 1_year, manual
+- High-impact threshold: 5% portfolio allocation
+- Review completion: outcome notes, return %, compliance, lessons learned
+
+### AI Authority
+- Dashboard is read-only — AI never writes
+- Learning loop is Owner-controlled
+- No automatic investment decisions or trading
+
+### Test Coverage
+- 10 PostgreSQL integration tests
+
+### Follow-ups
+- COS-010-C-FU-M1: Replace dynamic sqlalchemy imports in router
+- COS-010-C-FU-L1: Avoid duplicate position loading
+- COS-010-C-FU-L2: Add review completion 409 test
+- COS-010-C-FU-L3: Add positive high-impact test
+
 ## Sprint 010 Slice B — Guardian Intelligence — Done (2026-08-10)
 
 ### Merge
