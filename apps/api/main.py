@@ -7,6 +7,7 @@ from apps.api.mutation_gate import mutation_gate
 from apps.api.routers.automation import router as automation_router
 from apps.api.routers.backup import router as backup_router
 from apps.api.routers.committee import router as committee_router
+from apps.api.routers.committee_bridge import router as committee_bridge_router
 from apps.api.routers.decisions import router as decisions_router
 from apps.api.routers.guardian import router as guardian_router
 from apps.api.routers.health import router as health_router
@@ -62,3 +63,4 @@ app.include_router(backup_router)
 app.include_router(health_router)
 app.include_router(notifications_router)
 app.include_router(imports_router)
+app.include_router(committee_bridge_router)

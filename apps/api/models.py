@@ -2218,3 +2218,60 @@ class IdeaStatusHistory(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+# ---------------------------------------------------------------------------
+# Sprint 010 Slice A — Committee Integration Bridge
+# ---------------------------------------------------------------------------
+
+
+class CommitteeReviewRequest(Base):
+    """Bridge investment_ideas → committee_sessions.
+
+    Owner explicitly requests AI Committee review for an Investment Idea.
+    Status: pending → in_progress (session created) → completed (report done).
+    """
+
+    __tablename__ = "committee_review_requests"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending','in_progress','completed')",
+            name="ck_committee_review_requests_status",
+        ),
+        CheckConstraint(
+            "requested_by IN ('owner','committee','guardian')",
+            name="ck_committee_review_requests_requested_by",
+        ),
+        Index("ix_committee_review_requests_idea", "investment_idea_id"),
+        Index("ix_committee_review_requests_session", "committee_session_id"),
+        Index("ix_committee_review_requests_status", "status"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    investment_idea_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "investment_ideas.id",
+            name="fk_committee_review_requests_idea_id",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    committee_session_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            "committee_sessions.id",
+            name="fk_committee_review_requests_session_id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
+    requested_by: Mapped[str] = mapped_column(Text, nullable=False)
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, default="pending", server_default="pending",
+    )
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
