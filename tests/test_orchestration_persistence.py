@@ -87,7 +87,7 @@ def test_migration_head_is_0016(postgres_engine: Engine) -> None:
     script = ScriptDirectory.from_config(cfg)
     heads = script.get_heads()
     assert len(heads) == 1
-    assert heads[0] == "0029_perspective_analyses"
+    assert heads[0] == "0031_llm_runtime"
 
 
 # ── CHECK constraints ──

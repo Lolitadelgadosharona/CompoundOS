@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 
 pytestmark = pytest.mark.postgres
 
-HEAD_REVISION = "0029_perspective_analyses"
+HEAD_REVISION = "0031_llm_runtime"
 
 
 def _now():
