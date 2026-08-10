@@ -239,6 +239,10 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   - SEC-002: Global authentication layer — all mutation endpoints need OWNER authorization.
 - COS-009-C Follow-ups (from Slice C independent review):
   - COS-009-C-FU-M1: Enforce investment idea lifecycle transitions before API exposure (ALLOWED_TRANSITIONS defined but not enforced at DB or repo level).
+
+- Sprint 013 Slice B Follow-ups (from architecture review):
+  - COS-013-B-FU-M1: Immutable Research Evidence Snapshot Layer — market_data_cache is disposable. Future ResearchRun evidence must become immutable reproducible snapshots preserving source data, provenance, timestamps, quality status. Cache refreshes must not alter historical research results.
+  - COS-013-B-FU-T1: test_research_snapshot_not_changed_after_cache_refresh — test verifies evidence snapshot survives later cache refresh.
   - COS-009-C-FU-L1: Consider archive instead of delete for investment ideas (Owner product decision).
   - COS-009-C-FU-L2: Remove or integrate unused ALLOWED_TRANSITIONS dict in schemas.
 - OM-001 — Orchestration corrective review cleanup (MEDIUM/LOW follow-ups from Sprint 005 Corrective independent review):
