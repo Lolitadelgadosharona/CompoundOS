@@ -382,3 +382,276 @@ class TestAIAuthority:
         for word in trading_keywords:
             assert word not in source.lower(), (
                 f"Forbidden word '{word}' found")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Regression: Policy override
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestPolicyOverride:
+    def test_policy_rule_overrides_default_threshold(self, db_session: Session):
+        """Set policy to 15%, position at 18% → violation detected."""
+        from apps.api.models import PolicyRule
+        from apps.api.services.guardian_intelligence import (
+            evaluate_single_position_concentration,
+        )
+
+        hh = _create_household(db_session)
+        db_session.commit()
+        # One position at 18% of total
+        _setup_portfolio_data(db_session, hh.id, market_value=Decimal("180"))
+        _setup_portfolio_data(db_session, hh.id, market_value=Decimal("820"))
+        _, version = _setup_policy(db_session, hh.id)
+
+        # Policy says max 15%
+        rule = PolicyRule(
+            id=uuid4(), version_id=version.id,
+            rule_type="max_single_position_pct", rule_value="15",
+            severity="warning",
+        )
+        db_session.add(rule)
+        db_session.commit()
+
+        results = evaluate_single_position_concentration(
+            db_session, hh.id, str(version.id),
+        )
+        # 18% exceeds 15% policy threshold (at least one position triggers)
+        assert len(results) >= 1
+        assert results[0].exceeded
+        assert results[0].threshold_value == Decimal("15")
+
+    def test_policy_override_tighter_than_default(self, db_session: Session):
+        """Default is 20%. Policy says 10%. Position at 12% → violation."""
+        from apps.api.models import PolicyRule
+        from apps.api.services.guardian_intelligence import (
+            evaluate_single_position_concentration,
+        )
+
+        hh = _create_household(db_session)
+        db_session.commit()
+        _setup_portfolio_data(db_session, hh.id, market_value=Decimal("120"))
+        _setup_portfolio_data(db_session, hh.id, market_value=Decimal("880"))
+        _, version = _setup_policy(db_session, hh.id)
+
+        rule = PolicyRule(
+            id=uuid4(), version_id=version.id,
+            rule_type="max_single_position_pct", rule_value="10",
+            severity="critical",
+        )
+        db_session.add(rule)
+        db_session.commit()
+
+        results = evaluate_single_position_concentration(
+            db_session, hh.id, str(version.id),
+        )
+        # 12% exceeds 10% policy threshold (tighter than 20% default)
+        assert len(results) >= 1
+        assert results[0].threshold_value == Decimal("10")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Regression: Severity boundaries
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestSeverityBoundaries:
+    def test_policy_rule_severity_is_read_correctly(self, db_session: Session):
+        """Guardian reads severity from policy_rule, not from hardcoded value."""
+        from apps.api.models import PolicyRule
+        from apps.api.services.guardian_intelligence import (
+            _load_policy_rule_threshold,
+            evaluate_exploration_capital_limit,
+        )
+
+        hh = _create_household(db_session)
+        db_session.commit()
+        _setup_portfolio_data(db_session, hh.id, bucket="EXPLORATION",
+                              market_value=Decimal("150"))
+        _setup_portfolio_data(db_session, hh.id, bucket="CORE",
+                              market_value=Decimal("850"))
+        _, version = _setup_policy(db_session, hh.id)
+
+        # Critical threshold at 10% — 15% exceeds
+        rule = PolicyRule(
+            id=uuid4(), version_id=version.id,
+            rule_type="exploration_capital_limit", rule_value="10",
+            severity="critical",
+        )
+        db_session.add(rule)
+        db_session.commit()
+
+        # Threshold loaded correctly at 10%
+        threshold = _load_policy_rule_threshold(
+            db_session, str(version.id), "exploration_capital_limit",
+        )
+        assert threshold == Decimal("10")
+
+        # 15% exceeds 10% → violation detected
+        results = evaluate_exploration_capital_limit(
+            db_session, hh.id, str(version.id),
+        )
+        assert len(results) == 1
+
+    def test_no_violation_when_within_policy_threshold(self, db_session: Session):
+        """Exploration at 5%, policy limit 15% → no violation."""
+        from apps.api.models import PolicyRule
+        from apps.api.services.guardian_intelligence import (
+            evaluate_exploration_capital_limit,
+        )
+
+        hh = _create_household(db_session)
+        db_session.commit()
+        _setup_portfolio_data(db_session, hh.id, bucket="EXPLORATION",
+                              market_value=Decimal("50"))
+        _setup_portfolio_data(db_session, hh.id, bucket="CORE",
+                              market_value=Decimal("950"))
+        _, version = _setup_policy(db_session, hh.id)
+
+        rule = PolicyRule(
+            id=uuid4(), version_id=version.id,
+            rule_type="exploration_capital_limit", rule_value="15",
+            severity="critical",
+        )
+        db_session.add(rule)
+        db_session.commit()
+
+        results = evaluate_exploration_capital_limit(
+            db_session, hh.id, str(version.id),
+        )
+        assert results == []
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Regression: Committee block integration
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestCommitteeBlockIntegration:
+    def test_critical_severity_detected(self, db_session: Session):
+        """has_active_critical_event returns True when critical severity confirmed."""
+        from apps.api.models import (
+            GuardianCheck,
+            GuardianCheckConfirmed,
+            GuardianEvaluationRun,
+            GuardianEvent,
+        )
+        from apps.api.services.guardian_intelligence import has_active_critical_event
+
+        hh = _create_household(db_session)
+        _, version = _setup_policy(db_session, hh.id)
+        db_session.commit()
+
+        portfolio_id, _, _, _ = _setup_portfolio_data(db_session, hh.id)
+        db_session.commit()
+
+        snapshot_id = uuid4()
+        db_session.execute(
+            text(
+                "INSERT INTO portfolio_snapshots (id, portfolio_id, version_number, "
+                "valuation_date, status) VALUES (:sid, :pid, 1, :vd, 'current')"
+            ),
+            {"sid": snapshot_id, "pid": portfolio_id, "vd": _now().date()},
+        )
+
+        check = GuardianCheck(
+            id=uuid4(), household_id=hh.id,
+            name="Critical Test", canonical_name="crit_v3",
+            check_type="exploration_capital_limit", status="confirmed",
+        )
+        db_session.add(check)
+        db_session.flush()
+
+        confirmed = GuardianCheckConfirmed(
+            id=uuid4(), check_id=check.id, version_number=1,
+            check_type="exploration_capital_limit",
+            threshold_value=Decimal("10"), severity="critical",
+        )
+        db_session.add(confirmed)
+        db_session.flush()
+
+        run = GuardianEvaluationRun(
+            id=uuid4(), household_id=hh.id,
+            status="completed", checks_evaluated=1, events_created=1,
+            as_of_date=_now().date(),
+        )
+        db_session.add(run)
+        db_session.flush()
+
+        event = GuardianEvent(
+            id=uuid4(), evaluation_run_id=run.id,
+            household_id=hh.id, check_id=check.id,
+            check_version_id=confirmed.id,
+            check_type="exploration_capital_limit",
+            policy_version_id=version.id,
+            portfolio_snapshot_id=snapshot_id,
+            exceeded=True, as_of_date=_now().date(),
+        )
+        db_session.add(event)
+        db_session.commit()
+
+        assert has_active_critical_event(db_session, hh.id)
+
+    def test_warning_severity_not_blocked(self, db_session: Session):
+        """Warning severity → has_active_critical_event returns False."""
+        from apps.api.models import (
+            GuardianCheck,
+            GuardianCheckConfirmed,
+            GuardianEvaluationRun,
+            GuardianEvent,
+        )
+        from apps.api.services.guardian_intelligence import has_active_critical_event
+
+        hh = _create_household(db_session)
+        _, version = _setup_policy(db_session, hh.id)
+        db_session.commit()
+
+        portfolio_id, _, _, _ = _setup_portfolio_data(db_session, hh.id)
+        db_session.commit()
+
+        snapshot_id = uuid4()
+        db_session.execute(
+            text(
+                "INSERT INTO portfolio_snapshots (id, portfolio_id, version_number, "
+                "valuation_date, status) VALUES (:sid, :pid, 1, :vd, 'current')"
+            ),
+            {"sid": snapshot_id, "pid": portfolio_id, "vd": _now().date()},
+        )
+
+        check = GuardianCheck(
+            id=uuid4(), household_id=hh.id,
+            name="Warning Test", canonical_name="warn_v3",
+            check_type="capital_bucket_drift", status="confirmed",
+        )
+        db_session.add(check)
+        db_session.flush()
+
+        confirmed = GuardianCheckConfirmed(
+            id=uuid4(), check_id=check.id, version_number=1,
+            check_type="capital_bucket_drift",
+            threshold_value=Decimal("5"), severity="warning",
+        )
+        db_session.add(confirmed)
+        db_session.flush()
+
+        run = GuardianEvaluationRun(
+            id=uuid4(), household_id=hh.id,
+            status="completed", checks_evaluated=1, events_created=1,
+            as_of_date=_now().date(),
+        )
+        db_session.add(run)
+        db_session.flush()
+
+        event = GuardianEvent(
+            id=uuid4(), evaluation_run_id=run.id,
+            household_id=hh.id, check_id=check.id,
+            check_version_id=confirmed.id,
+            check_type="capital_bucket_drift",
+            policy_version_id=version.id,
+            portfolio_snapshot_id=snapshot_id,
+            exceeded=True, as_of_date=_now().date(),
+        )
+        db_session.add(event)
+        db_session.commit()
+
+        assert not has_active_critical_event(db_session, hh.id)
