@@ -108,6 +108,22 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
       - Unknown job types: fail closed — never silently fall through to Guardian
     - 18 tests: 12 original + 6 COS-008-C-HARDEN regression
     - Remaining follow-ups: M1 DELETE, M2 lazy seed, M3 clock, L1 allowlist drift, TECH-001 frontend audit
+- Sprint 009: Wealth Intelligence Foundation — IN PROGRESS
+  - Technical Design: docs/sprints/SPRINT_009_TECHNICAL_DESIGN.md
+  - Architecture Design APPROVED (Owner authorization for Slice A implementation)
+  - Scope: Asset identity, multi-currency positions, transactions, investment ideas,
+    versioned policy enrichment (buckets/rules), AI authority matrix, read-only
+    connector architecture
+  - Slices: A (Core Portfolio Schema), B (Policy Enrichment), C (Ideas + Decision Bridge),
+    D (Manual Import + Data Source Foundation)
+  - Slice A: IN PROGRESS
+    - Migration 0018_portfolio_foundation
+    - Tables: assets, positions, cash_balances, transactions, fx_rates, data_sources
+    - Account extension: account_type, capital_bucket, currency, provider, provider_account_id
+    - 50 PostgreSQL integration tests covering all constraints and provenance
+  - 7 Owner Decisions pending (OD-9-1 through OD-9-7)
+  - 5 proposed ADRs (0007–0011)
+  - NO broker integrations. NO credentials. NO trading.
 
 ## Backlog
 

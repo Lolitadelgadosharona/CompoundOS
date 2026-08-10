@@ -719,6 +719,27 @@ class Account(Base):
             "sort_order >= 0",
             name="ck_accounts_sort_order_nonnegative",
         ),
+        CheckConstraint(
+            "account_type IN ('brokerage','bank','retirement','other')",
+            name="ck_accounts_type",
+        ),
+        CheckConstraint(
+            "capital_bucket IN ('CORE','EXPLORATION','CASH_RESERVE','RETIREMENT','OTHER')",
+            name="ck_accounts_bucket",
+        ),
+        CheckConstraint(
+            "currency ~ '^[A-Z]{3}$'",
+            name="ck_accounts_currency",
+        ),
+        Index(
+            "uq_accounts_provider_id",
+            "provider",
+            "provider_account_id",
+            unique=True,
+            postgresql_where=text(
+                "provider IS NOT NULL AND provider_account_id IS NOT NULL"
+            ),
+        ),
         Index("ix_accounts_portfolio_id_sort_order", "portfolio_id", "sort_order"),
     )
 
@@ -736,6 +757,17 @@ class Account(Base):
     sort_order: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default=text("0")
     )
+    account_type: Mapped[str] = mapped_column(
+        Text, nullable=False, default="brokerage", server_default="brokerage"
+    )
+    capital_bucket: Mapped[str] = mapped_column(
+        Text, nullable=False, default="CORE", server_default="CORE"
+    )
+    currency: Mapped[str] = mapped_column(
+        Text, nullable=False, default="USD", server_default="USD"
+    )
+    provider: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    provider_account_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
 class PortfolioDraft(Base):
@@ -1600,3 +1632,320 @@ class NotificationPreferences(Base):
     enabled_sources: Mapped[Any] = mapped_column(JSONB, nullable=False, default=list)
     enabled_severities: Mapped[Any] = mapped_column(JSONB, nullable=False, default=list)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# ---------------------------------------------------------------------------
+# Sprint 009 Slice A — Core Portfolio Schema + Asset Identity
+# ---------------------------------------------------------------------------
+
+
+class Asset(Base):
+    """Canonical financial instrument identity."""
+
+    __tablename__ = "assets"
+    __table_args__ = (
+        CheckConstraint(
+            "asset_type IN ('ETF','STOCK','BOND','CASH','MONEY_MARKET','FUND','OTHER')",
+            name="ck_assets_type",
+        ),
+        CheckConstraint(
+            "currency ~ '^[A-Z]{3}$'",
+            name="ck_assets_currency",
+        ),
+        CheckConstraint(
+            "char_length(name) <= 200",
+            name="ck_assets_name_length",
+        ),
+        Index(
+            "uq_assets_isin",
+            "isin",
+            unique=True,
+            postgresql_where=text("isin IS NOT NULL"),
+        ),
+        Index(
+            "uq_assets_symbol_exchange_currency",
+            "symbol",
+            "exchange",
+            "currency",
+            unique=True,
+            postgresql_where=text("symbol IS NOT NULL"),
+        ),
+        Index("ix_assets_type", "asset_type"),
+        Index("ix_assets_currency", "currency"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    symbol: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    asset_type: Mapped[str] = mapped_column(Text, nullable=False)
+    currency: Mapped[str] = mapped_column(Text, nullable=False)
+    exchange: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    isin: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    asset_class: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    sub_asset_class: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    region: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    sector: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class Position(Base):
+    """Account × asset holding with source provenance and point-in-time history."""
+
+    __tablename__ = "positions"
+    __table_args__ = (
+        CheckConstraint(
+            "quantity >= 0",
+            name="ck_positions_quantity",
+        ),
+        CheckConstraint(
+            "quantity_source IN ('provider_reported','compoundos_derived')",
+            name="ck_positions_quantity_source",
+        ),
+        CheckConstraint(
+            "source IN "
+            "('interactive_brokers','hsbc','schwab','csv','manual','compoundos_derived')",
+            name="ck_positions_source",
+        ),
+        Index(
+            "uq_positions_source_record",
+            "source",
+            "source_record_id",
+            unique=True,
+            postgresql_where=text("source_record_id IS NOT NULL"),
+        ),
+        Index("ix_positions_account_asset_latest", "account_id", "asset_id", "is_latest"),
+        Index("ix_positions_account_latest", "account_id", "is_latest"),
+        Index("ix_positions_source", "source"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    account_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "accounts.id",
+            name="fk_positions_account_id_accounts",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    asset_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "assets.id",
+            name="fk_positions_asset_id_assets",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    quantity: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    quantity_source: Mapped[str] = mapped_column(Text, nullable=False)
+    avg_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(20, 8), nullable=True)
+    avg_cost_currency: Mapped[str] = mapped_column(Text, nullable=False)
+    avg_cost_source: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    market_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(20, 8), nullable=True)
+    market_price_currency: Mapped[str] = mapped_column(Text, nullable=False)
+    market_price_as_of: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    market_value: Mapped[Optional[Decimal]] = mapped_column(Numeric(20, 8), nullable=True)
+    market_value_currency: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    cost_basis: Mapped[Optional[Decimal]] = mapped_column(Numeric(20, 8), nullable=True)
+    cost_basis_currency: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    unrealized_gain_loss: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(20, 8), nullable=True
+    )
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    imported_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    source_record_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_latest: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class CashBalance(Base):
+    """Cash balance per account per currency with source provenance."""
+
+    __tablename__ = "cash_balances"
+    __table_args__ = (
+        CheckConstraint(
+            "currency ~ '^[A-Z]{3}$'",
+            name="ck_cash_balances_currency",
+        ),
+        Index(
+            "uq_cash_balances_source_record",
+            "source",
+            "source_record_id",
+            unique=True,
+            postgresql_where=text("source_record_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_cash_balances_account_currency_latest",
+            "account_id",
+            "currency",
+            "is_latest",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    account_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "accounts.id",
+            name="fk_cash_balances_account_id_accounts",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    currency: Mapped[str] = mapped_column(Text, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    source_record_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_latest: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class Transaction(Base):
+    """Financial event with full source provenance."""
+
+    __tablename__ = "transactions"
+    __table_args__ = (
+        CheckConstraint(
+            "transaction_type IN "
+            "('BUY','SELL','DIVIDEND','INTEREST','DEPOSIT',"
+            "'WITHDRAWAL','FEE','TRANSFER_IN','TRANSFER_OUT','SPLIT','OTHER')",
+            name="ck_transactions_type",
+        ),
+        Index(
+            "uq_transactions_source_record",
+            "source",
+            "source_record_id",
+            unique=True,
+            postgresql_where=text("source_record_id IS NOT NULL"),
+        ),
+        Index("ix_transactions_account_executed", "account_id", "executed_at"),
+        Index("ix_transactions_asset", "asset_id"),
+        Index("ix_transactions_source", "source"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    account_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "accounts.id",
+            name="fk_transactions_account_id_accounts",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    asset_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            "assets.id",
+            name="fk_transactions_asset_id_assets",
+            ondelete="RESTRICT",
+        ),
+        nullable=True,
+    )
+    transaction_type: Mapped[str] = mapped_column(Text, nullable=False)
+    quantity: Mapped[Optional[Decimal]] = mapped_column(Numeric(20, 8), nullable=True)
+    price: Mapped[Optional[Decimal]] = mapped_column(Numeric(20, 8), nullable=True)
+    price_currency: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(20, 8), nullable=True)
+    amount_currency: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    fee: Mapped[Optional[Decimal]] = mapped_column(Numeric(20, 8), nullable=True)
+    fee_currency: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    executed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    settled_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    source_record_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    imported_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class FxRate(Base):
+    """Exchange rate observation with timestamp and source provenance."""
+
+    __tablename__ = "fx_rates"
+    __table_args__ = (
+        CheckConstraint(
+            "from_currency ~ '^[A-Z]{3}$' AND to_currency ~ '^[A-Z]{3}$'",
+            name="ck_fx_rates_currency",
+        ),
+        CheckConstraint(
+            "from_currency != to_currency",
+            name="ck_fx_rates_different",
+        ),
+        UniqueConstraint(
+            "from_currency",
+            "to_currency",
+            "observed_at",
+            "rate_source",
+            name="uq_fx_rates",
+        ),
+        Index("ix_fx_rates_from_to_observed", "from_currency", "to_currency", "observed_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    from_currency: Mapped[str] = mapped_column(Text, nullable=False)
+    to_currency: Mapped[str] = mapped_column(Text, nullable=False)
+    rate: Mapped[Decimal] = mapped_column(Numeric(20, 10), nullable=False)
+    rate_source: Mapped[str] = mapped_column(Text, nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    imported_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class DataSource(Base):
+    """Lightweight registry of known data providers."""
+
+    __tablename__ = "data_sources"
+    __table_args__ = (
+        CheckConstraint(
+            "source_type IN ('broker','bank','csv','manual')",
+            name="ck_data_sources_type",
+        ),
+        UniqueConstraint("source_key", name="uq_data_sources_source_key"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    source_key: Mapped[str] = mapped_column(Text, nullable=False)
+    source_type: Mapped[str] = mapped_column(Text, nullable=False)
+    display_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
+    last_import_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    source_metadata: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

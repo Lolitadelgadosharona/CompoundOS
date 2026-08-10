@@ -206,7 +206,7 @@ class TestMigration:
             "SELECT version_num FROM alembic_version"
         )).fetchone()
         assert row is not None
-        assert row[0] == "0017_backup_daily_allowlist"
+        assert row[0] == "0018_portfolio_foundation"
 
     def test_backup_records_table_exists(self, db_session: Session) -> None:
         db_session.execute(text("SELECT 1 FROM backup_records LIMIT 0"))
