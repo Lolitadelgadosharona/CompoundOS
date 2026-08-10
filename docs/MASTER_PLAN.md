@@ -229,9 +229,9 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Slice B: DONE — merged as 4fe15ea (PR #95)
   - AlphaVantageProvider + DatabaseKnowledgeProvider + EvidenceSnapshot
   - 24 mock tests (CI-safe, no real AV calls)
-- Slice C: IN PROGRESS (PR #96)
+- Slice C: DONE — merged as f7c46ef (PR #96)
   - ResearchIntelligencePipeline, MemoGenerator, ConfidenceEngine
-  - 15 integration tests
+  - 22 tests (15 + 7 hardening)
 
 
 

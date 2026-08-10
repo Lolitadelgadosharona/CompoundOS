@@ -1,5 +1,35 @@
 # Changelog
 
+## Sprint 013 Slice C — Active Research Intelligence Loop — Done (2026-08-10)
+
+### Implementation
+- PR #96: `feat(intelligence): add active research intelligence loop`
+- Squash merged as: `f7c46effa17eb68b918ec0b21fb3fbbef6c31764`
+
+### MemoGenerator
+- Synthesizes 6 perspectives into 11-section Investment Memo
+- Uses governed LLM executor (PermissionGate→PromptGovernor→Router→Provider→Validator)
+- Structured output: thesis, evidence, bull/bear case, risks, valuation, portfolio_impact, guardian_impact, committee votes, decision_context, invalidation_conditions
+
+### ConfidenceEngine (deterministic)
+- 6-dimension weighted scoring: evidence_quality, thesis_clarity, risk_completeness, policy_alignment, data_freshness, historical_precedent
+- Not LLM-generated — system code owns the calculation
+- model_version tracked for formula evolution
+
+### ResearchIntelligencePipeline
+- End-to-end orchestration: EvidenceCollector → PerspectiveExecutor → MemoGenerator → ConfidenceEngine
+- Full provenance: perspectives → analyses → memo → confidence
+- Partial failure: failed perspectives preserved, memo skipped if <6 succeed
+
+### Hardening
+- Governance bypass prevention verified
+- Provenance chain: 6 perspectives in committee section, perspective_analyses persisted
+- Confidence determinism: identical inputs → identical outputs
+- Memo gate: all 6 required for memo generation
+
+### Tests
+22 tests (15 integration + 7 hardening)
+
 ## Sprint 013 Slice B — Real Research Evidence Layer — Done (2026-08-10)
 
 ### Implementation
