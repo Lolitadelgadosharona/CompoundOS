@@ -1,5 +1,33 @@
 # Changelog
 
+## Sprint 013 Slice B — Real Research Evidence Layer — Done (2026-08-10)
+
+### Implementation
+- PR #95: `feat(evidence): add real research evidence layer`
+- Squash merged as: `4fe15ea313b2d39f66bc994f502f99d38c0e8b97`
+
+### AlphaVantageProvider
+- Implements MarketDataProvider Protocol (Sprint 012-C)
+- Plain REST API, no SDK coupling
+- AV_API_KEY from environment only, fail closed, repr redacts
+- Methods: get_overview, get_financials, get_price_history
+- Error normalization: ConfigurationError, RateLimitError, ProviderTimeoutError, ProviderResponseError
+
+### DatabaseKnowledgeProvider
+- Reads investment_knowledge_memory: profiles, historical thesis, decisions, outcomes
+- Read-only; AI cannot mutate prediction_accuracy
+
+### Evidence Layer
+- CacheService: TTL-based market_data_cache with ON CONFLICT upsert
+- EvidenceCollector: integrates market + knowledge providers
+- EvidenceSnapshot: research-time evidence persistence prototype
+- missing_sources propagation on graceful degradation
+- ProvenanceEnvelope on every evidence artifact
+
+### Follow-ups
+- COS-013-B-FU-M1: Immutable Research Evidence Snapshot Layer (future)
+- COS-013-B-FU-T1: snapshot-cache refresh test (future)
+
 ## Sprint 013 Slice A — Real LLM Provider Runtime — Done (2026-08-10)
 
 ### Implementation
