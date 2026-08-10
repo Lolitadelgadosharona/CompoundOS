@@ -1,5 +1,36 @@
 # Changelog
 
+## Sprint 012 — AI Runtime + Research Execution Engine — COMPLETE (2026-08-10)
+
+### Sprint Summary
+4 slices delivered: LLM Runtime Foundation, Research Execution Pipeline,
+Tool Interface Foundation, AI Governance Layer. AI remains advisory-only.
+
+### Slice A — LLM Runtime Foundation (PR #90, merged as 59d137e)
+- Migration 0031_llm_runtime: prompt_templates + llm_execution_log
+- Versioned prompt lifecycle (draft → active → deprecated)
+- Immutability trigger on active templates
+
+### Slice B — Research Execution Pipeline (PR #91, merged as b5444ac)
+- WorkerQueue interface + LocalWorker implementation
+- EvidenceCollector, PerspectiveExecutor (6 parallel perspectives)
+- ConfidenceEngine (versioned scoring), ResearchPipeline orchestrator
+- 3 API endpoints: start, progress, results
+
+### Slice C — Tool Interface Foundation (PR #92, merged as 1d73f84)
+- 4 provider Protocols (MarketData, CompanyData, Knowledge, Document)
+- Zero SDK coupling — interfaces only
+- ProvenanceEnvelope: 6 mandatory fields
+- Enhanced EvidenceCollector with provider injection + CacheService
+- Graceful degradation on external provider failure
+
+### Slice D — AI Governance Layer (PR #93, pending merge)
+- ActionMatrix: 15 actions (8 AUTO, 4 OWNER, 3 NEVER)
+- PermissionGate: centralized enforcement, no scattered checks
+- PromptGovernor: hard enforcement — active prompt required
+- CostTracker: log-only cost tracking with model-specific pricing
+- 21 PostgreSQL integration tests
+
 ## Sprint 012 Slice C — Tool Interface Foundation — Done (2026-08-10)
 
 ### Implementation
