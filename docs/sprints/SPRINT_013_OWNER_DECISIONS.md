@@ -1,11 +1,11 @@
 # Sprint 013 — Owner Decisions
 
-> **STATUS: PENDING OWNER DECISIONS**
+> **STATUS: OWNER DECISIONS DOCUMENTED — PENDING APPROVAL**
 >
 > Sprint 012: COMPLETE (all 4 slices done)
-> Sprint 013: DESIGN PHASE — NOT AUTHORIZED FOR IMPLEMENTATION
+> Sprint 013: DESIGN COMPLETE — AWAITING OWNER APPROVAL
 >
-> 8 decisions required before implementation.
+> 8 decisions documented. Final version: `SPRINT_013_OWNER_DECISIONS_FINAL.md`
 
 ---
 

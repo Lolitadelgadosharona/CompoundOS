@@ -220,10 +220,9 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 
 ## Backlog
 
-### Sprint 013: DESIGN PHASE — NOT AUTHORIZED FOR IMPLEMENTATION
+### Sprint 013: DESIGN COMPLETE — AWAITING OWNER APPROVAL
 - Technical Design: docs/sprints/SPRINT_013_TECHNICAL_DESIGN.md
-- Owner Decisions: docs/sprints/SPRINT_013_OWNER_DECISIONS.md (8 pending)
-- Focus: First Real Investment Intelligence
+- Owner Decisions: docs/sprints/SPRINT_013_OWNER_DECISIONS_FINAL.md (8 documented)
 - 3 LLM providers (Claude + GPT-4o + Gemini), Alpha Vantage market data
 - End-to-end: real data → real LLM → real memo
 - ~$0.06/run, ~1 min/run, ~500 lines, ~25 tests
