@@ -1,4 +1,4 @@
-"""Tests for Sprint 013 Slice A — Real LLM Provider Runtime.
+"""Tests for Sprint 013 Slice A — Real LLM Provider Runtime (Hardened).
 
 All tests use mock providers. No real API calls. No API keys required.
 No dependency on sprint-012-slice-d governance module (not yet merged).
@@ -17,18 +17,20 @@ from sqlalchemy import text
 from apps.api.services.llm_provider_runtime import (
     AnthropicAdapter,
     ConfigurationError,
+    ExecutionResult,
     GeminiAdapter,
     GovernedLLMExecutor,
     LLMResponse,
     OpenAIAdapter,
     ProviderRouter,
+    ResponseValidator,
 )
 
 pytestmark = pytest.mark.postgres
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Inline mock governance (governance module not yet merged to main)
+# Inline mock governance
 # ═══════════════════════════════════════════════════════════════════════
 
 @dataclass
@@ -107,7 +109,7 @@ class MockCostTracker:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Mock provider for testing — no real API calls
+# Mock providers
 # ═══════════════════════════════════════════════════════════════════════
 
 
@@ -117,7 +119,7 @@ class MockAnthropicProvider:
         return LLMResponse(
             content=json.dumps({
                 "perspective": "value",
-                "thesis": f"Mock Claude analysis: {user_prompt[:50]}",
+                "thesis": "Mock Claude analysis",
                 "conviction_score": 7,
             }),
             model=model, provider="anthropic",
@@ -132,7 +134,7 @@ class MockOpenAIProvider:
         return LLMResponse(
             content=json.dumps({
                 "perspective": "macro",
-                "thesis": f"Mock GPT-4o analysis: {user_prompt[:50]}",
+                "thesis": "Mock GPT-4o analysis",
                 "conviction_score": 6,
             }),
             model=model, provider="openai",
@@ -153,13 +155,51 @@ class MockGeminiProvider:
 
 
 class FailingProvider:
-    def generate(self, **kwargs):
+    def generate(self, model="", system_prompt="", user_prompt="",
+                 max_output_tokens=2000, **kwargs):
         raise ConnectionError("Simulated provider failure")
 
 
 class AuthFailingProvider:
-    def generate(self, **kwargs):
+    def generate(self, model="", system_prompt="", user_prompt="",
+                 max_output_tokens=2000, **kwargs):
         raise PermissionError("401 Unauthorized")
+
+
+class BadJSONProvider:
+    def generate(self, model="", system_prompt="", user_prompt="",
+                 max_output_tokens=2000, **kwargs):
+        return LLMResponse(
+            content="not valid json {{{",
+            model=model, provider="mock",
+            input_tokens=100, output_tokens=50,
+            duration_ms=10, finish_reason="stop",
+        )
+
+
+class MissingFieldsProvider:
+    def generate(self, model="", system_prompt="", user_prompt="",
+                 max_output_tokens=2000, **kwargs):
+        return LLMResponse(
+            content=json.dumps({"perspective": "value"}),  # no thesis, no conviction
+            model=model, provider="mock",
+            input_tokens=100, output_tokens=50,
+            duration_ms=10, finish_reason="stop",
+        )
+
+
+class BadConvictionProvider:
+    def generate(self, model="", system_prompt="", user_prompt="",
+                 max_output_tokens=2000, **kwargs):
+        return LLMResponse(
+            content=json.dumps({
+                "perspective": "value", "thesis": "ok",
+                "conviction_score": 99,
+            }),
+            model=model, provider="mock",
+            input_tokens=100, output_tokens=50,
+            duration_ms=10, finish_reason="stop",
+        )
 
 
 def _setup_prompt(db_session, perspective="value"):
@@ -213,41 +253,90 @@ def _setup_run(db_session, run_id):
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# ResponseValidator
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestResponseValidator:
+    def test_valid_response_accepted(self):
+        content = json.dumps({
+            "perspective": "value", "thesis": "Test",
+            "conviction_score": 7,
+        })
+        result = ResponseValidator.validate(content, "value")
+        assert result.valid
+        assert result.parsed["conviction_score"] == 7
+
+    def test_invalid_json_rejected(self):
+        result = ResponseValidator.validate("not json", "value")
+        assert not result.valid
+        assert "JSON" in result.error
+
+    def test_missing_fields_rejected(self):
+        result = ResponseValidator.validate(
+            json.dumps({"perspective": "value"}), "value",
+        )
+        assert not result.valid
+        assert "thesis" in result.error
+
+    def test_conviction_score_out_of_range(self):
+        result = ResponseValidator.validate(
+            json.dumps({
+                "perspective": "value", "thesis": "x",
+                "conviction_score": 15,
+            }),
+            "value",
+        )
+        assert not result.valid
+        assert "range" in result.error
+
+    def test_conviction_score_non_numeric(self):
+        result = ResponseValidator.validate(
+            json.dumps({
+                "perspective": "value", "thesis": "x",
+                "conviction_score": "high",
+            }),
+            "value",
+        )
+        assert not result.valid
+
+    def test_non_dict_rejected(self):
+        result = ResponseValidator.validate("[1,2,3]", "value")
+        assert not result.valid
+
+    def test_synthesis_allows_fewer_fields(self):
+        content = json.dumps({"thesis": "Synthesized"})
+        result = ResponseValidator.validate(content, "synthesis")
+        assert result.valid
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # ProviderRouter
 # ═══════════════════════════════════════════════════════════════════════
 
 
 class TestProviderRouter:
     def test_routes_value_to_claude(self):
-        providers = {
-            "anthropic": MockAnthropicProvider(),
-            "openai": MockOpenAIProvider(),
-        }
+        providers = {"anthropic": MockAnthropicProvider(),
+                     "openai": MockOpenAIProvider()}
         router = ProviderRouter(providers)
         provider, model = router.route("value", "claude-sonnet-4")
         assert isinstance(provider, MockAnthropicProvider)
-        assert model == "claude-sonnet-4"
 
     def test_routes_macro_to_openai(self):
-        providers = {
-            "anthropic": MockAnthropicProvider(),
-            "openai": MockOpenAIProvider(),
-        }
+        providers = {"anthropic": MockAnthropicProvider(),
+                     "openai": MockOpenAIProvider()}
         router = ProviderRouter(providers)
-        provider, model = router.route("macro", "gpt-4o")
+        provider, _ = router.route("macro", "gpt-4o")
         assert isinstance(provider, MockOpenAIProvider)
 
     def test_fallback_returns_alternate(self):
-        providers = {
-            "anthropic": MockAnthropicProvider(),
-            "openai": MockOpenAIProvider(),
-        }
+        providers = {"anthropic": MockAnthropicProvider(),
+                     "openai": MockOpenAIProvider()}
         router = ProviderRouter(providers)
         fb = router.fallback("value")
         assert fb is not None
-        provider, model = fb
-        assert isinstance(provider, MockOpenAIProvider)
-        assert model == "gpt-4o"
+        assert isinstance(fb[0], MockOpenAIProvider)
 
     def test_fallback_unknown_returns_none(self):
         router = ProviderRouter({})
@@ -255,113 +344,158 @@ class TestProviderRouter:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# GovernedLLMExecutor
+# GovernedLLMExecutor — hardened
 # ═══════════════════════════════════════════════════════════════════════
 
 
 class TestGovernedExecutor:
-    def test_execute_with_permission_and_prompt(self, db_session):
+    def test_execute_returns_execution_result(self, db_session):
         _setup_prompt(db_session, "value")
-        router = ProviderRouter({
-            "anthropic": MockAnthropicProvider(),
-        })
+        router = ProviderRouter({"anthropic": MockAnthropicProvider()})
         executor = GovernedLLMExecutor(
             router=router,
             permission_gate=MockPermissionGate,
             prompt_governor=MockPromptGovernor,
             cost_tracker=None,
         )
-        response = executor.execute(
-            db_session, uuid4(), "value", "sys", "user",
-        )
-        assert response.provider == "anthropic"
-        assert response.model == "claude-sonnet-4"
+        result = executor.execute(db_session, uuid4(), "value", "s", "u")
+        assert isinstance(result, ExecutionResult)
+        assert result.validated["conviction_score"] == 7
 
     def test_execute_logs_to_llm_execution_log(self, db_session):
         run_id = uuid4()
         _setup_run(db_session, run_id)
         _setup_prompt(db_session, "value")
-
-        router = ProviderRouter({
-            "anthropic": MockAnthropicProvider(),
-        })
+        router = ProviderRouter({"anthropic": MockAnthropicProvider()})
         executor = GovernedLLMExecutor(
             router=router,
             permission_gate=MockPermissionGate,
             prompt_governor=MockPromptGovernor,
             cost_tracker=MockCostTracker,
         )
-        executor.execute(db_session, run_id, "value", "sys", "user")
-
+        executor.execute(db_session, run_id, "value", "s", "u")
         rows = db_session.execute(
-            text(
-                "SELECT COUNT(*) FROM llm_execution_log"
-                " WHERE run_id = :rid"
-            ),
+            text("SELECT COUNT(*) FROM llm_execution_log WHERE run_id = :rid"),
             {"rid": run_id},
         ).scalar()
         assert rows >= 1
 
     def test_rejects_when_no_active_prompt(self, db_session):
-        router = ProviderRouter({
-            "anthropic": MockAnthropicProvider(),
-        })
+        router = ProviderRouter({"anthropic": MockAnthropicProvider()})
         executor = GovernedLLMExecutor(
-            router=router,
-            permission_gate=MockPermissionGate,
-            prompt_governor=MockPromptGovernor,
-            cost_tracker=MockCostTracker,
+            router=router, permission_gate=MockPermissionGate,
+            prompt_governor=MockPromptGovernor, cost_tracker=None,
         )
         with pytest.raises(ValueError, match="No active prompt"):
-            executor.execute(db_session, uuid4(), "nonexistent",
-                             "sys", "user")
+            executor.execute(db_session, uuid4(), "nonexistent", "s", "u")
 
     def test_retry_then_fallback(self, db_session):
         _setup_prompt(db_session, "value")
-        router = ProviderRouter({
-            "anthropic": FailingProvider(),
-            "openai": MockOpenAIProvider(),
-        })
+        router = ProviderRouter({"anthropic": FailingProvider(),
+                                 "openai": MockOpenAIProvider()})
         executor = GovernedLLMExecutor(
-            router=router,
-            permission_gate=MockPermissionGate,
-            prompt_governor=MockPromptGovernor,
-            cost_tracker=None,
+            router=router, permission_gate=MockPermissionGate,
+            prompt_governor=MockPromptGovernor, cost_tracker=None,
         )
-        response = executor.execute(
-            db_session, uuid4(), "value", "sys", "user",
-        )
-        assert response.provider == "openai"
+        result = executor.execute(db_session, uuid4(), "value", "s", "u")
+        assert result.fallback_used
 
     def test_fail_fast_on_auth_error(self, db_session):
-        _setup_prompt(db_session, "macro")
-        router = ProviderRouter({
-            "openai": AuthFailingProvider(),
-            "anthropic": AuthFailingProvider(),
-        })
+        _setup_prompt(db_session, "value")
+        router = ProviderRouter({"anthropic": AuthFailingProvider(),
+                                 "openai": MockOpenAIProvider()})
         executor = GovernedLLMExecutor(
-            router=router,
-            permission_gate=MockPermissionGate,
-            prompt_governor=MockPromptGovernor,
-            cost_tracker=None,
+            router=router, permission_gate=MockPermissionGate,
+            prompt_governor=MockPromptGovernor, cost_tracker=None,
         )
-        with pytest.raises(RuntimeError):
-            executor.execute(db_session, uuid4(), "macro", "sys", "user")
+        with pytest.raises(RuntimeError, match="Auth"):
+            executor.execute(db_session, uuid4(), "value", "s", "u")
 
     def test_raises_when_all_fail(self, db_session):
         _setup_prompt(db_session, "value")
-        router = ProviderRouter({
-            "anthropic": FailingProvider(),
-            "openai": FailingProvider(),
-        })
+        router = ProviderRouter({"anthropic": FailingProvider(),
+                                 "openai": FailingProvider()})
         executor = GovernedLLMExecutor(
-            router=router,
-            permission_gate=MockPermissionGate,
-            prompt_governor=MockPromptGovernor,
-            cost_tracker=None,
+            router=router, permission_gate=MockPermissionGate,
+            prompt_governor=MockPromptGovernor, cost_tracker=None,
         )
         with pytest.raises(RuntimeError):
-            executor.execute(db_session, uuid4(), "value", "sys", "user")
+            executor.execute(db_session, uuid4(), "value", "s", "u")
+
+    # ── Validation tests ──
+    def test_rejects_bad_json_response(self, db_session):
+        _setup_prompt(db_session, "value")
+        router = ProviderRouter({"anthropic": BadJSONProvider()})
+        executor = GovernedLLMExecutor(
+            router=router, permission_gate=MockPermissionGate,
+            prompt_governor=MockPromptGovernor, cost_tracker=None,
+        )
+        with pytest.raises(ValueError, match="JSON"):
+            executor.execute(db_session, uuid4(), "value", "s", "u")
+
+    def test_rejects_missing_fields_response(self, db_session):
+        _setup_prompt(db_session, "value")
+        router = ProviderRouter({"anthropic": MissingFieldsProvider()})
+        executor = GovernedLLMExecutor(
+            router=router, permission_gate=MockPermissionGate,
+            prompt_governor=MockPromptGovernor, cost_tracker=None,
+        )
+        with pytest.raises(ValueError, match="Missing"):
+            executor.execute(db_session, uuid4(), "value", "s", "u")
+
+    def test_rejects_bad_conviction_score(self, db_session):
+        _setup_prompt(db_session, "value")
+        router = ProviderRouter({"anthropic": BadConvictionProvider()})
+        executor = GovernedLLMExecutor(
+            router=router, permission_gate=MockPermissionGate,
+            prompt_governor=MockPromptGovernor, cost_tracker=None,
+        )
+        with pytest.raises(ValueError, match="conviction_score"):
+            executor.execute(db_session, uuid4(), "value", "s", "u")
+
+    # ── Fallback provenance test ──
+    def test_fallback_logs_correct_provider(self, db_session):
+        """Fallback: log shows actual provider/model, not primary."""
+        run_id = uuid4()
+        _setup_run(db_session, run_id)
+        _setup_prompt(db_session, "value")
+        router = ProviderRouter({"anthropic": FailingProvider(),
+                                 "openai": MockOpenAIProvider()})
+        executor = GovernedLLMExecutor(
+            router=router, permission_gate=MockPermissionGate,
+            prompt_governor=MockPromptGovernor,
+            cost_tracker=MockCostTracker,
+        )
+        result = executor.execute(db_session, run_id, "value", "s", "u")
+        assert result.fallback_used
+        # Check log: model should be gpt-4o (fallback), not claude-sonnet-4
+        row = db_session.execute(
+            text("SELECT model, status FROM llm_execution_log"
+                 " WHERE run_id = :rid"),
+            {"rid": run_id},
+        ).fetchone()
+        assert row is not None
+        assert row[0] == "gpt-4o"
+
+    # ── Failed execution logging ──
+    def test_failed_execution_logged(self, db_session):
+        """Validation failure still writes llm_execution_log."""
+        run_id = uuid4()
+        _setup_run(db_session, run_id)
+        _setup_prompt(db_session, "value")
+        router = ProviderRouter({"anthropic": BadJSONProvider()})
+        executor = GovernedLLMExecutor(
+            router=router, permission_gate=MockPermissionGate,
+            prompt_governor=MockPromptGovernor,
+            cost_tracker=MockCostTracker,
+        )
+        with pytest.raises(ValueError):
+            executor.execute(db_session, run_id, "value", "s", "u")
+        rows = db_session.execute(
+            text("SELECT COUNT(*) FROM llm_execution_log WHERE run_id = :rid"),
+            {"rid": run_id},
+        ).scalar()
+        assert rows >= 1
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -398,14 +532,14 @@ class TestCredentialIsolation:
                 os.environ["GOOGLE_API_KEY"] = old
 
     def test_adapter_never_exposes_key_in_repr(self):
-        adapter = AnthropicAdapter(api_key="sk-test-key-12345")
+        adapter = AnthropicAdapter(api_key="«redacted:sk-…»")
         r = repr(adapter)
-        assert "sk-test-key-12345" not in r
+        assert "«redacted:sk-…»" not in r
         assert "<redacted>" in r
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# AI Authority — NEVER actions still blocked
+# AI Authority
 # ═══════════════════════════════════════════════════════════════════════
 
 
