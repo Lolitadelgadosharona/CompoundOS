@@ -193,7 +193,7 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   investment_memos, investment_knowledge_memory, market_data_cache
 - 6 AI perspectives including Portfolio Construction
 - Investment Memo schema with 9 structured sections
-- Slice A: IN PROGRESS (PR #86)
+- Slice A: DONE — merged as 355637d (PR #86)
   - Migration 0026_research_foundation: research_requests + research_runs
   - API: POST /api/research/request + GET /status + GET /runs
   - Run immutability trigger (err 55000)
