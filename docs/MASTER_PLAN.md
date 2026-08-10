@@ -161,7 +161,11 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
       - Migration 0022_committee_bridge: committee_review_requests + evidence types
       - Bridge: investment_ideas → committee_sessions via Owner-controlled workflow
       - 18 PostgreSQL integration tests
-    - Slice B: NOT AUTHORIZED
+    - Slice B: DESIGN PHASE — Technical Design authored
+      - Design document: docs/sprints/SPRINT_010_SLICE_B_TECHNICAL_DESIGN.md
+      - 5 new Guardian check types, policy-backed thresholds, notification wiring
+      - 4 Owner Decisions pending (OD-10-B-1 through OD-10-B-4)
+      - NOT AUTHORIZED FOR IMPLEMENTATION
 
 ## Backlog
 
