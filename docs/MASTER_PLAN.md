@@ -215,9 +215,10 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   - Enhanced EvidenceCollector: CacheService, graceful degradation
   - ProvenanceEnvelope: 6 mandatory fields
   - 11 PostgreSQL integration tests
-- Slice D: DESIGN COMPLETE — Awaiting Implementation Authorization
-  - AI Governance: PermissionGate, prompt enforcement, cost tracking, audit
-  - Owner Decisions resolved (OD-12-D-1 through OD-12-D-4)
+- Slice D: IN PROGRESS (PR #93)
+  - ActionMatrix (15 actions), PermissionGate, PromptGovernor, CostTracker
+  - Hard prompt enforcement, log-only cost tracking
+  - 21 PostgreSQL integration tests
 
 ## Backlog
 
