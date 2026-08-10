@@ -184,12 +184,16 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
       - 22 PostgreSQL integration tests
       - Sprint 010: COMPLETE (all 4 slices merged)
 
-### Sprint 011: DESIGN COMPLETE — NOT AUTHORIZED FOR IMPLEMENTATION
-- Technical Design: docs/sprints/SPRINT_011_TECHNICAL_DESIGN.md
+### Sprint 011: DESIGN REVISED — APPROVED WITH IMPROVEMENTS
+- Technical Design (Revised): docs/sprints/SPRINT_011_TECHNICAL_DESIGN.md
 - Design Direction: docs/sprints/SPRINT_011_DESIGN_DIRECTION.md
-- Owner Decisions: docs/sprints/SPRINT_011_OWNER_DECISIONS.md (7 pending)
-- Architecture: 6 modules, 3 new tables, 5 new API endpoints
-- 4 implementation slices (A-D), ~940 lines, ~26 tests
+- Owner Decisions: docs/sprints/SPRINT_011_OWNER_DECISIONS.md (12 pending)
+- Architecture: Research Request → Run → Perspective → Memo layers
+- 6 tables: research_requests, research_runs, perspective_analyses,
+  investment_memos, investment_knowledge_memory, market_data_cache
+- 6 AI perspectives including Portfolio Construction
+- Investment Memo schema with 9 structured sections
+- NOT AUTHORIZED FOR IMPLEMENTATION
 
 ## Backlog
 

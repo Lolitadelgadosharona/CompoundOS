@@ -1,11 +1,9 @@
-# Sprint 011 — Owner Decisions
+# Sprint 011 — Owner Decisions (Revised)
 
 > **STATUS: PENDING OWNER DECISIONS**
 >
-> Sprint 010: COMPLETE
-> Sprint 011: DESIGN PREPARATION — NOT AUTHORIZED FOR IMPLEMENTATION
->
-> These decisions must be resolved before Sprint 011 implementation begins.
+> Sprint 011 Design: APPROVED WITH IMPROVEMENTS (revised 2026-08-10)
+> 12 decisions require Owner review before implementation begins.
 
 ---
 
@@ -14,27 +12,18 @@
 ### Question
 What should be the primary objective of Sprint 011?
 
-### Options
-
-| Option | Description | Pros | Cons |
-|---|---|---|---|
-| A: AI Committee Intelligence | Evidence gathering, multi-perspective reasoning, memo generation | Directly advances core AI mission; builds on Sprint 006/010-A | Requires external APIs; high complexity |
-| B: Portfolio Operations | Broker connectors, real-time positions, automated import | Practical value; makes system usable with real data | SEC-001 blocker (private repo needed first) |
-| C: Frontend Implementation | Dashboard UI, decision workflow, portfolio views | Visual product; Owner can interact with system | Backend-dependent; large scope |
-| D: Production Hardening | HTTPS, deployment, monitoring, backup verification | Makes system production-ready | Defers AI capabilities further |
+### Options: A: AI Committee Intelligence / B: Portfolio Ops / C: Frontend / D: Production
 
 ### Recommendation
 **Option A — AI Committee Intelligence.** Sprint 010 built the foundation
-(committee infrastructure, Guardian intelligence, dashboard). Sprint 011
-should complete the AI intelligence layer while the architecture momentum
-is strong. Broker connectivity is blocked on SEC-001 (private repo).
+for AI-assisted investing. Sprint 011 should complete the intelligence layer.
 
 ### Owner Decision
 - [ ] APPROVE — Option A (AI Committee Intelligence)
 - [ ] APPROVE — Option B (Portfolio Operations)
 - [ ] APPROVE — Option C (Frontend Implementation)
 - [ ] APPROVE — Option D (Production Hardening)
-- [ ] OTHER (specify): _______________
+- [ ] OTHER: _______________
 
 ---
 
@@ -43,83 +32,56 @@ is strong. Broker connectivity is blocked on SEC-001 (private repo).
 ### Question
 How autonomously should AI conduct investment research?
 
-### Options
-
-| Option | Description | Pros | Cons |
-|---|---|---|---|
-| A: Owner-triggered only | AI analyzes only when Owner explicitly requests via Committee bridge | Maximum control; matches OD-10-4 | Requires Owner initiation for every analysis |
-| B: Scheduled research | AI runs periodic analysis on watchlist ideas | Proactive; catches opportunities | May produce noise on unchanging ideas |
-| C: Event-triggered | AI analyzes when market data changes significantly (price moves, news) | Responsive; timely | Complex trigger logic; dependency on market data |
+### Options: A: Owner-triggered only / B: Scheduled / C: Event-triggered
 
 ### Recommendation
-**Option A — Owner-triggered only.** Extends the existing manual trigger
-model (OD-10-4). Owner retains complete control over when AI analysis is
-initiated. Scheduled and event-triggered analysis can be added in future
-sprints as the market data infrastructure matures.
+**Option A — Owner-triggered only.** Extends the manual trigger model
+(OD-10-4). Owner controls when AI analysis runs.
 
 ### Owner Decision
-- [ ] APPROVE — Option A (Owner-triggered only)
-- [ ] APPROVE — Option B (Scheduled research)
+- [ ] APPROVE — Option A (Owner-triggered)
+- [ ] APPROVE — Option B (Scheduled)
 - [ ] APPROVE — Option C (Event-triggered)
-- [ ] OTHER (specify): _______________
+- [ ] OTHER: _______________
 
 ---
 
 ## OD-11-3: External Market Data Source
 
 ### Question
-Which external market data provider should CompoundOS integrate with?
+Which market data provider should CompoundOS use?
 
-### Options
-
-| Option | Description | Pros | Cons |
-|---|---|---|---|
-| A: Alpha Vantage | Free tier available; fundamentals + prices | Low cost; well-documented API | Rate limits; data quality varies |
-| B: Yahoo Finance (yfinance) | Free; comprehensive; no API key needed | Easiest to start; broad coverage | Unofficial; terms of service gray area |
-| C: Polygon.io | Professional API; real-time data | Reliable; enterprise-grade | Requires paid plan for full access |
-| D: Defer to future sprint | No external data in Sprint 011 | Keeps scope bounded | AI analysis limited to internal data only |
+### Options: A: Alpha Vantage / B: Yahoo Finance / C: Polygon.io / D: Defer
 
 ### Recommendation
-**Option A — Alpha Vantage.** Provides a free tier with sufficient data
-for V1 research. Well-documented REST API with fundamentals, prices, and
-FX rates. Can be upgraded to paid tier later. The API key model aligns
-with the existing X-API-Key auth pattern.
+**Option A — Alpha Vantage.** Free tier sufficient for V1 research.
 
 ### Owner Decision
 - [ ] APPROVE — Option A (Alpha Vantage)
 - [ ] APPROVE — Option B (Yahoo Finance)
 - [ ] APPROVE — Option C (Polygon.io)
 - [ ] APPROVE — Option D (Defer)
-- [ ] OTHER (specify): _______________
+- [ ] OTHER: _______________
 
 ---
 
 ## OD-11-4: LLM Provider Strategy
 
 ### Question
-Which LLM provider should power the AI Committee analysis?
+Which LLM provider should power AI Committee analysis?
 
-### Options
-
-| Option | Description | Pros | Cons |
-|---|---|---|---|
-| A: OpenRouter | Multi-model gateway; Claude, GPT, Gemini | Model flexibility; no lock-in; pay-per-use | Adds intermediary layer |
-| B: Anthropic direct | Claude API directly | Strong reasoning; long context | Single provider lock-in |
-| C: OpenAI direct | GPT-4 API directly | Large ecosystem; well-supported | Single provider lock-in |
-| D: Local model | Run open-source LLM locally | No API costs; data privacy | Hardware requirements; lower quality |
+### Options: A: OpenRouter / B: Anthropic direct / C: OpenAI direct / D: Local
 
 ### Recommendation
-**Option A — OpenRouter.** Provides access to multiple models through a single
-API. Allows the Committee to use different models for different perspectives
-(e.g., Claude for deep analysis, GPT for summarization). No provider lock-in.
-The API key model aligns with existing X-API-Key auth.
+**Option A — OpenRouter.** Multi-model, no lock-in. Different models for
+different perspectives.
 
 ### Owner Decision
 - [ ] APPROVE — Option A (OpenRouter)
 - [ ] APPROVE — Option B (Anthropic direct)
 - [ ] APPROVE — Option C (OpenAI direct)
 - [ ] APPROVE — Option D (Local model)
-- [ ] OTHER (specify): _______________
+- [ ] OTHER: _______________
 
 ---
 
@@ -128,52 +90,43 @@ The API key model aligns with existing X-API-Key auth.
 ### Question
 How should AI-generated research evidence be stored?
 
-### Options
-
-| Option | Description | Pros | Cons |
-|---|---|---|---|
-| A: Extend committee_evidence_items | Use existing table with new source types | Reuses existing schema; unified evidence model | Evidence items table may grow large |
-| B: New research_evidence table | Separate table for AI-generated analysis | Clean separation; optimized for research data | Schema proliferation; another table to maintain |
-| C: JSONB in committee_reports | Store analysis as structured JSON in existing report field | Simple; no new tables | Difficult to query structured data; report field becomes dumping ground |
+### Options: A: Extend committee_evidence_items / B: New table / C: JSONB in reports
 
 ### Recommendation
-**Option A — Extend committee_evidence_items.** The existing evidence
-pipeline (Sprint 006) already supports 9 source types. Adding AI-generated
-research as new source types preserves the unified evidence model and
-enables cross-referencing. The evidence items table is designed for growth.
+**Option A — Extend committee_evidence_items.** Unified evidence model.
 
 ### Owner Decision
 - [ ] APPROVE — Option A (Extend committee_evidence_items)
-- [ ] APPROVE — Option B (New research_evidence table)
-- [ ] APPROVE — Option C (JSONB in committee_reports)
-- [ ] OTHER (specify): _______________
+- [ ] APPROVE — Option B (New table)
+- [ ] APPROVE — Option C (JSONB in reports)
+- [ ] OTHER: _______________
 
 ---
 
-## OD-11-6: Research Memory Strategy
+## OD-11-6: Investment Knowledge Memory Strategy
 
 ### Question
-How should AI-generated research be persisted across sessions?
+How should accumulated investment knowledge be stored and reused?
 
 ### Options
 
-| Option | Description | Pros | Cons |
-|---|---|---|---|
-| A: Company profile cache | Cache per-company fundamentals in structured table | Reusable across ideas; reduces API calls | Cache staleness management needed |
-| B: Session-only research | Research lives only within committee session | Simple; no staleness issues | Redundant API calls for repeated analysis |
-| C: Full research archive | All analysis permanently stored with versioning | Complete audit trail; historical reference | Storage growth; complexity |
+| Option | Description |
+|---|---|
+| A: Company profile + history | Cache fundamentals + past thesis + past decisions + past outcomes + prediction accuracy |
+| B: Company profile only | Cache fundamentals only; no historical context |
+| C: Session-only | No persistent memory; re-fetch every time |
 
 ### Recommendation
-**Option A — Company profile cache.** Caching fundamental data (financials,
-metrics, sector info) makes sense because it changes slowly and is reusable.
-Session-specific analysis (thesis, risk assessment) remains within the
-committee session. This balances efficiency with simplicity.
+**Option A — Full knowledge memory.** The value of the system grows over
+time as it accumulates knowledge about companies, past decisions, and
+outcome accuracy. This enables the Learning Loop to close the feedback
+cycle between predictions and outcomes.
 
 ### Owner Decision
-- [ ] APPROVE — Option A (Company profile cache)
-- [ ] APPROVE — Option B (Session-only)
-- [ ] APPROVE — Option C (Full archive)
-- [ ] OTHER (specify): _______________
+- [ ] APPROVE — Option A (Company profile + history)
+- [ ] APPROVE — Option B (Company profile only)
+- [ ] APPROVE — Option C (Session-only)
+- [ ] OTHER: _______________
 
 ---
 
@@ -182,56 +135,167 @@ committee session. This balances efficiency with simplicity.
 ### Question
 How many committee perspectives should Sprint 011 implement?
 
-### Options
-
-| Option | Description | Pros | Cons |
-|---|---|---|---|
-| A: 3 perspectives | Value, Growth, Risk — essential trio | Focused; implementable in one sprint | May miss macro/regulatory angles |
-| B: 5 perspectives | Value, Growth, Risk, Macro, Policy | Comprehensive coverage | More LLM calls per analysis; higher cost |
-| C: Configurable | Owner selects which perspectives to run | Flexible; pay for what you use | More complex UI/service layer |
+### Options: A: 3 / B: 5 / C: 6 / D: Configurable
 
 ### Recommendation
-**Option B — 5 perspectives.** The perspectives defined in the design
-direction cover the essential dimensions of investment analysis. Each
-perspective generates valuable, distinct insights. Since analysis is
-Owner-triggered (not automated), cost is controlled by usage frequency.
+**Option C — 6 perspectives.** Includes the new Portfolio Construction
+perspective per design review. Portfolio fit is essential for CompoundOS's
+household-level analysis.
 
 ### Owner Decision
-- [ ] APPROVE — Option A (3 perspectives)
-- [ ] APPROVE — Option B (5 perspectives)
+- [ ] APPROVE — Option A (3: Value, Growth, Risk)
+- [ ] APPROVE — Option B (5: + Macro, Policy)
+- [ ] APPROVE — Option C (6: + Portfolio Fit)
+- [ ] APPROVE — Option D (Configurable)
+- [ ] OTHER: _______________
+
+---
+
+## OD-11-8: Research Run Retention
+
+### Question
+How long should research runs and their analyses be retained?
+
+### Options
+
+| Option | Description |
+|---|---|
+| A: Indefinite | Keep all runs permanently — full research history |
+| B: Latest only | Keep only the most recent run per request; delete older |
+| C: Configurable | Retention period per research request type |
+
+### Recommendation
+**Option A — Indefinite.** Research runs are immutable historical records
+of AI analysis at a point in time. They serve as an audit trail for
+investment decisions. Storage cost is minimal (JSONB blobs).
+
+### Owner Decision
+- [ ] APPROVE — Option A (Indefinite)
+- [ ] APPROVE — Option B (Latest only)
 - [ ] APPROVE — Option C (Configurable)
-- [ ] OTHER (specify): _______________
+- [ ] OTHER: _______________
+
+---
+
+## OD-11-9: Investment Knowledge Memory Retention
+
+### Question
+How long should investment knowledge be retained?
+
+### Options
+
+| Option | Description |
+|---|---|
+| A: Indefinite | Knowledge accumulates forever; grows with system |
+| B: Staleness-based | Expire profiles not accessed in N days |
+| C: Manual cleanup | Owner decides when to archive |
+
+### Recommendation
+**Option A — Indefinite.** Knowledge compounds. A company analysis from
+6 months ago is still valuable context. The knowledge_memory table grows
+slowly (one row per company/sector/macro indicator).
+
+### Owner Decision
+- [ ] APPROVE — Option A (Indefinite)
+- [ ] APPROVE — Option B (Staleness-based)
+- [ ] APPROVE — Option C (Manual cleanup)
+- [ ] OTHER: _______________
+
+---
+
+## OD-11-10: Perspective Model Selection
+
+### Question
+Should each perspective use a fixed model or be configurable?
+
+### Options
+
+| Option | Description |
+|---|---|
+| A: Fixed per perspective | Value→Claude, Growth→Claude, Risk→Claude, Macro→GPT-4o, Policy→Claude, Portfolio→GPT-4o |
+| B: Configurable per run | Owner can override model for any perspective |
+| C: Best available | System picks cheapest available model meeting quality threshold |
+
+### Recommendation
+**Option A — Fixed with configurable override.** Sensible defaults per
+perspective based on model strengths, but allow override via
+`research_requests.parameters` JSONB for experimentation.
+
+### Owner Decision
+- [ ] APPROVE — Option A (Fixed per perspective)
+- [ ] APPROVE — Option B (Configurable per run)
+- [ ] APPROVE — Option C (Best available)
+- [ ] OTHER: _______________
+
+---
+
+## OD-11-11: LLM Routing Strategy
+
+### Question
+How should LLM calls be routed through OpenRouter?
+
+### Options
+
+| Option | Description |
+|---|---|
+| A: Direct model selection | Explicit model per perspective (claude-sonnet-4, gpt-4o) |
+| B: Capability-based routing | Route by capability (reasoning→Claude, breadth→GPT) |
+| C: Cost-optimized routing | Use cheapest model per capability tier |
+
+### Recommendation
+**Option A — Direct model selection.** For investment research, model
+quality matters more than cost. Explicit selection ensures the Owner
+knows exactly which model produced each analysis. Cost tracking per
+run is straightforward.
+
+### Owner Decision
+- [ ] APPROVE — Option A (Direct model selection)
+- [ ] APPROVE — Option B (Capability-based routing)
+- [ ] APPROVE — Option C (Cost-optimized routing)
+- [ ] OTHER: _______________
+
+---
+
+## OD-11-12: Evidence Freshness Rules
+
+### Question
+How fresh must market data be before re-fetching?
+
+### Options
+
+| Option | Description |
+|---|---|
+| A: Aggressive | Prices: 1h / Fundamentals: 24h / Sector: 7d |
+| B: Moderate | Prices: 6h / Fundamentals: 7d / Sector: 30d |
+| C: Conservative | Prices: 24h / Fundamentals: 30d / Sector: 90d |
+
+### Recommendation
+**Option B — Moderate.** Balances data freshness with API call volume.
+For a family office making occasional investment decisions (not daily
+trading), 6-hour price data and weekly fundamentals are sufficient.
+Alpha Vantage free tier supports this cadence.
+
+### Owner Decision
+- [ ] APPROVE — Option A (Aggressive: 1h/24h/7d)
+- [ ] APPROVE — Option B (Moderate: 6h/7d/30d)
+- [ ] APPROVE — Option C (Conservative: 24h/30d/90d)
+- [ ] OTHER: _______________
 
 ---
 
 ## Decision Summary
 
-| ID | Topic | Recommendation | Owner Decision |
-|---|---|---|---|
-| OD-11-1 | Sprint 011 focus | AI Committee Intelligence (A) | |
-| OD-11-2 | AI research autonomy | Owner-triggered only (A) | |
-| OD-11-3 | Market data source | Alpha Vantage (A) | |
-| OD-11-4 | LLM provider | OpenRouter (A) | |
-| OD-11-5 | Evidence storage | Extend committee_evidence_items (A) | |
-| OD-11-6 | Research memory | Company profile cache (A) | |
-| OD-11-7 | Reasoning scope | 5 perspectives (B) | |
-
----
-
-## Post-Decision Process
-
-1. Owner marks each decision.
-2. Agent updates this document with final decisions.
-3. Agent creates Sprint 011 Technical Design.
-4. Implementation begins after design approval.
-
----
-
-## AI Authority Reminder
-
-None of these decisions expand AI authority:
-- AI analyzes and recommends — never decides
-- Owner triggers all analysis
-- No autonomous trading or execution
-- No policy modification by AI
-- Owner remains the sole decision-maker
+| ID | Topic | Recommendation |
+|---|---|---|
+| OD-11-1 | Sprint 011 focus | AI Committee Intelligence (A) |
+| OD-11-2 | Research autonomy | Owner-triggered only (A) |
+| OD-11-3 | Market data | Alpha Vantage (A) |
+| OD-11-4 | LLM provider | OpenRouter (A) |
+| OD-11-5 | Evidence storage | Extend committee_evidence_items (A) |
+| OD-11-6 | Knowledge memory | Company profile + history (A) |
+| OD-11-7 | Perspectives | 6 including Portfolio Fit (C) |
+| OD-11-8 | Run retention | Indefinite (A) |
+| OD-11-9 | Memory retention | Indefinite (A) |
+| OD-11-10 | Model selection | Fixed per perspective (A) |
+| OD-11-11 | LLM routing | Direct model selection (A) |
+| OD-11-12 | Evidence freshness | Moderate: 6h/7d/30d (B) |
