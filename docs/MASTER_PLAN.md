@@ -144,16 +144,23 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
     - Decision bridge: decision_drafts + confirmed_snapshots gain investment_idea_id FK
     - 27 PostgreSQL integration tests
     - Follow-ups: COS-009-C-FU-M1 (lifecycle transition enforcement), FU-L1 (soft-delete), FU-L2 (unused ALLOWED_TRANSITIONS)
-  - Slice D: IN PROGRESS (PR #81)
+  - Slice D: DONE — merged as 61e7a8c (PR #81)
     - Migration 0021_manual_import_foundation: assets.confidence + transaction immutability
     - CSV import pipeline: parse → validate → resolve → store
     - Asset resolution: ISIN → (symbol,exchange,currency) → create unverified
     - Import idempotency: upsert positions/balances, skip duplicate transactions
     - Provider interfaces: AccountImporter, PositionImporter, TransactionImporter, BalanceImporter
     - 30 PostgreSQL integration tests
+    - Follow-ups: COS-009-D-FU-L1 (atomic position upsert), FU-L2 (extend immutability fields), SEC-002 (global auth)
+  - Sprint 009: COMPLETE — Slices A, B, C, D all done
+  - Sprint 010: NOT STARTED
 
 ## Backlog
 
+- COS-009-D Follow-ups (from Slice D independent review):
+  - COS-009-D-FU-L1: Atomic position import upsert — call supersede_latest_positions on re-import.
+  - COS-009-D-FU-L2: Extend transaction immutability trigger to cover price_currency and fee_currency.
+  - SEC-002: Global authentication layer — all mutation endpoints need OWNER authorization.
 - COS-009-C Follow-ups (from Slice C independent review):
   - COS-009-C-FU-M1: Enforce investment idea lifecycle transitions before API exposure (ALLOWED_TRANSITIONS defined but not enforced at DB or repo level).
   - COS-009-C-FU-L1: Consider archive instead of delete for investment ideas (Owner product decision).

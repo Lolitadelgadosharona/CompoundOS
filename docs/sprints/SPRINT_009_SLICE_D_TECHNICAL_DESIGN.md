@@ -1,7 +1,7 @@
 # Sprint 009 Slice D — Technical Design
 # Manual Import + Data Source Foundation
 
-> **STATUS: DESIGN PHASE — NOT AUTHORIZED FOR IMPLEMENTATION**
+> **STATUS: DONE — merged 2026-08-10 (61e7a8c, PR #81)**
 >
 > Slice A (Core Portfolio Schema): DONE — merged 2026-08-10 (9f0ed00, PR #78)
 > Slice B (Investment Policy Enrichment): DONE — merged 2026-08-10 (4a7312c, PR #79)

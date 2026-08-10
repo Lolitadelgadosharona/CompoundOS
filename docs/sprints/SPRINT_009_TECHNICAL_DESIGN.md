@@ -1,11 +1,13 @@
 # Sprint 009 — Technical Design Gate
 
-> **STATUS: IMPLEMENTATION IN PROGRESS**
+> **STATUS: SPRINT 009 COMPLETE**
 >
 > Slice A (Core Portfolio Schema + Asset Identity): **DONE** — merged 2026-08-10 (9f0ed00, PR #78)
 > Slice B (Investment Policy Enrichment): **DONE** — merged 2026-08-10 (4a7312c, PR #79)
 > Slice C (Investment Idea + Decision Bridge): **DONE** — merged 2026-08-10 (f87e4e8, PR #80)
-> Slice D (Manual Import + Data Source Foundation): NOT AUTHORIZED
+> Slice D (Manual Import + Data Source Foundation): **DONE** — merged 2026-08-10 (61e7a8c, PR #81)
+>
+> Sprint 010: NOT STARTED
 >
 > This document defines the architecture for the Wealth Intelligence Foundation.
 > Slice A implementation complete. Subsequent slices require separate Owner authorization.

@@ -1,5 +1,45 @@
 # Changelog
 
+## Sprint 009 Slice D — Manual Import + Data Source Foundation — Done (2026-08-10)
+
+### Merge
+- PR #81: `feat(import): add manual import foundation`
+- Squash merged as: `61e7a8c5d6778d8e542625b40453836b0831ca4d`
+- Independent review: APPROVE WITH NON-BLOCKING FOLLOW-UP (1 MEDIUM, 3 LOW)
+
+### Data Foundation
+- Migration 0021_manual_import_foundation: 1 column + 1 trigger
+- `assets.confidence`: verified/unverified enum for asset resolution
+- `fn_transaction_immutability`: blocks UPDATE of core fields, blocks DELETE entirely
+
+### Import Pipeline
+- CSV parser: positions, transactions, cash balances (10 MB limit)
+- Validators: field-level (currency, decimal, datetime), row-level (account, asset), cross-row (batch dedup)
+- Asset resolver: ISIN → (symbol,exchange,currency) → create with confidence='unverified'
+- Idempotency via existing (source, source_record_id) partial unique indexes
+
+### Provider Interfaces
+- AccountImporter, PositionImporter, TransactionImporter, BalanceImporter (Protocol classes, no implementations)
+
+### API Endpoints
+- POST /api/import/positions, transactions, cash-balances (OWNER auth)
+- GET /api/import/sources, POST /api/import/sources
+
+### Follow-ups
+- COS-009-D-FU-L1: Atomic position import upsert (is_latest toggling)
+- COS-009-D-FU-L2: Extend transaction immutability to price_currency, fee_currency
+- SEC-002: Global authentication layer
+
+### Test Coverage
+- 30 PostgreSQL integration tests: parsing, validation, idempotency, provenance, immutability
+
+### Sprint 009 Status
+- Slice A: DONE (9f0ed00, PR #78) — Core Portfolio Schema
+- Slice B: DONE (4a7312c, PR #79) — Investment Policy Enrichment
+- Slice C: DONE (f87e4e8, PR #80) — Investment Idea + Decision Bridge
+- Slice D: DONE (61e7a8c, PR #81) — Manual Import + Data Source Foundation
+- Sprint 009: COMPLETE
+
 ## Sprint 009 Slice C — Investment Idea + Decision Bridge — Done (2026-08-10)
 
 ### Merge
