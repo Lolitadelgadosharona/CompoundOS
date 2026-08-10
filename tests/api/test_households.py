@@ -290,5 +290,5 @@ def test_migration_contains_only_approved_product_tables(postgres_engine) -> Non
         "owner_api_keys", "audit_log", "notification_escalation_rules",
         "research_requests", "research_runs",
         "market_data_cache", "investment_knowledge_memory",
-        "perspective_analyses",
+        "perspective_analyses", "prompt_templates", "llm_execution_log",
     }
