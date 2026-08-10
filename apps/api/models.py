@@ -1949,3 +1949,140 @@ class DataSource(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+# ---------------------------------------------------------------------------
+# Sprint 009 Slice B — Investment Policy Enrichment
+# ---------------------------------------------------------------------------
+
+
+class PolicyCapitalBucket(Base):
+    """Capital allocation targets per policy version or draft.
+
+    Draft rows are mutable and cascade-deleted with the draft.
+    Version rows are immutable (protected by BEFORE UPDATE/DELETE trigger).
+    """
+
+    __tablename__ = "policy_capital_buckets"
+    __table_args__ = (
+        CheckConstraint(
+            "(draft_id IS NOT NULL)::int + (version_id IS NOT NULL)::int = 1",
+            name="ck_policy_capital_buckets_one_parent",
+        ),
+        CheckConstraint(
+            "target_pct >= 0 AND target_pct <= 100",
+            name="ck_policy_capital_buckets_target_pct_range",
+        ),
+        CheckConstraint(
+            "min_pct IS NULL OR max_pct IS NULL OR min_pct <= max_pct",
+            name="ck_policy_capital_buckets_min_max",
+        ),
+        Index(
+            "uq_policy_capital_buckets_draft_name",
+            "draft_id",
+            "bucket_name",
+            unique=True,
+            postgresql_where=text("draft_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_policy_capital_buckets_version_name",
+            "version_id",
+            "bucket_name",
+            unique=True,
+            postgresql_where=text("version_id IS NOT NULL"),
+        ),
+        Index("ix_policy_capital_buckets_draft", "draft_id", "sort_order"),
+        Index("ix_policy_capital_buckets_version", "version_id", "sort_order"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    draft_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            "investment_policy_drafts.id",
+            name="fk_policy_capital_buckets_draft_id_drafts",
+            ondelete="CASCADE",
+        ),
+        nullable=True,
+    )
+    version_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            "investment_policy_versions.id",
+            name="fk_policy_capital_buckets_version_id_versions",
+            ondelete="RESTRICT",
+        ),
+        nullable=True,
+    )
+    bucket_name: Mapped[str] = mapped_column(Text, nullable=False)
+    target_pct: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
+    min_pct: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2), nullable=True)
+    max_pct: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2), nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    sort_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class PolicyRule(Base):
+    """Extensible policy constraints versioned with policy.
+
+    Draft rows are mutable and cascade-deleted with the draft.
+    Version rows are immutable (protected by BEFORE UPDATE/DELETE trigger).
+    """
+
+    __tablename__ = "policy_rules"
+    __table_args__ = (
+        CheckConstraint(
+            "(draft_id IS NOT NULL)::int + (version_id IS NOT NULL)::int = 1",
+            name="ck_policy_rules_one_parent",
+        ),
+        CheckConstraint(
+            "rule_type IN ("
+            "'max_single_position_pct','max_sector_concentration_pct',"
+            "'max_drawdown_pct','min_cash_reserve_pct',"
+            "'approval_required_for','exploration_capital_limit',"
+            "'custom')",
+            name="ck_policy_rules_type",
+        ),
+        CheckConstraint(
+            "severity IN ('info','warning','critical')",
+            name="ck_policy_rules_severity",
+        ),
+        Index("ix_policy_rules_draft", "draft_id", "sort_order"),
+        Index("ix_policy_rules_version", "version_id", "sort_order"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    draft_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            "investment_policy_drafts.id",
+            name="fk_policy_rules_draft_id_drafts",
+            ondelete="CASCADE",
+        ),
+        nullable=True,
+    )
+    version_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            "investment_policy_versions.id",
+            name="fk_policy_rules_version_id_versions",
+            ondelete="RESTRICT",
+        ),
+        nullable=True,
+    )
+    rule_type: Mapped[str] = mapped_column(Text, nullable=False)
+    rule_value: Mapped[str] = mapped_column(Text, nullable=False)
+    severity: Mapped[str] = mapped_column(
+        Text, nullable=False, default="warning", server_default="warning",
+    )
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true"),
+    )
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    sort_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
