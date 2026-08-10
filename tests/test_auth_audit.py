@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 
 pytestmark = pytest.mark.postgres
 
-HEAD_REVISION = "0026_research_foundation"
+HEAD_REVISION = "0028_evidence_hardening"
 
 
 def _hash_key(api_key):

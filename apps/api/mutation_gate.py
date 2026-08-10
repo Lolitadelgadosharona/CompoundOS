@@ -14,7 +14,7 @@ from apps.api.config import get_database_url
 
 MUTATION_METHODS = {"POST", "PATCH", "PUT", "DELETE"}
 ALLOWED_PATHS = {"/api/health/live", "/api/health/ready", "/api/health/full"}
-EXPECTED_HEAD = "0026_research_foundation"
+EXPECTED_HEAD = "0028_evidence_hardening"
 
 
 async def mutation_gate(request: Request, call_next):
