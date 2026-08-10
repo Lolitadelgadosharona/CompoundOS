@@ -131,12 +131,14 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   - 7 Owner Decisions pending (OD-9-1 through OD-9-7)
   - 5 proposed ADRs (0007–0011)
   - NO broker integrations. NO credentials. NO trading.
-  - Slice B: IN PROGRESS
-    - Migration 0019_investment_policy_enrichment
+  - Slice B: DONE — merged as 4a7312c (PR #79)
+    - Migration 0019_policy_enrichment
     - Tables: policy_capital_buckets, policy_rules
     - Version immutability: BEFORE UPDATE/DELETE triggers on version rows
     - 35 PostgreSQL integration tests covering constraints and triggers
     - No hardcoded allocations — policy remains configurable
+    - Guardian compatibility: schema supports future drift detection
+  - Slice C: NOT AUTHORIZED BEFORE REVIEW
 
 ## Backlog
 

@@ -3,8 +3,8 @@
 > **STATUS: IMPLEMENTATION IN PROGRESS**
 >
 > Slice A (Core Portfolio Schema + Asset Identity): **DONE** — merged 2026-08-10 (9f0ed00, PR #78)
-> Slice B (Policy Enrichment): NOT AUTHORIZED
-> Slice C (Ideas + Decision Bridge): NOT AUTHORIZED
+> Slice B (Investment Policy Enrichment): **DONE** — merged 2026-08-10 (4a7312c, PR #79)
+> Slice C (Ideas + Decision Bridge): NOT AUTHORIZED BEFORE REVIEW
 > Slice D (Manual Import + Data Source Foundation): NOT AUTHORIZED
 >
 > This document defines the architecture for the Wealth Intelligence Foundation.

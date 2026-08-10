@@ -1,5 +1,35 @@
 # Changelog
 
+## Sprint 009 Slice B — Investment Policy Enrichment — Done (2026-08-10)
+
+### Merge
+- PR #79: `feat(policy): add investment policy enrichment`
+- Squash merged as: `4a7312c3307c7201cb145965c94234e7aba98d6b`
+- Independent review: APPROVE (0 BLOCKER, 0 HIGH, 3 LOW)
+
+### Policy Configuration
+- Migration 0019_policy_enrichment: 2 tables + 2 trigger functions
+- `policy_capital_buckets`: capital allocation targets per version/draft
+- `policy_rules`: 7 extensible constraint types (max_position, concentration, etc.)
+- Single-table draft/version pattern with mutual-exclusivity CHECK
+- Version rows immutable via BEFORE UPDATE/DELETE triggers
+- Draft rows mutable, CASCADE deleted on publish
+
+### Design Invariants
+- No hardcoded 95/5 — any bucket name/percentage accepted
+- Rule types: 7 approved (incl. exploration_capital_limit)
+- Severity: info, warning, critical per rule
+- Bucket uniqueness per (draft_id, bucket_name) and (version_id, bucket_name)
+- Version FK: RESTRICT prevents deletion with attached buckets/rules
+
+### Guardian Compatibility
+- Schema supports future drift detection without modifying Guardian
+- No automatic actions — read-only data for evaluation
+
+### Test Coverage
+- 35 PostgreSQL integration tests: constraints, uniqueness, immutability, isolation
+- Pydantic schema validation for buckets and rules
+
 ## Sprint 009 Slice A — Core Portfolio Schema — Done (2026-08-10)
 
 ### Merge
