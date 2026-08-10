@@ -582,6 +582,11 @@ class DecisionConfirmedSnapshot(Base):
         ),
         nullable=True,
     )
+    # Sprint 010 Slice C — Learning Loop review dates
+    review_30d: Mapped[Optional[Any]] = mapped_column(Date, nullable=True)
+    review_90d: Mapped[Optional[Any]] = mapped_column(Date, nullable=True)
+    review_1yr: Mapped[Optional[Any]] = mapped_column(Date, nullable=True)
+    review_outcome: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -2223,6 +2228,62 @@ class IdeaStatusHistory(Base):
 # ---------------------------------------------------------------------------
 # Sprint 010 Slice A — Committee Integration Bridge
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Sprint 010 Slice C — Learning Loop
+# ---------------------------------------------------------------------------
+
+
+class DecisionReview(Base):
+    __tablename__ = "decision_reviews"
+    __table_args__ = (
+        CheckConstraint(
+            "review_type IN ('30_day','90_day','1_year','manual')",
+            name="ck_decision_reviews_type",
+        ),
+        UniqueConstraint(
+            "decision_id", "review_type",
+            name="uq_decision_reviews_decision_type",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    decision_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "decisions.id",
+            name="fk_decision_reviews_decision_id",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    investment_idea_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            "investment_ideas.id",
+            name="fk_decision_reviews_investment_idea_id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
+    review_type: Mapped[str] = mapped_column(Text, nullable=False)
+    scheduled_at: Mapped[Any] = mapped_column(Date, nullable=False)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    outcome_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    actual_return_pct: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(8, 2), nullable=True,
+    )
+    policy_compliant: Mapped[Optional[bool]] = mapped_column(
+        Boolean, nullable=True,
+    )
+    lessons_learned: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(),
+    )
 
 
 class CommitteeReviewRequest(Base):
