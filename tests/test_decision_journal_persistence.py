@@ -17,7 +17,7 @@ from tests.conftest import postgres_test_database_url
 
 pytestmark = pytest.mark.postgres
 
-HEAD_REVISION = "0019_investment_policy_enrichment"
+HEAD_REVISION = "0019_policy_enrichment"
 SLICE_3_REVISION = "0003_decision_journal_foundation"
 SLICE_2_REVISION = "0002_investment_policy_foundation"
 SLICE_1_REVISION = "0001_household_persistence"
