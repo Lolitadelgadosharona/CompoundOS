@@ -474,6 +474,14 @@ class DecisionDraft(Base):
     revision: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("1")
     )
+    investment_idea_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            "investment_ideas.id",
+            name="fk_decision_drafts_investment_idea_id_ideas",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -565,6 +573,14 @@ class DecisionConfirmedSnapshot(Base):
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     confirmed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    investment_idea_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            "investment_ideas.id",
+            name="fk_decision_snapshots_investment_idea_id_ideas",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -2086,3 +2102,116 @@ class PolicyRule(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+# ---------------------------------------------------------------------------
+# Sprint 009 Slice C — Investment Idea + Decision Bridge
+# ---------------------------------------------------------------------------
+
+
+class InvestmentIdea(Base):
+    """Investment thought with lifecycle."""
+
+    __tablename__ = "investment_ideas"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ("
+            "'draft','under_review','approved','rejected',"
+            "'deferred','cancelled')",
+            name="ck_investment_ideas_status",
+        ),
+        CheckConstraint(
+            "confidence IS NULL OR confidence IN"
+            " ('HIGH','MEDIUM','LOW','SPECULATIVE')",
+            name="ck_investment_ideas_confidence",
+        ),
+        CheckConstraint(
+            "source IN ('owner','committee','guardian','external')",
+            name="ck_investment_ideas_source",
+        ),
+        CheckConstraint(
+            "char_length(title) <= 200",
+            name="ck_investment_ideas_title_length",
+        ),
+        Index("ix_investment_ideas_household_status", "household_id", "status"),
+        Index("ix_investment_ideas_asset", "asset_id"),
+        Index("ix_investment_ideas_policy_version", "policy_version_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    household_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "household_profiles.id",
+            name="fk_investment_ideas_household_id_household_profiles",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    asset_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            "assets.id",
+            name="fk_investment_ideas_asset_id_assets",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    thesis: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    proposed_allocation_pct: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(5, 2), nullable=True,
+    )
+    proposed_amount: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(20, 8), nullable=True,
+    )
+    proposed_amount_currency: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    expected_holding_period: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    expected_return_rationale: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    downside_thesis: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    risks: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    catalysts: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    valuation_assumptions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    confidence: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    policy_version_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            "investment_policy_versions.id",
+            name="fk_investment_ideas_policy_version_id_versions",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, default="draft", server_default="draft",
+    )
+    status_change_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class IdeaStatusHistory(Base):
+    """Append-only audit of InvestmentIdea status transitions."""
+
+    __tablename__ = "idea_status_history"
+    __table_args__ = (
+        Index("ix_idea_status_history_idea", "idea_id", "changed_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    idea_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "investment_ideas.id",
+            name="fk_idea_status_history_idea_id_ideas",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    )
+    old_status: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    new_status: Mapped[str] = mapped_column(Text, nullable=False)
+    changed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
