@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 
 pytestmark = pytest.mark.postgres
 
-HEAD_REVISION = "0021_manual_import_foundation"
+HEAD_REVISION = "0022_committee_bridge"
 
 SPRINT_009C_TABLES = frozenset({
     "investment_ideas",
