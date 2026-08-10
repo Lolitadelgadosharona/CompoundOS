@@ -1,5 +1,38 @@
 # Changelog
 
+## Sprint 010 Slice B — Guardian Intelligence — Done (2026-08-10)
+
+### Merge
+- PR #83: `feat(guardian): add guardian intelligence layer`
+- Squash merged as: `414e38fcbc38525e7044f9a6761d4333b111cd06`
+- Independent review: APPROVE WITH NON-BLOCKING FOLLOW-UP
+
+### Guardian Checks
+- Migration 0023_guardian_intelligence: extended check_type CHECK (+5 types)
+- `capital_bucket_drift` — actual vs policy target allocation
+- `single_position_concentration` — single position > max % (default 20%)
+- `sector_concentration` — sector > max % (default 40%)
+- `exploration_capital_limit` — EXPLORATION bucket safety rail (default 10%)
+- `data_quality_staleness` — stale position data (default 24h)
+
+### Policy Integration
+- Thresholds from policy_rules (rule_type → check_type mapping)
+- Fallback defaults when no policy_rule exists
+- Severity from policy_rule.severity
+
+### BLOCK_RECOMMENDATION
+- Critical Guardian events block new Committee review requests (409)
+- has_active_critical_event() check in committee_bridge router
+- Warning events do not block
+
+### AI Authority
+- Guardian reads portfolio and policy — never modifies
+- No trade/order/rebalance code paths
+- Owner remains sole decision authority
+
+### Test Coverage
+- 20 PostgreSQL integration tests: migration, loading, drift, concentration, staleness, block, policy override, severity
+
 ## Sprint 010 Slice A — Committee Integration Bridge — Done (2026-08-10)
 
 ### Merge
