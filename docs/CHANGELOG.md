@@ -1,5 +1,40 @@
 # Changelog
 
+## Sprint 010 Slice D — Auth, Audit & Escalation — Done (2026-08-10)
+
+### Merge
+- PR #85: `feat(security): add auth, audit and escalation foundation`
+- Squash merged as: `ba5054b5b3266d283df9c375c947bea0f61b7a2c`
+- Independent review: APPROVED after SECURITY HARDENING
+
+### Authentication
+- Global X-API-Key middleware applied to ALL non-health endpoints
+- SHA-256 hashed key storage — plaintext never persisted
+- Environment-based bypass: development/test only
+- Fail-closed: missing/production/unknown ENVIRONMENT requires auth
+- Key bootstrap CLI: `python -m apps.api.bootstrap_key`
+- Key lifecycle: create → use → revoke → rotate
+
+### Authorization
+- Endpoint classification: PUBLIC / READ / OWNER_MUTATION / SYSTEM
+- /health and /api/health remain PUBLIC
+- All financial endpoints require X-API-Key in production
+
+### Audit
+- Immutable audit_log with BEFORE UPDATE/DELETE trigger
+- Events: authentication.success, authentication.failure, owner.mutation, authorization.denied
+- Key create, revoke, and bootstrap all audit-logged
+
+### Escalation
+- notification_escalation_rules table (schema only)
+- No email/SMS/phone delivery
+
+### Test Coverage
+- 22 PostgreSQL integration tests (migration, auth env, key validation, lifecycle, audit, escalation)
+
+### Sprint 010 — COMPLETE
+All 4 slices merged: Committee Bridge, Guardian Intelligence, Dashboard+Learning, Auth+Audit
+
 ## Sprint 010 Slice C — Wealth Dashboard + Learning Loop — Done (2026-08-10)
 
 ### Merge

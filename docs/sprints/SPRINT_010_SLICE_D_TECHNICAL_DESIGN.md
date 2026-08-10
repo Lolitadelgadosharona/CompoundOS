@@ -1,7 +1,7 @@
 # Sprint 010 Slice D — Technical Design
 # Authentication, Authorization, Audit & Escalation
 
-> **STATUS: DESIGN PHASE — NOT AUTHORIZED FOR IMPLEMENTATION**
+> **STATUS: DONE — merged 2026-08-10 (ba5054b, PR #85)**
 >
 > Sprint 010 Slice A (Committee Bridge): DONE — 972bf24 (PR #82)
 > Sprint 010 Slice B (Guardian Intelligence): DONE — 414e38f (PR #83)

@@ -177,11 +177,12 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
     - COS-010-C-FU-L1: Avoid duplicate position loading in dashboard service
     - COS-010-C-FU-L2: Add review completion 409 boundary test
     - COS-010-C-FU-L3: Add positive high-impact review scheduling test
-    - Slice D: IN PROGRESS (PR #85)
+    - Slice D: DONE — merged as ba5054b (PR #85)
       - Migration 0025_auth_and_audit: owner_api_keys, audit_log, notification_escalation_rules
-      - Auth: X-API-Key middleware + environment-based bypass + key CRUD
-      - Audit: immutable audit_log with BEFORE UPDATE/DELETE trigger
-      - 7 PostgreSQL integration tests
+      - Auth: Global X-API-Key middleware, environment-based bypass, key CRUD
+      - Audit: Immutable audit_log, 4 event types, key lifecycle logging
+      - 22 PostgreSQL integration tests
+      - Sprint 010: COMPLETE (all 4 slices merged)
 
 ## Backlog
 
