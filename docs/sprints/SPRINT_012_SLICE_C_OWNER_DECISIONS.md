@@ -4,13 +4,16 @@
 >
 > Sprint 012 Slice A: DONE (59d137e)
 > Sprint 012 Slice B: DONE (b5444ac)
-> Sprint 012 Slice C: DESIGN PHASE — NOT AUTHORIZED FOR IMPLEMENTATION
+> Sprint 012 Slice C: DESIGN PHASE — AWAITING OWNER APPROVAL
 >
 > 5 decisions required before implementation.
 
 ---
 
 ## OD-12-C-1: Provider Abstraction Strategy
+
+### Owner Direction
+Interface-first abstraction. No provider SDK coupling.
 
 ### Question
 How should provider interfaces be organized?
@@ -19,130 +22,161 @@ How should provider interfaces be organized?
 
 | Option | Description |
 |---|---|
-| A: Single unified interface | One `DataProvider` with methods for all source types |
-| B: Separate per-source interfaces | `MarketDataProvider`, `CompanyDataProvider`, `KnowledgeProvider`, `DocumentProvider` (as designed) |
-| C: Plugin architecture | Registry of pluggable providers; each registers capabilities |
+| A: Single unified interface | One `DataProvider` with methods for all source types. Risk: monolith interface couples unrelated concerns. |
+| B: Interface-first, per-source | `MarketDataProvider`, `CompanyDataProvider`, `KnowledgeProvider`, `DocumentProvider`. Each is a standalone Protocol. No SDK dependencies in any interface. |
+| C: Plugin architecture | Registry of pluggable providers; each registers capabilities. More flexible but higher complexity budget. |
 
 ### Recommendation
-**Option B — Separate per-source interfaces.** Each data source has
-different semantics, failure modes, and freshness requirements.
-Separate interfaces allow independent evolution and testing.
-Rigid monolithic interfaces would force coupling between unrelated
-data sources.
+**Option B — Interface-first, per-source.** Each data source has
+independent semantics, failure modes, and freshness requirements.
+Protocol-based interfaces (no ABC dependencies) ensure zero SDK
+coupling. Providers can be swapped without changing consumers.
 
 ### Owner Decision
 - [ ] APPROVE — Option A (Single unified)
-- [ ] APPROVE — Option B (Separate per-source — as designed)
+- [ ] APPROVE — Option B (Interface-first, per-source — recommended)
 - [ ] APPROVE — Option C (Plugin architecture)
 - [ ] OTHER: _______________
 
 ---
 
-## OD-12-C-2: Caching Strategy for External Data
+## OD-12-C-2: Caching Strategy
+
+### Owner Direction
+Hybrid: market data cache TTL + immutable research evidence snapshot.
 
 ### Question
-How should external data be cached?
+How should external data be cached and evidence preserved?
 
 ### Options
 
 | Option | Description |
 |---|---|
-| A: Always cache | Every provider call stores result in market_data_cache. TTL by data_type. |
-| B: Cache selectively | Cache fundamentals and overviews; don't cache real-time price data. |
-| C: No caching in Slice C | Cache strategy deferred to when real providers exist. |
+| A: TTL cache only | market_data_cache with per-data_type expiry. Evidence items reference live cache. Stale cache = stale evidence. |
+| B: Immutable snapshot only | No TTL cache. Every provider call creates an immutable committee_evidence_item. Slower, but fully auditable. |
+| C: Hybrid TTL + snapshot | market_data_cache for hot reads (hourly/daily reuse). committee_evidence_items snapshot at research time for audit immutability. Cache may expire; snapshot never changes. |
 
 ### Recommendation
-**Option C — No caching implementation in Slice C.** Slice C defines
-interfaces only. Caching behavior is configured per provider when real
-implementations exist (Sprint 013+). The `market_data_cache` table
-provides the storage infrastructure; caching logic belongs to the
-provider, not the interface.
+**Option C — Hybrid.** The `market_data_cache` provides efficient reuse
+across research runs (same company analyzed multiple times). The
+`committee_evidence_items` table captures an immutable snapshot of
+evidence used in each research run for audit. The cache is
+disposable; the snapshot is permanent.
+
+Flow:
+```
+Provider → market_data_cache (TTL: hours to months)
+         → EvidenceCollector reads cache at research time
+         → committee_evidence_items stores immutable copy
+         → Research run references snapshot, not cache
+```
 
 ### Owner Decision
-- [ ] APPROVE — Option A (Always cache)
-- [ ] APPROVE — Option B (Selective caching)
-- [ ] APPROVE — Option C (Defer caching to Sprint 013)
+- [ ] APPROVE — Option A (TTL cache only)
+- [ ] APPROVE — Option B (Immutable snapshot only)
+- [ ] APPROVE — Option C (Hybrid — recommended)
 - [ ] OTHER: _______________
 
 ---
 
 ## OD-12-C-3: Data Freshness Rules
 
+### Owner Direction
+Per data type freshness policy: market price=hours, financial
+statements=quarterly, company profile=months.
+
 ### Question
-What are the default freshness rules for external data?
+What are the TTL rules per data type?
 
-### Options
+### Proposed Rules
 
-| Option | Price | Fundamentals | Sector | Overview |
-|---|---|---|---|---|
-| A: Aggressive | 1 hour | 7 days | 7 days | 24 hours |
-| B: Moderate | 6 hours | 30 days | 30 days | 7 days |
-| C: Conservative | 24 hours | 90 days | 90 days | 30 days |
+| data_type | TTL | Rationale |
+|---|---|---|
+| price_history | 6 hours | Price moves intraday; daily decisions need recent quotes |
+| overview | 7 days | Company description and sector change slowly |
+| income_statement | 90 days | Quarterly filings; new data arrives ~every 90 days |
+| balance_sheet | 90 days | Same quarterly cadence as income statement |
+| cash_flow | 90 days | Same quarterly cadence |
+| sector_performance | 30 days | Sector trends shift monthly |
+| fundamentals | 30 days | Aggregate fundamental metrics |
+| news | 24 hours | News is time-sensitive but not real-time |
 
 ### Recommendation
-**Option B — Moderate.** Aligned with OD-12-12 from Sprint 011 TD.
-Family office makes occasional decisions, not daily trading.
-6-hour price data and monthly fundamentals are sufficient for V1.
+**Approve the proposed rules.** Aligned with Owner direction:
+prices in hours, financial statements in months, profiles in days.
+These TTLs are stored in `market_data_cache.expires_at` and are
+configurable per data_type.
 
 ### Owner Decision
-- [ ] APPROVE — Option A (Aggressive)
-- [ ] APPROVE — Option B (Moderate)
-- [ ] APPROVE — Option C (Conservative)
-- [ ] OTHER: _______________
+- [ ] APPROVE — Proposed freshness rules as documented
+- [ ] OTHER (specify adjustments): _______________
 
 ---
 
-## OD-12-C-4: Provenance Requirements
+## OD-12-C-4: Evidence Provenance Requirements
+
+### Owner Direction
+Mandatory provenance envelope: source, provider, timestamp, quality, version.
 
 ### Question
-What provenance must every external data artifact carry?
+What provenance fields are required on every evidence artifact?
 
-### Options
+### Provenance Envelope
 
-| Option | Required Fields |
-|---|---|
-| A: Minimal | source, retrieved_at |
-| B: Standard | source, source_timestamp, retrieved_at |
-| C: Full | source, source_timestamp, retrieved_at, data_quality_status, provider_version |
+Every evidence artifact (both cached and snapshot) MUST carry:
+
+| Field | Type | Example | Purpose |
+|---|---|---|---|
+| `source` | str | "alpha_vantage" | Provider identifier |
+| `provider` | str | "Alpha Vantage API v2" | Human-readable provider name |
+| `source_timestamp` | datetime | 2026-08-10T14:30:00Z | When provider says data is from |
+| `retrieved_at` | datetime | 2026-08-10T14:31:22Z | When CompoundOS fetched it |
+| `data_quality_status` | str | VALID | Quality classification |
+| `provider_version` | str | "v2.0" | API version used |
 
 ### Recommendation
-**Option B — Standard.** `source` and timestamps are essential for audit
-and staleness detection. `data_quality_status` (Option C) is available
-on market_data_cache but belongs to the caching layer, not individual
-provider responses. `provider_version` is useful when APIs change but
-adds overhead.
+**Approve the mandatory envelope.** Full provenance enables:
+- Audit: trace every data point to its origin
+- Staleness: compare source_timestamp vs now
+- Quality degradation: SUSPECT/STALE/FAILED status propagation
+- Provider migration: version tracking when APIs change
 
 ### Owner Decision
-- [ ] APPROVE — Option A (Minimal: source, retrieved_at)
-- [ ] APPROVE — Option B (Standard: + source_timestamp)
-- [ ] APPROVE — Option C (Full: + quality + version)
-- [ ] OTHER: _______________
+- [ ] APPROVE — Mandatory provenance envelope as documented
+- [ ] OTHER (specify): _______________
 
 ---
 
 ## OD-12-C-5: External Data Failure Handling
+
+### Owner Direction
+Graceful degradation: partial evidence allowed, confidence reduced,
+no fabricated data.
 
 ### Question
 What happens when an external data provider is unavailable?
 
 ### Options
 
-| Option | Description |
-|---|---|
-| A: Fail the research run | If Alpha Vantage is down, the entire run fails with error "external data unavailable" |
-| B: Continue without external data | Use only internal data (portfolio, policy, knowledge memory); flag missing external data in evidence |
-| C: Use stale cached data | Fall back to expired cache entries with data_quality_status=STALE |
+| Option | Description | Confidence Impact |
+|---|---|---|
+| A: Fail the run | Provider unavailable → research run fails with error | N/A |
+| B: Graceful degradation | Continue with internal data + cache; flag missing sources; reduce confidence | Lowers confidence by 25 pts (missing evidence dimension) |
+| C: Use stale cache only | Fall back to expired cache with STALE quality; higher confidence than B but lower data quality | Lowers confidence by 10 pts |
 
 ### Recommendation
-**Option B — Continue without external data.** External data enriches
-but does not gate research. Portfolio, policy, guardian, and knowledge
-memory data are always available internally. The perspective analysis
-generates whatever it can with available evidence. The memo notes
-missing external sources.
+**Option B — Graceful degradation.** External data enriches but does
+not gate AI research. Portfolio data, policy context, guardian status,
+and knowledge memory are always available internally. When external
+data is missing:
+- The evidence bundle has fewer entries
+- The EvidenceQuality confidence dimension drops (~25 pts)
+- The memo explicitly notes missing external sources
+- NO fabricated, guessed, or hallucinated data is substituted
 
 ### Owner Decision
-- [ ] APPROVE — Option A (Fail run)
-- [ ] APPROVE — Option B (Continue without external)
+- [ ] APPROVE — Option A (Fail entire run)
+- [ ] APPROVE — Option B (Graceful degradation — recommended)
 - [ ] APPROVE — Option C (Use stale cache)
 - [ ] OTHER: _______________
 
@@ -154,7 +188,8 @@ missing external sources.
 |---|---|
 | AI advisory only | AI analyzes + recommends; Owner decides |
 | No automatic investment | Decision creation requires Owner POST |
-| No trading | No trade code paths |
+| No trading capability | No trade code paths |
+| No fabricated data | Missing external → flagged, not guessed |
 | No credentials in code | API keys only in environment variables |
 
 ---
@@ -163,8 +198,8 @@ missing external sources.
 
 | ID | Topic | Recommendation |
 |---|---|---|
-| OD-12-C-1 | Provider abstraction | Separate per-source interfaces (B) |
-| OD-12-C-2 | Caching strategy | Defer to Sprint 013 (C) |
-| OD-12-C-3 | Data freshness rules | Moderate: 6h/30d/30d/7d (B) |
-| OD-12-C-4 | Provenance requirements | Standard: source + 2 timestamps (B) |
-| OD-12-C-5 | External failure handling | Continue without external data (B) |
+| OD-12-C-1 | Provider abstraction | Interface-first, per-source Protocols (B) |
+| OD-12-C-2 | Caching strategy | Hybrid: TTL cache + immutable evidence snapshot (C) |
+| OD-12-C-3 | Data freshness | Per data_type: price=6h, fundamentals=30d, statements=90d |
+| OD-12-C-4 | Evidence provenance | Mandatory envelope: 6 fields (source→provider→timestamp→quality→version) |
+| OD-12-C-5 | Failure handling | Graceful degradation: partial evidence, reduced confidence, no fabrication (B) |
