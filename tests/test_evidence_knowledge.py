@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 
 pytestmark = pytest.mark.postgres
 
-HEAD_REVISION = "0027_evidence_knowledge"
+HEAD_REVISION = "0028_evidence_hardening"
 
 
 def _now():
@@ -217,3 +217,73 @@ class TestAIAuthority:
         """Verify no trade/order/broker code in evidence/memory."""
         # Slice B is data storage only — no AI execution paths
         assert True
+
+
+# =====================================================================
+# Hardening — data quality + memory type constraints
+# =====================================================================
+
+
+class TestHardening:
+    def test_data_quality_status_check(self, db_session):
+        """data_quality_status constrained to VALID/STALE/FAILED/SUSPECT."""
+        with pytest.raises((IntegrityError, OperationalError)):
+            db_session.execute(
+                text(
+                    "INSERT INTO market_data_cache"
+                    " (id, symbol, data_type, data, fetched_at, expires_at,"
+                    " data_quality_status)"
+                    " VALUES (:id, 'IBM', 'overview', '{}', :now, :exp,"
+                    " 'INVALID')"
+                ),
+                {"id": uuid4(), "now": _now(),
+                 "exp": _now() + timedelta(hours=24)},
+            )
+            db_session.commit()
+        db_session.rollback()
+
+    def test_valid_quality_status(self, db_session):
+        """All valid statuses accepted."""
+        for status in ["VALID", "STALE", "FAILED", "SUSPECT"]:
+            db_session.execute(
+                text(
+                    "INSERT INTO market_data_cache"
+                    " (id, symbol, data_type, data, fetched_at, expires_at,"
+                    " data_quality_status)"
+                    " VALUES (:id, :sym, 'overview', '{}', :now, :exp,"
+                    " :status)"
+                ),
+                {"id": uuid4(), "sym": f"TICK{status[:2]}",
+                 "now": _now(), "exp": _now() + timedelta(hours=24),
+                 "status": status},
+            )
+            db_session.commit()
+
+    def test_memory_type_check(self, db_session):
+        """memory_type constrained to valid classifications."""
+        with pytest.raises((IntegrityError, OperationalError)):
+            db_session.execute(
+                text(
+                    "INSERT INTO investment_knowledge_memory"
+                    " (id, entity_type, entity_key, version, memory_type)"
+                    " VALUES (:id, 'company', 'BAD', 1, 'INVALID')"
+                ),
+                {"id": uuid4()},
+            )
+            db_session.commit()
+        db_session.rollback()
+
+    def test_valid_memory_types(self, db_session):
+        """All valid memory types accepted."""
+        for mtype in ["company_profile", "historical_thesis", "risk_note",
+                       "decision_lesson", "sector_analysis", "macro_note"]:
+            db_session.execute(
+                text(
+                    "INSERT INTO investment_knowledge_memory"
+                    " (id, entity_type, entity_key, version, memory_type)"
+                    " VALUES (:id, 'company', :key, 1, :mtype)"
+                ),
+                {"id": uuid4(), "key": f"KEY{mtype[:3]}",
+                 "mtype": mtype},
+            )
+            db_session.commit()

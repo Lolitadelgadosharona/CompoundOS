@@ -9,7 +9,7 @@ from sqlalchemy import text
 
 pytestmark = pytest.mark.postgres
 
-HEAD_REVISION = "0027_evidence_knowledge"
+HEAD_REVISION = "0028_evidence_hardening"
 _PORTFOLIO_CACHE: dict = {}
 
 
