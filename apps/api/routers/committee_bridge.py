@@ -49,6 +49,15 @@ def request_committee_review(
     if idea is None:
         raise HTTPException(404, f"Idea {idea_id} not found")
 
+    # BLOCK_RECOMMENDATION: reject if household has active critical Guardian events
+    from apps.api.services.guardian_intelligence import has_active_critical_event
+    if has_active_critical_event(session, idea.household_id):
+        raise HTTPException(
+            409,
+            "Committee review blocked: active critical Guardian risk detected. "
+            "Acknowledge the critical event before requesting new analysis.",
+        )
+
     # Only allow one active review per idea
     existing = list_review_requests_for_idea(session, idea_uuid)
     active = [r for r in existing if r.status in ("pending", "in_progress")]
