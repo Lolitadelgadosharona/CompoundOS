@@ -157,7 +157,7 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
     - Design document: docs/sprints/SPRINT_010_TECHNICAL_DESIGN.md
     - Owner decisions: docs/sprints/SPRINT_010_OWNER_DECISIONS.md (OD-10-1 through OD-10-5 — all resolved)
     - 4 slices: Committee Bridge, Guardian Intelligence, Dashboard+Learning, Security+Notifications
-    - Slice A: IN PROGRESS (PR #82)
+    - Slice A: DONE — merged as 972bf24 (PR #82)
       - Migration 0022_committee_bridge: committee_review_requests + evidence types
       - Bridge: investment_ideas → committee_sessions via Owner-controlled workflow
       - 18 PostgreSQL integration tests

@@ -1,5 +1,27 @@
 # Changelog
 
+## Sprint 010 Slice A — Committee Integration Bridge — Done (2026-08-10)
+
+### Merge
+- PR #82: `feat(committee): add committee integration bridge`
+- Squash merged as: `972bf24be3940096673b3b5ba9b5ccdfedcc7677`
+- Independent review: APPROVE WITH NON-BLOCKING FOLLOW-UP (0 BLOCKER, 0 HIGH, 4 LOW)
+
+### Bridge
+- Migration 0022_committee_bridge: 1 new table + 1 CHECK extension
+- `committee_review_requests`: bridges investment_ideas → committee_sessions
+- Extended `committee_evidence_items.source_type` CHECK (+3 types)
+- Owner-controlled review workflow: POST /api/ideas/{id}/request-review
+
+### AI Authority
+- AI CANNOT request review (CHECK constraint blocks 'ai_agent')
+- Only owner/committee/guardian sources allowed
+- RESTRICT FK prevents idea deletion with active reviews
+- One active review per idea enforced at API layer
+
+### Test Coverage
+- 18 PostgreSQL integration tests: creation, lifecycle, authority, querying, schema
+
 ## Sprint 009 Slice D — Manual Import + Data Source Foundation — Done (2026-08-10)
 
 ### Merge
