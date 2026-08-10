@@ -129,7 +129,7 @@ class TestOwnerDecision:
         )
         session_id = uuid4()
         result = OwnerDecisionService.approve(
-            db_session, idea_id, memo_id, session_id, 75,
+            db_session, idea_id, memo_id, session_id, 75, hh,
         )
         assert result["status"] == "approved"
         assert "decision_id" in result
@@ -141,7 +141,7 @@ class TestOwnerDecision:
         )
         session_id = uuid4()
         result = OwnerDecisionService.reject(
-            db_session, idea_id, memo_id, session_id, 75,
+            db_session, idea_id, memo_id, session_id, 75, hh,
         )
         assert result["status"] == "rejected"
 
@@ -152,7 +152,7 @@ class TestOwnerDecision:
         )
         session_id = uuid4()
         result = OwnerDecisionService.approve(
-            db_session, idea_id, memo_id, session_id, 75,
+            db_session, idea_id, memo_id, session_id, 75, hh,
         )
         row = db_session.execute(text(
             "SELECT status FROM decisions WHERE id = :id"
@@ -174,7 +174,7 @@ class TestLearningLoop:
         )
         session_id = uuid4()
         OwnerDecisionService.approve(
-            db_session, idea_id, memo_id, session_id, 75,
+            db_session, idea_id, memo_id, session_id, 75, hh,
         )
         reviews = LearningLoopService.schedule_reviews(
             db_session, uuid4(),
@@ -219,7 +219,7 @@ class TestProvenance:
         # Create decision
         dec = OwnerDecisionService.approve(
             db_session, idea_id, memo_id,
-            uuid4(result["session_id"]), 75,
+            uuid4(result["session_id"]), 75, hh,
         )
         chain = ProvenanceService.trace(
             db_session, uuid4(dec["decision_id"]),

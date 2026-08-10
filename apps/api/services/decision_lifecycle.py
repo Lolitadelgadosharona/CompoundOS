@@ -88,8 +88,8 @@ class CommitteeIntegrationService:
                         " as_of, freshness, confidence, citation_ref,"
                         " created_at)"
                         " VALUES (:id, :sid, 'research_memo',"
-                        " 'AI Research Memo', :ch, '{}'::jsonb,"
-                        " :content, NOW(), 100, 50, 'cmte_v1',"
+                        " 'AI Research Memo', :ch, 'ai_generated',"
+                        " :content, NOW(), '0.95', 'medium', 'cmte_v1',"
                         " NOW())" 
                     ),
                     {
@@ -124,16 +124,19 @@ class OwnerDecisionService:
     @staticmethod
     def approve(session: Session, idea_id: UUID, memo_id: UUID,
                 session_id: UUID, confidence: int,
+                household_id: UUID | None = None,
                 rationale: str = "") -> dict:
         now = datetime.now(timezone.utc)
         decision_id = uuid4()
-        # Lookup household_id from committee session
-        hh_row = session.execute(
-            text("SELECT household_id FROM committee_sessions"
-                 " WHERE id = :sid"),
-            {"sid": session_id},
-        ).fetchone()
-        hh_id = hh_row[0] if hh_row else uuid4()
+        # Lookup household_id from committee session if not provided
+        hh_id = household_id
+        if hh_id is None:
+            hh_row = session.execute(
+                text("SELECT household_id FROM committee_sessions"
+                     " WHERE id = :sid"),
+                {"sid": session_id},
+            ).fetchone()
+            hh_id = hh_row[0] if hh_row else uuid4()
         # Create decisions FK row
         session.execute(
             text("INSERT INTO decisions (id, household_id, status,"
@@ -151,16 +154,19 @@ class OwnerDecisionService:
     @staticmethod
     def reject(session: Session, idea_id: UUID, memo_id: UUID,
                session_id: UUID, confidence: int,
+               household_id: UUID | None = None,
                rationale: str = "") -> dict:
         now = datetime.now(timezone.utc)
         decision_id = uuid4()
-        # Lookup household_id from committee session
-        hh_row = session.execute(
-            text("SELECT household_id FROM committee_sessions"
-                 " WHERE id = :sid"),
-            {"sid": session_id},
-        ).fetchone()
-        hh_id = hh_row[0] if hh_row else uuid4()
+        # Lookup household_id from committee session if not provided
+        hh_id = household_id
+        if hh_id is None:
+            hh_row = session.execute(
+                text("SELECT household_id FROM committee_sessions"
+                     " WHERE id = :sid"),
+                {"sid": session_id},
+            ).fetchone()
+            hh_id = hh_row[0] if hh_row else uuid4()
         # Create decisions FK row
         session.execute(
             text("INSERT INTO decisions (id, household_id, status,"
@@ -220,13 +226,13 @@ class LearningLoopService:
             session.execute(
                 text(
                     "INSERT INTO decision_reviews"
-                    " (id, decision_id, review_type, scheduled_date,"
-                    " status, created_at)"
-                    " VALUES (:id, :did, :rt, :sd, 'scheduled', NOW())"
+                    " (id, decision_id, review_type, scheduled_at,"
+                    " created_at)"
+                    " VALUES (:id, :did, :rt, :sd, NOW())" 
                 ),
                 {
                     "id": rid, "did": decision_id,
-                    "rt": f"{days}d_review",
+                    "rt": f"{days}_day",
                     "sd": now + timedelta(days=days),
                 },
             )
