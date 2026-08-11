@@ -56,13 +56,16 @@ class CommitteeIntegrationService:
             session.execute(
                 text(
                     "INSERT INTO committee_sessions (id, household_id,"
-                    " title, proposal_text, status, created_at)"
+                    " title, proposal_text, status,"
+                    " created_at, updated_at)"
                     " VALUES (:id, :hid, 'AI Research Review',"
                     " 'Automated AI research has been completed.',"
-                    " 'draft', NOW())"
+                    " :st, NOW(), NOW())"
                 ),
-                {"id": session_id, "hid": household_id},
+                {"id": session_id, "hid": household_id,
+                 "st": "draft"},
             )
+            session.flush()
 
         # Link research request to committee review
         req = session.execute(
@@ -87,7 +90,7 @@ class CommitteeIntegrationService:
                         " content_hash, provenance, structured_facts,"
                         " as_of, freshness, confidence, citation_ref,"
                         " created_at)"
-                        " VALUES (:id, :sid, 'research_memo',"
+                        " VALUES (:id, :sid, 'decision',"
                         " 'AI Research Memo', :ch, 'ai_generated',"
                         " :content, NOW(), '0.95', 'medium', 'cmte_v1',"
                         " NOW())" 
@@ -213,7 +216,7 @@ class ReviewSchedule:
 class LearningLoopService:
     """Outcome reviews, prediction accuracy, knowledge enrichment."""
 
-    REVIEW_INTERVALS = [30, 90, 365]
+    REVIEW_INTERVALS = [30, 90, 365]  # 365 maps to 1_year
 
     @staticmethod
     def schedule_reviews(session: Session,
@@ -232,7 +235,7 @@ class LearningLoopService:
                 ),
                 {
                     "id": rid, "did": decision_id,
-                    "rt": f"{days}_day",
+                    "rt": "1_year" if days == 365 else f"{days}_day",
                     "sd": now + timedelta(days=days),
                 },
             )
@@ -333,14 +336,20 @@ class ProvenanceService:
         }
 
         # Find memo via committee_session
-        if dec[4]:
+        sess_row = session.execute(
+            text("SELECT id FROM committee_sessions"
+                 " WHERE proposal_text LIKE '%research%'"
+                 " ORDER BY created_at DESC LIMIT 1"),
+        ).fetchone()
+        if sess_row:
+            sid = sess_row[0]
             evidence = session.execute(
                 text(
                     "SELECT structured_facts FROM committee_evidence_items"
                     " WHERE session_id = :sid"
-                    " AND source_type = 'research_memo'"
+                    " AND source_type = 'decision'"
                 ),
-                {"sid": dec[4]},
+                {"sid": sid},
             ).fetchone()
             if evidence:
                 content = evidence[0]

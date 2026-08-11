@@ -2,7 +2,7 @@
 
 import json
 from datetime import datetime, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
@@ -173,11 +173,11 @@ class TestLearningLoop:
             db_session, hh,
         )
         session_id = uuid4()
-        OwnerDecisionService.approve(
+        dec = OwnerDecisionService.approve(
             db_session, idea_id, memo_id, session_id, 75, hh,
         )
         reviews = LearningLoopService.schedule_reviews(
-            db_session, uuid4(),
+            db_session, UUID(dec["decision_id"]),
         )
         assert len(reviews) == 3
 
@@ -219,10 +219,10 @@ class TestProvenance:
         # Create decision
         dec = OwnerDecisionService.approve(
             db_session, idea_id, memo_id,
-            uuid4(result["session_id"]), 75, hh,
+            UUID(result["session_id"]), 75, hh,
         )
         chain = ProvenanceService.trace(
-            db_session, uuid4(dec["decision_id"]),
+            db_session, UUID(dec["decision_id"]),
         )
         assert "decision" in chain
 

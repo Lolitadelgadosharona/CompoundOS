@@ -50,13 +50,13 @@ def upgrade():
         "ALTER TABLE committee_evidence_items DROP CONSTRAINT IF EXISTS"
         " ck_evidence_items_source_type"
     )
-    op.create_check_constraint(
-        "ck_evidence_items_source_type",
-        "committee_evidence_items",
-        "source_type IN ('portfolio_snapshot', 'policy_version',"
+    op.execute(
+        "ALTER TABLE committee_evidence_items ADD CONSTRAINT"
+        " ck_evidence_items_source_type CHECK (source_type IN"
+        " ('portfolio_snapshot', 'policy_version'," 
         " 'guardian_event', 'decision', 'owner_claim', 'external',"
         " 'portfolio_position', 'policy_bucket', 'investment_idea',"
-        " 'research_memo')",
+        " 'research_memo'))"
     )
 
     # 4. Drop and recreate ck_evidence_items_provenance: add 'ai_generated'
@@ -77,12 +77,12 @@ def downgrade():
         "ALTER TABLE committee_evidence_items DROP CONSTRAINT IF EXISTS"
         " ck_evidence_items_source_type"
     )
-    op.create_check_constraint(
-        "ck_evidence_items_source_type",
-        "committee_evidence_items",
-        "source_type IN ('portfolio_snapshot', 'policy_version',"
+    op.execute(
+        "ALTER TABLE committee_evidence_items ADD CONSTRAINT"
+        " ck_evidence_items_source_type CHECK (source_type IN"
+        " ('portfolio_snapshot', 'policy_version'," 
         " 'guardian_event', 'decision', 'owner_claim', 'external',"
-        " 'portfolio_position', 'policy_bucket', 'investment_idea')",
+        " 'portfolio_position', 'policy_bucket', 'investment_idea'))"
     )
 
     # Restore original constraints (remove added values)
