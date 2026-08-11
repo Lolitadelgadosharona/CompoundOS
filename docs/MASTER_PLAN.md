@@ -230,7 +230,11 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   - HTMX + Jinja2 + Pico.css dashboard
   - 5 pages, 5 templates, 1 router
   - 9 tests
-- Slice C: First Real Investment Workflow
+- Slice C: IN PROGRESS (First Real Investment Workflow)
+  - DashboardResearchService: create request, status, list recent
+  - Research workflow API endpoint (POST /api/research/start)
+  - mutation_gate EXPECTED_HEAD updated to 0032
+  - 9 tests
 - Slice D: Portfolio Intelligence (holdings, allocation, correlation)
 
 ### Sprint 013: COMPLETE — ALL 4 SLICES DONE

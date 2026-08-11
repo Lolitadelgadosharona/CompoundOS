@@ -2,7 +2,9 @@
 {% block content %}
 <h1>Research</h1>
 
-<form hx-post="/api/research/start" hx-target="#research-status" hx-swap="innerHTML">
+<form hx-post="/api/research/start" hx-target="#research-status" hx-swap="innerHTML"
+      hx-vals='js:{symbol: document.querySelector("input[name=symbol]").value}'
+      hx-headers='{"Content-Type": "application/json"}'>
     <fieldset role="group">
         <input type="text" name="symbol" placeholder="Symbol (e.g., AAPL)" required>
         <button type="submit">Start Research</button>
