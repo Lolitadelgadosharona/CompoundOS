@@ -275,8 +275,9 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Slice D: Knowledge Compounding (cross-refs, contradiction detection)
 - 14 tests
 
-### Sprint 022: DESIGN PHASE — NOT AUTHORIZED FOR IMPLEMENTATION
+### Sprint 022: DESIGN COMPLETE — AWAITING OWNER DECISIONS
 - Design Direction: docs/sprints/SPRINT_022_DESIGN_DIRECTION.md
+- Owner Decisions: docs/sprints/SPRINT_022_OWNER_DECISIONS.md (8 pending)
 
 ### Sprint 013: COMPLETE — ALL 4 SLICES DONE
 - Slice A: DONE — merged as 82bb43e (PR #94)
