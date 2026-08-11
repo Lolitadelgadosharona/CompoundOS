@@ -1,139 +1,127 @@
 # Sprint 014 — Owner Decisions
 
-> **STATUS: PENDING OWNER DECISIONS**
+> **STATUS: ALL 8 OWNER DECISIONS RESOLVED — READY FOR IMPLEMENTATION**
 >
 > Sprint 013: COMPLETE
-> Sprint 014: DESIGN ONLY — NOT AUTHORIZED FOR IMPLEMENTATION
+> Sprint 014: OWNER DECISIONS RESOLVED
 >
-> 8 decisions required before any implementation.
+> All decisions preserve: AI advisory only, no trading, no broker,
+> no autonomous investment execution.
 
 ---
 
 ## OD-14-1 — Deployment Target
 
-**Question:** Where should CompoundOS V1 be deployed?
+**Decision:** **Hetzner VPS + Docker + PostgreSQL + Caddy**
 
-**Options:**
-- A) Hetzner CX22 ($5/mo, 2 vCPU, 4GB RAM, 40GB SSD) — single VM, self-contained
-- B) Fly.io free tier — limited resources, simpler deploy, US-only free tier
-- C) Railway / Render free tier — managed, simpler but less control
-- D) Local-only for now, deploy later
-
-**Recommendation:** **A — Hetzner CX22.** Single VM is sufficient for a solo-Owner system. Gives us full control, fixed cost, and room to grow to Postgres + Docker.
-
-**Budget:** ~$5/mo, $60/year
+- Hetzner CX22 ($5/mo)
+- Docker Compose for API + DB
+- Caddy reverse proxy with auto-LetsEncrypt
+- Future migration path to any VPS provider
+- No cloud vendor lock-in
 
 ---
 
 ## OD-14-2 — Dashboard Technology
 
-**Question:** What frontend stack should the Owner Dashboard use?
+**Decision:** **HTMX + Jinja2 + Pico.css**
 
-**Options:**
-- A) HTMX + Jinja2 + Pico.css (~100 lines per page, no build step)
-- B) React + Vite (rich UI, heavier, more complex to maintain solo)
-- C) Gradio (Python-native, fast to build, limited customization)
-- D) No dashboard — continue using CLI + test output only
-
-**Recommendation:** **A — HTMX + Jinja2 + Pico.css.** Minimal dependencies, no JavaScript build step, works with existing FastAPI backend. Suitable for a solo-Owner who wants functional, not flashy.
+- Zero JavaScript build step
+- Jinja2 templates rendered by FastAPI
+- Pico.css for minimal, dark-theme-compatible styling
+- 5 pages: Home, Research, Memo, Decisions, Learning
+- Owner interaction: symbol input, approve/reject buttons
 
 ---
 
-## OD-14-3 — Real Market Data in V1
+## OD-14-3 — Market Data
 
-**Question:** Should the first real investment workflow use Alpha Vantage or continue with mock data?
+**Decision:** **Alpha Vantage V1 — provider abstraction preserved**
 
-**Options:**
-- A) Alpha Vantage free tier (5 calls/min, 25/day) — real data, limited throughput
-- B) Continue mock data — validate workflow without API dependency
-- C) Use a commercial provider (Tiingo, Polygon.io, etc.)
-
-**Recommendation:** **A — Alpha Vantage free tier.** Sprint 013 built the infrastructure. V1 should exercise it. 25 calls/day is sufficient for 2-4 research runs/day. We can upgrade later.
-
-**API Key:** The Owner must provide their own free Alpha Vantage key. This key is never stored in the repo.
+- Alpha Vantage free tier (5 calls/min, 25/day)
+- Owner provides their own API key via env var
+- Existing provider abstraction (Sprint 012-C) unchanged
+- Future providers pluggable without code changes
 
 ---
 
-## OD-14-4 — Portfolio Data Source
+## OD-14-4 — Portfolio Source
 
-**Question:** How does the Owner's portfolio enter CompoundOS?
+**Decision:** **CSV import only — no broker integration**
 
-**Options:**
-- A) Manual CSV import (Owner exports from their broker, imports via dashboard)
-- B) Direct broker API (requires credentials — violates current security policy)
-- C) Manual entry via dashboard form (holdings: symbol, shares, cost basis)
-- D) Skip portfolio context entirely for V1
-
-**Recommendation:** **A — Manual CSV import.** Avoids broker credentials. Owner controls what data enters the system. Portfolio context is critical for investment decisions. A simple CSV (symbol, shares, cost_basis) is all we need.
+- Owner exports CSV from their broker
+- Dashboard upload endpoint (POST /api/portfolio/import)
+- Columns: symbol, shares, cost_basis
+- No broker credentials, no API connections, no trading
 
 ---
 
-## OD-14-5 — Dashboard Authentication
+## OD-14-5 — Authentication
 
-**Question:** How does the Owner authenticate to the dashboard?
+**Decision:** **Reuse existing X-API-Key architecture**
 
-**Options:**
-- A) Simple API key in URL/handler (Bearer token)
-- B) Password + session (cookie-based, FastAPI built-in)
-- C) OAuth (Google/GitHub) — overkill for solo-Owner
-- D) No authentication (local-only, trusted network)
-
-**Recommendation:** **B — Password + session.** FastAPI has built-in support. Solo-Owner creates one account. Session persists. Simple and sufficient.
-
-**Credential:** One hardcoded admin user in `.env` — `ADMIN_USERNAME` / `ADMIN_PASSWORD`.
+- Sprint 010-D FastAPI auth middleware
+- Environment-based bypass for development/test
+- Production must require valid API key
+- No password management, no OAuth, no session complexity
 
 ---
 
 ## OD-14-6 — Backup Strategy
 
-**Question:** How often and where should backups be stored?
+**Decision:** **Daily PostgreSQL backup + restore verification**
 
-**Options:**
-- A) Daily pg_dump to Backblaze B2 (~$0.005/GB/mo) — off-site, $1-2/mo
-- B) Daily pg_dump to local VM only — no off-site, risk of VM failure
-- C) Weekly manual backup — Owner exports manually
-- D) No backup — accept risk for V1
-
-**Recommendation:** **A — Daily pg_dump to Backblaze B2.** Off-site is essential for financial data. Tiny cost. Simple to automate (cron + rclone).
+- pg_dump scheduled via cron
+- Off-site storage (Backblaze B2 or S3-compatible)
+- Restore verification test monthly
+- Migration files are the schema source of truth
 
 ---
 
 ## OD-14-7 — Monitoring
 
-**Question:** What monitoring is required for V1?
+**Decision:** **Health checks + logs + basic alerts**
 
-**Options:**
-- A) UptimeRobot (free) + Sentry (free tier) — health check + error tracking
-- B) Prometheus + Grafana (self-hosted on VM) — more data, more maintenance
-- C) None — check manually if something seems wrong
-
-**Recommendation:** **A — UptimeRobot + Sentry.** Free, zero-config, covers the basics. Owner gets notified if the API is down or if errors occur.
+- Health endpoint: GET /health
+- UptimeRobot monitoring (free tier)
+- Structured logging (JSON to stdout)
+- Error alerts on research pipeline failure
+- No Prometheus/Grafana complexity for V1
 
 ---
 
-## OD-14-8 — First Real Investment Symbol
+## OD-14-8 — First Research Symbol
 
-**Question:** What symbol should be used for the first real end-to-end research run?
+**Decision:** **Owner-selectable — do not hardcode**
 
-**Options:**
-- A) AAPL — widely analyzed, lots of public information, good baseline
-- B) An ETF (VOO, SPY) — simpler analysis, index-level reasoning
-- C) A stock the Owner already holds — immediate portfolio context
-- D) Don't specify — pick any symbol at runtime
-
-**Recommendation:** **D — Don't specify now.** The system should work with any symbol. The Owner will pick one when the dashboard is ready.
+- System accepts any valid symbol
+- Owner picks first symbol when dashboard is ready
+- No default, no hardcoded ticker
+- Pipeline validates symbol before execution
 
 ---
 
 ## Summary
 
-| ID | Topic | Recommendation | Impact |
+| ID | Topic | Decision | Impact |
 |---|---|---|---|
-| OD-14-1 | Deployment | Hetzner CX22 | $5/mo |
-| OD-14-2 | Dashboard | HTMX + Jinja2 + Pico.css | ~500 lines HTML |
+| OD-14-1 | Deployment | Hetzner VPS + Docker + Caddy | $5/mo |
+| OD-14-2 | Dashboard | HTMX + Jinja2 + Pico.css | ~500 lines |
 | OD-14-3 | Market data | Alpha Vantage (Owner key) | Free tier |
-| OD-14-4 | Portfolio source | CSV import | No broker creds |
-| OD-14-5 | Authentication | Password + session | .env config |
-| OD-14-6 | Backup | Daily to B2 | <$2/mo |
-| OD-14-7 | Monitoring | UptimeRobot + Sentry | Free |
-| OD-14-8 | First symbol | Owner's choice | Any symbol |
+| OD-14-4 | Portfolio | CSV import | No broker |
+| OD-14-5 | Auth | X-API-Key (existing) | No new infra |
+| OD-14-6 | Backup | Daily pg_dump + verify | <$2/mo |
+| OD-14-7 | Monitoring | Health + UptimeRobot | Free |
+| OD-14-8 | Symbol | Owner's choice | Any symbol |
+
+---
+
+## Architecture Preservation
+
+All Sprint 013 governance boundaries remain:
+- AI advisory only
+- Owner final authority
+- No trading
+- No broker integration
+- PermissionGate authoritative
+- All LLM calls through GovernedLLMExecutor

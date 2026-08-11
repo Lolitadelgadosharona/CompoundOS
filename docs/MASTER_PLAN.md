@@ -220,9 +220,9 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 
 ## Backlog
 
-### Sprint 014: DESIGN PHASE — NOT AUTHORIZED FOR IMPLEMENTATION
+### Sprint 014: OWNER DECISIONS RESOLVED — READY FOR IMPLEMENTATION
 - Design Direction: docs/sprints/SPRINT_014_DESIGN_DIRECTION.md
-- Owner Decisions: docs/sprints/SPRINT_014_OWNER_DECISIONS.md (8 pending)
+- Owner Decisions: docs/sprints/SPRINT_014_OWNER_DECISIONS.md (all 8 RESOLVED)
 - Slice A: Production Foundation (deployment, DB, secrets, backup)
 - Slice B: Owner Dashboard (HTMX + FastAPI + Pico.css)
 - Slice C: First Real Investment Workflow
