@@ -20,6 +20,7 @@ from apps.api.routers.policies import router as policies_router
 from apps.api.routers.portfolios import router as portfolios_router
 from apps.api.routers.research import router as research_router
 from apps.api.routers.research_workflow import router as research_workflow_router
+from apps.api.routers.dashboard_data import router as dashboard_data_router
 
 app = FastAPI(title="CompoundOS API", version="0.1.0")
 
@@ -164,4 +165,5 @@ app.include_router(committee_bridge_router)
 app.include_router(dashboard_router)
 app.include_router(research_router)
 app.include_router(research_workflow_router)
+app.include_router(dashboard_data_router)
 app.include_router(auth_router)

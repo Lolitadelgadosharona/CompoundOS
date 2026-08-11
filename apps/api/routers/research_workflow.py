@@ -1,10 +1,14 @@
-"""Research workflow API endpoints — Sprint 014 Slice C."""
+"""Research workflow API — Sprint 015 (async + progress)."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from uuid import uuid4
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
 
-from apps.api.services.dashboard_research import DashboardResearchService
+from apps.api.services.pipeline_async import (
+    PipelineProgressTracker,
+    execute_pipeline,
+)
 
 router = APIRouter(prefix="/api/research", tags=["research-workflow"])
 
@@ -14,39 +18,63 @@ class StartResearchRequest(BaseModel):
 
 
 @router.post("/start")
-def start_research(
-    body: StartResearchRequest,
-    session: Session = Depends(lambda: None),
-):
-    """Create a research request for the given symbol.
-
-    The pipeline executes asynchronously. Poll GET /api/research/{run_id}/status
-    for completion. When complete, the memo is available at /memo/{memo_id}.
-    """
+def start_research(body: StartResearchRequest,
+                   background_tasks: BackgroundTasks):
+    """Create research request and start async pipeline execution."""
     if not body.symbol or not body.symbol.strip():
         raise HTTPException(status_code=400, detail="Symbol is required")
+
     symbol = body.symbol.strip().upper()
+    run_id = uuid4()
 
-    # In a full implementation, session comes from FastAPI dependency injection.
-    # For now, return a 501 if no DB session is available.
-    if session is None:
-        raise HTTPException(
-            status_code=501,
-            detail="Research pipeline requires database session. "
-                   "Configure DATABASE_URL and restart.",
-        )
+    # Create progress tracker entry
+    progress = PipelineProgressTracker.create(run_id)
 
-    result = DashboardResearchService.create_request(
-        session, symbol, None,
-    )
-    return result
+    # Start pipeline in background
+    background_tasks.add_task(execute_pipeline, run_id, symbol)
+
+    return {
+        "run_id": str(run_id),
+        "symbol": symbol,
+        "status": progress.state.value,
+        "message": f"Research started for {symbol}",
+    }
 
 
 @router.get("/{run_id}/status")
 def get_status(run_id: str):
-    return {"run_id": run_id, "status": "pending"}
+    """Return current pipeline progress."""
+    from uuid import UUID
+    progress = PipelineProgressTracker.get(UUID(run_id))
+    if progress is None:
+        return {"status": "not_found"}
+
+    return {
+        "run_id": str(progress.run_id),
+        "status": progress.state.value,
+        "progress_pct": progress.progress_pct,
+        "perspectives": f"{progress.perspective_count}/{progress.total_perspectives}",
+        "memo_id": progress.memo_id,
+        "confidence": progress.confidence,
+        "error": progress.error,
+        "is_complete": progress.is_complete,
+        "is_failed": progress.is_failed,
+        "steps": progress.steps,
+        "started_at": progress.started_at,
+        "completed_at": progress.completed_at,
+    }
 
 
 @router.get("/recent")
 def list_recent():
-    return {"requests": []}
+    """List recent research runs."""
+    runs = [
+        {
+            "run_id": str(rid),
+            "status": p.state.value,
+            "progress_pct": p.progress_pct,
+            "is_complete": p.is_complete,
+        }
+        for rid, p in PipelineProgressTracker._runs.items()
+    ]
+    return {"requests": runs}
