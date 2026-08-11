@@ -12,9 +12,8 @@ Creates:
 
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision: str = "0030_investment_memo"
 down_revision: Union[str, None] = "0029_perspective_analyses"
