@@ -220,26 +220,14 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 
 ## Backlog
 
-### Sprint 014: OWNER DECISIONS RESOLVED — READY FOR IMPLEMENTATION
-- Design Direction: docs/sprints/SPRINT_014_DESIGN_DIRECTION.md
-- Owner Decisions: docs/sprints/SPRINT_014_OWNER_DECISIONS.md (all 8 RESOLVED)
-- Slice A: IN PROGRESS (Production Foundation)
-  - Dockerfile, docker-compose.yml, Caddyfile
-  - Backup script + deployment documentation
-- Slice B: IN PROGRESS (Owner Dashboard)
-  - HTMX + Jinja2 + Pico.css dashboard
-  - 5 pages, 5 templates, 1 router
-  - 9 tests
-- Slice C: IN PROGRESS (First Real Investment Workflow)
-  - DashboardResearchService: create request, status, list recent
-  - Research workflow API endpoint (POST /api/research/start)
-  - mutation_gate EXPECTED_HEAD updated to 0032
-  - 9 tests
-- Slice D: IN PROGRESS (Portfolio Intelligence)
-  - PortfolioIntelligenceService: holdings, allocation, concentration
-  - Deterministic calculations only — no LLM, no trading
-  - Dashboard memo shows portfolio impact + warnings
-  - 14 tests
+### Sprint 014: COMPLETE — ALL 4 SLICES DONE
+- Slice A: DONE — Production Foundation (Docker, Caddy, backup)
+- Slice B: DONE — Owner Dashboard (HTMX + Jinja2 + Pico.css, 5 pages)
+- Slice C: DONE — First Real Investment Workflow (POST /api/research/start)
+- Slice D: DONE — Portfolio Intelligence (allocation, concentration, impact)
+
+### Sprint 015: DESIGN PHASE — NOT AUTHORIZED FOR IMPLEMENTATION
+- Design Direction: docs/sprints/SPRINT_015_DESIGN_DIRECTION.md
 
 ### Sprint 013: COMPLETE — ALL 4 SLICES DONE
 - Slice A: DONE — merged as 82bb43e (PR #94)

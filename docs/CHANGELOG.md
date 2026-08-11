@@ -1,5 +1,47 @@
 # Changelog
 
+## Sprint 014 — CompoundOS V1 Usability — COMPLETE (2026-08-11)
+
+### Sprint Summary
+4 slices delivered: Production Foundation, Owner Dashboard, First Real
+Investment Workflow, and Portfolio Intelligence. CompoundOS is now a
+deployable web application with an HTML dashboard for daily family
+office operations.
+
+### Slice A — Production Foundation (271761c)
+- Dockerfile: multi-stage build, healthcheck, production defaults
+- docker-compose.yml: API + PostgreSQL + Redis + Caddy
+- Caddyfile: auto-HTTPS reverse proxy
+- Backup script: pg_dump + gzip, 30-day retention
+- Deployment guide: VPS setup, migrations, restore
+
+### Slice B — Owner Dashboard (9d26b2e)
+- 5 pages: Dashboard, Research, Memo, Decisions, Learning
+- HTMX + Jinja2 + Pico.css — zero build step
+- Dashboard: net worth, allocation, guardian alerts
+- Research: symbol input, status tracking
+- Memo: 11-section view with confidence
+- Decisions: approve/reject, history
+- Learning: prediction accuracy, perspective performance
+- 9 tests
+
+### Slice C — First Real Investment Workflow (65210fb)
+- DashboardResearchService: create request, poll status, list recent
+- POST /api/research/start endpoint
+- Dashboard integration: HTMX form to API
+- mutation_gate EXPECTED_HEAD 0031→0032 fix
+- 9 tests
+
+### Slice D — Portfolio Intelligence (271761c)
+- PortfolioIntelligenceService: deterministic calculations
+- Holdings, allocation, concentration (20%/40% thresholds)
+- Impact projection for new positions
+- Dashboard memo shows allocation/concentration warnings
+- 14 tests
+
+### Total: 41 tests across 4 slices
+### No credentials, no broker, no trading
+
 ## Sprint 013 — First Real Investment Intelligence — COMPLETE (2026-08-11)
 
 ### Sprint Summary
