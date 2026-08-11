@@ -275,12 +275,15 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Slice D: Knowledge Compounding (cross-refs, contradiction detection)
 - 14 tests
 
-### Sprint 022: IN PROGRESS — ALL 4 SLICES IMPLEMENTED
+### Sprint 022: COMPLETE — ALL 4 SLICES DONE
 - Slice A: Knowledge Graph (nodes, edges, append-only, related queries)
 - Slice B: Advanced Committee (multi-model, divergence >20pt, no consensus)
 - Slice C: Portfolio Monitoring (6 triggers, 4 priority levels)
 - Slice D: Family Office (multi-portfolio, owner/advisor roles)
 - 14 tests
+
+### Sprint 023: DESIGN PHASE — NOT AUTHORIZED FOR IMPLEMENTATION
+- Design Direction: docs/sprints/SPRINT_023_DESIGN_DIRECTION.md
 
 ### Sprint 013: COMPLETE — ALL 4 SLICES DONE
 - Slice A: DONE — merged as 82bb43e (PR #94)

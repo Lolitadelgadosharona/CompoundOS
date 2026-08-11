@@ -1,5 +1,30 @@
 # Changelog
 
+## Sprint 022 — Scale & Intelligence Enhancement — COMPLETE (2026-08-11)
+
+### Sprint Summary
+4 slices delivered: Investment Knowledge Graph, Advanced AI
+Committee, Portfolio Monitoring, and Family Office Layer.
+CompoundOS now has an entity relationship graph, multi-model
+AI debate with divergence detection, position monitoring
+alerts, and multi-portfolio role-based access.
+
+### Slice A — Knowledge Graph (a2811ad)
+- Nodes + edges; append-only immutable history
+- 4 edge types: BELONGS_TO, ANALYZED_IN, LED_TO, SUPERSEDES
+
+### Slice B — Advanced Committee (a2811ad)
+- Claude: Value+Risk+Policy, GPT-4o: Growth+Macro, Gemini: Fit
+- Divergence detection >20pt; never forces consensus
+
+### Slice C — Portfolio Monitoring (a2811ad)
+- 6 triggers, 4 priority levels (critical/high/medium/low)
+
+### Slice D — Family Office (a2811ad)
+- Multi-portfolio (taxable/IRA/trust), owner/advisor roles
+
+### 14 tests
+
 ## Sprint 021 — Real Operation & Calibration — COMPLETE (2026-08-11)
 
 ### Sprint Summary
