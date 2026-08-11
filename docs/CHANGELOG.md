@@ -1,5 +1,33 @@
 # Changelog
 
+## Sprint 015 — Real Usage Validation & Refinement — COMPLETE (2026-08-11)
+
+### Sprint Summary
+4 slices delivered: Real Investment Case Validation, Dashboard Data
+Integration, Async Pipeline Execution, and Personal Workflow Automation.
+CompoundOS now has real data APIs, async research execution with
+progress tracking, and a validation framework.
+
+### Slice A — Validation (f48a891)
+- ValidationService: 5-dimension quality evaluation
+- 5 validation symbols: AAPL, MSFT, GOOGL, BRK.B, JNJ
+- All memos pass through — Owner filters
+
+### Slice B — Dashboard Data (f48a891)
+- 6 API endpoints under /api/dashboard/
+- Thin dashboard architecture — no business logic in templates
+
+### Slice C — Async Pipeline (f48a891)
+- 7 progress states: pending → collecting → running → generating → scoring → complete/failed
+- FastAPI BackgroundTasks integration
+- Progress polling endpoint
+
+### Slice D — Workflow Automation (f48a891)
+- Manual-only execution
+- Dashboard badge notifications
+
+### 23 tests
+
 ## Sprint 014 — CompoundOS V1 Usability — COMPLETE (2026-08-11)
 
 ### Sprint Summary
