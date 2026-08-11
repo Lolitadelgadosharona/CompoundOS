@@ -1,5 +1,33 @@
 # Changelog
 
+## Sprint 018 — Portfolio Intelligence Upgrade — COMPLETE (2026-08-11)
+
+### Sprint Summary
+4 slices delivered: Advanced Portfolio Analytics, Benchmark
+Tracking, Committee Enhancement, and Bond Intelligence.
+CompoundOS now computes Sharpe ratio, max drawdown, and beta;
+compares against S&P 500 and 60/40 benchmarks; generates
+structured committee briefs with dissent tracking; and
+analyzes Treasury bond ETFs.
+
+### Slice A — Bond Intelligence (3607a8e)
+- TLT, IEF, SHY: yield, effective duration, rate sensitivity
+- Duration risk rating; portfolio-level rate impact summary
+
+### Slice B — Advanced Analytics (3607a8e)
+- Sharpe ratio, max drawdown, portfolio beta, annualized returns
+- Ratings: excellent/good/adequate/poor, low/moderate/high
+
+### Slice C — Committee Brief (3607a8e)
+- Structured 1-page brief with 6 perspective votes
+- Majority vote detection, dissent flagging
+
+### Slice D — Benchmark Tracking (3607a8e)
+- S&P 500 + 60/40 comparison with period scaling
+- Beat/lag indicators per benchmark
+
+### 14 tests
+
 ## Sprint 017 — Intelligence Expansion — COMPLETE (2026-08-11)
 
 ### Sprint Summary
