@@ -1,5 +1,32 @@
 # Changelog
 
+## Sprint 017 — Intelligence Expansion — COMPLETE (2026-08-11)
+
+### Sprint Summary
+4 slices delivered: Research Quality Scoring, Research Memory
+Evolution, Macro Intelligence, and Multi-Asset Intelligence.
+CompoundOS now auto-rates memo quality, remembers past analyses,
+tracks macro context, and supports ETFs alongside equities.
+
+### Slice A — Research Memory (7fe18bf)
+- Per-entity indexed, immutable snapshots, append-only
+- Outcome attachment, summary retrieval
+
+### Slice B — Multi-Asset (7fe18bf)
+- ETF classification and detail (top 10, expense ratio, concentration)
+- Stocks always supported; bonds/cash deferred
+
+### Slice C — Macro Intelligence (7fe18bf)
+- 6 core indicators: rates, yields, spread, VIX, sectors
+- Facts-only context — no prediction
+
+### Slice D — Quality Scoring (7fe18bf)
+- 5 dimensions: completeness, evidence, balance, confidence, clarity
+- Weighted scoring, labeled: Strong/Adequate/Needs Improvement
+- Informational only — never gates memo access
+
+### 15 tests
+
 ## Sprint 016 — Real World Operation & Calibration — COMPLETE (2026-08-11)
 
 ### Sprint Summary
