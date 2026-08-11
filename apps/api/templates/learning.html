@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Learning Dashboard</h1>
+
+<article>
+    <h3>Overall Prediction Accuracy</h3>
+    <h2>{{ "%.0f"|format(accuracy * 100) }}%</h2>
+    <p>Based on {{ review_count }} outcome reviews</p>
+    <progress value="{{ accuracy }}" max="1"></progress>
+</article>
+
+<h3>Perspective Performance</h3>
+<table>
+    <thead>
+        <tr><th>Perspective</th><th>Accuracy</th><th>Rating</th></tr>
+    </thead>
+    <tbody>
+    {% for p in perspectives %}
+    <tr>
+        <td>{{ p.name }}</td>
+        <td>{{ "%.0f"|format(p.accuracy * 100) }}%</td>
+        <td>
+            <progress value="{{ p.accuracy }}" max="1"></progress>
+        </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

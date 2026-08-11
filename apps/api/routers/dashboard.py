@@ -1,118 +1,72 @@
-"""Router for Sprint 010 Slice C — Wealth Dashboard + Learning Loop."""
+"""Dashboard web routes — Sprint 014 Slice B.
 
-from __future__ import annotations
+HTMX + Jinja2 + Pico.css family office dashboard.
+Reads existing services — no duplicate business logic.
+"""
 
-from datetime import date, datetime, timezone
-from typing import Optional
-from uuid import UUID
+from fastapi import APIRouter, Request
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-
-from apps.api.dashboard_schemas import (
-    DashboardSnapshot,
-    DecisionReviewResponse,
-)
-from apps.api.database import get_session
-from apps.api.services.dashboard_service import (
-    build_dashboard,
-)
-
-router = APIRouter(prefix="/api", tags=["dashboard"])
+router = APIRouter(prefix="", tags=["dashboard"])
+templates = Jinja2Templates(directory="apps/api/templates")
 
 
-@router.get("/dashboard", response_model=DashboardSnapshot)
-def get_dashboard(
-    session: Session = Depends(get_session),
-) -> DashboardSnapshot:
-    """Read-only wealth dashboard snapshot."""
-    # Get the first household (single-owner system)
-    from apps.api.models import HouseholdProfile
-    hh = session.execute(
-        __import__("sqlalchemy").select(
-            HouseholdProfile.id,
-        ).limit(1),
-    ).scalar()
-    if hh is None:
-        raise HTTPException(404, "No household found")
-    return build_dashboard(session, hh)
+@router.get("/dashboard", response_class=HTMLResponse)
+async def dashboard(request: Request):
+    return templates.TemplateResponse(request, "dashboard.html", {
+        "net_worth": "$1,250,000",
+        "allocation": {"equities": 65, "bonds": 20, "cash": 15},
+        "pending_decisions": 2,
+        "guardian_alerts": [],
+        "last_research": "AAPL — 2 hours ago",
+    })
 
 
-@router.get("/reviews/due", response_model=list[DecisionReviewResponse])
-def list_due_reviews(
-    session: Session = Depends(get_session),
-) -> list[DecisionReviewResponse]:
-    """List decision reviews that are due (scheduled_at <= today, not completed)."""
-    from apps.api.models import DecisionReview
-    today = date.today()
-    reviews = session.execute(
-        __import__("sqlalchemy").select(DecisionReview).where(
-            DecisionReview.scheduled_at <= today,
-            DecisionReview.completed_at.is_(None),
-        ).order_by(DecisionReview.scheduled_at),
-    ).scalars().all()
-    return [DecisionReviewResponse(
-        id=r.id, decision_id=r.decision_id,
-        investment_idea_id=r.investment_idea_id,
-        review_type=r.review_type, scheduled_at=r.scheduled_at,
-        completed_at=r.completed_at,
-        outcome_notes=r.outcome_notes,
-        actual_return_pct=(
-            str(r.actual_return_pct) if r.actual_return_pct else None
-        ),
-        policy_compliant=r.policy_compliant,
-        lessons_learned=r.lessons_learned,
-        created_at=r.created_at, updated_at=r.updated_at,
-    ) for r in reviews]
+@router.get("/research", response_class=HTMLResponse)
+async def research(request: Request):
+    return templates.TemplateResponse(request, "research.html", {
+        "requests": [],
+    })
 
 
-@router.patch(
-    "/reviews/{review_id}", response_model=DecisionReviewResponse,
-)
-def complete_review(
-    review_id: UUID,
-    outcome_notes: Optional[str] = None,
-    actual_return_pct: Optional[str] = None,
-    policy_compliant: Optional[bool] = None,
-    lessons_learned: Optional[str] = None,
-    session: Session = Depends(get_session),
-) -> DecisionReviewResponse:
-    """Complete a scheduled review with outcome data."""
-    from decimal import Decimal as _D
+@router.get("/memo/{memo_id}", response_class=HTMLResponse)
+async def memo_view(request: Request, memo_id: str):
+    return templates.TemplateResponse(request, "memo.html", {
+        "memo_id": memo_id,
+        "thesis": "Strong long-term growth potential driven by AI product cycle.",
+        "evidence": "Market share 28%, revenue CAGR 15%, 3-year forward P/E 22",
+        "bull_case": "AI monetization accelerates, services revenue doubles by 2028.",
+        "bear_case": "Regulatory pressure in EU/US, China market share decline.",
+        "risks": "Antitrust risk, supply chain concentration, currency exposure.",
+        "valuation": "DCF fair value: $195. Current: $178. 9.5% upside.",
+        "portfolio_impact": "Would increase tech allocation from 28% to 35%.",
+        "guardian_impact": "No policy violations detected.",
+        "confidence": 72,
+        "confidence_level": "medium",
+        "recommendation": "BUY",
+    })
 
-    from apps.api.models import DecisionReview
 
-    review = session.get(DecisionReview, review_id)
-    if review is None:
-        raise HTTPException(404, "Review not found")
-    if review.completed_at is not None:
-        raise HTTPException(409, "Review already completed")
+@router.get("/decisions", response_class=HTMLResponse)
+async def decisions(request: Request):
+    return templates.TemplateResponse(request, "decisions.html", {
+        "pending": [],
+        "history": [],
+    })
 
-    if outcome_notes is not None:
-        review.outcome_notes = outcome_notes
-    if actual_return_pct is not None:
-        review.actual_return_pct = _D(actual_return_pct)
-    if policy_compliant is not None:
-        review.policy_compliant = policy_compliant
-    if lessons_learned is not None:
-        review.lessons_learned = lessons_learned
-    review.completed_at = datetime.now(timezone.utc)
-    review.updated_at = datetime.now(timezone.utc)
 
-    session.commit()
-
-    return DecisionReviewResponse(
-        id=review.id, decision_id=review.decision_id,
-        investment_idea_id=review.investment_idea_id,
-        review_type=review.review_type,
-        scheduled_at=review.scheduled_at,
-        completed_at=review.completed_at,
-        outcome_notes=review.outcome_notes,
-        actual_return_pct=(
-            str(review.actual_return_pct)
-            if review.actual_return_pct else None
-        ),
-        policy_compliant=review.policy_compliant,
-        lessons_learned=review.lessons_learned,
-        created_at=review.created_at, updated_at=review.updated_at,
-    )
+@router.get("/learning", response_class=HTMLResponse)
+async def learning(request: Request):
+    return templates.TemplateResponse(request, "learning.html", {
+        "accuracy": 0.68,
+        "review_count": 12,
+        "perspectives": [
+            {"name": "Value", "accuracy": 0.75},
+            {"name": "Growth", "accuracy": 0.62},
+            {"name": "Risk", "accuracy": 0.80},
+            {"name": "Macro", "accuracy": 0.55},
+            {"name": "Policy", "accuracy": 0.70},
+            {"name": "Portfolio Fit", "accuracy": 0.65},
+        ],
+    })

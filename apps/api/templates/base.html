@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CompoundOS — Family Office</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css">
+    <style>
+        :root { --primary: #4a9eff; }
+        .memo-section { margin-bottom: 1.5rem; padding: 1rem; border: 1px solid var(--muted-border-color); border-radius: 4px; }
+        .confidence-high { color: #2ecc71; }
+        .confidence-medium { color: #f39c12; }
+        .confidence-low { color: #e74c3c; }
+        .status-draft { color: #95a5a6; }
+        .status-running { color: #3498db; }
+        .status-complete { color: #2ecc71; }
+        .status-failed { color: #e74c3c; }
+        nav { margin-bottom: 2rem; }
+    </style>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+</head>
+<body>
+<main class="container">
+<nav>
+    <ul>
+        <li><strong>CompoundOS</strong></li>
+    </ul>
+    <ul>
+        <li><a href="/dashboard">Dashboard</a></li>
+        <li><a href="/research">Research</a></li>
+        <li><a href="/decisions">Decisions</a></li>
+        <li><a href="/learning">Learning</a></li>
+    </ul>
+</nav>
+
+{% block content %}{% endblock %}
+
+</main>
+</body>
+</html>

@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Investment Memo</h1>
+
+<article class="memo-section">
+    <h3>Thesis</h3>
+    <p>{{ thesis }}</p>
+</article>
+
+<article class="memo-section">
+    <h3>Evidence</h3>
+    <p>{{ evidence }}</p>
+</article>
+
+<div class="grid">
+    <article class="memo-section">
+        <h3>Bull Case</h3>
+        <p>{{ bull_case }}</p>
+    </article>
+    <article class="memo-section">
+        <h3>Bear Case</h3>
+        <p>{{ bear_case }}</p>
+    </article>
+</div>
+
+<article class="memo-section">
+    <h3>Risks</h3>
+    <p>{{ risks }}</p>
+</article>
+
+<article class="memo-section">
+    <h3>Valuation</h3>
+    <p>{{ valuation }}</p>
+</article>
+
+<div class="grid">
+    <article class="memo-section">
+        <h3>Portfolio Impact</h3>
+        <p>{{ portfolio_impact }}</p>
+    </article>
+    <article class="memo-section">
+        <h3>Guardian Impact</h3>
+        <p>{{ guardian_impact }}</p>
+    </article>
+</div>
+
+<article class="memo-section">
+    <h3>Confidence</h3>
+    <h2 class="confidence-{{ confidence_level }}">{{ confidence }}%</h2>
+    <p>Recommendation: <strong>{{ recommendation }}</strong></p>
+</article>
+
+<div class="grid">
+    <a href="/decisions" role="button" class="secondary">Return to Decisions</a>
+</div>
+{% endblock %}

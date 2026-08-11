@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Research</h1>
+
+<form hx-post="/api/research/start" hx-target="#research-status" hx-swap="innerHTML">
+    <fieldset role="group">
+        <input type="text" name="symbol" placeholder="Symbol (e.g., AAPL)" required>
+        <button type="submit">Start Research</button>
+    </fieldset>
+</form>
+
+<div id="research-status"></div>
+
+{% if requests %}
+<table>
+    <thead>
+        <tr><th>Symbol</th><th>Status</th><th>Confidence</th><th>Date</th><th>Action</th></tr>
+    </thead>
+    <tbody>
+    {% for r in requests %}
+    <tr>
+        <td>{{ r.symbol }}</td>
+        <td class="status-{{ r.status }}">{{ r.status }}</td>
+        <td>{{ r.confidence or '-' }}</td>
+        <td>{{ r.date }}</td>
+        <td>{% if r.memo_id %}<a href="/memo/{{ r.memo_id }}">View</a>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No research yet. Enter a symbol above to begin.</p>
+{% endif %}
+{% endblock %}

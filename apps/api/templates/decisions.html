@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Committee Decisions</h1>
+
+<h2>Pending</h2>
+{% if pending %}
+<table>
+    <thead>
+        <tr><th>Symbol</th><th>Recommendation</th><th>Confidence</th><th>Memo</th><th>Action</th></tr>
+    </thead>
+    <tbody>
+    {% for d in pending %}
+    <tr>
+        <td>{{ d.symbol }}</td>
+        <td>{{ d.recommendation }}</td>
+        <td>{{ d.confidence }}%</td>
+        <td><a href="/memo/{{ d.memo_id }}">View Memo</a></td>
+        <td>
+            <a href="#" role="button" class="contrast" style="background:#2ecc71">APPROVE</a>
+            <a href="#" role="button" class="secondary" style="background:#e74c3c">REJECT</a>
+        </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No pending decisions.</p>
+{% endif %}
+
+<h2>History</h2>
+{% if history %}
+<table>
+    <thead>
+        <tr><th>Symbol</th><th>Decision</th><th>Date</th><th>Outcome</th></tr>
+    </thead>
+    <tbody>
+    {% for h in history %}
+    <tr>
+        <td>{{ h.symbol }}</td>
+        <td>{{ h.decision }}</td>
+        <td>{{ h.date }}</td>
+        <td>{{ h.outcome or 'Pending review' }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No past decisions.</p>
+{% endif %}
+{% endblock %}

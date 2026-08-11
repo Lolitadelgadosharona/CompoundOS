@@ -226,7 +226,10 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Slice A: IN PROGRESS (Production Foundation)
   - Dockerfile, docker-compose.yml, Caddyfile
   - Backup script + deployment documentation
-- Slice B: Owner Dashboard (HTMX + FastAPI + Pico.css)
+- Slice B: IN PROGRESS (Owner Dashboard)
+  - HTMX + Jinja2 + Pico.css dashboard
+  - 5 pages, 5 templates, 1 router
+  - 9 tests
 - Slice C: First Real Investment Workflow
 - Slice D: Portfolio Intelligence (holdings, allocation, correlation)
 

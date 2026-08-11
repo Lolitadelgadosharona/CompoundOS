@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Dashboard</h1>
+
+<div class="grid">
+    <article>
+        <h3>Net Worth</h3>
+        <h2>{{ net_worth }}</h2>
+    </article>
+    <article>
+        <h3>Pending Decisions</h3>
+        <h2>{{ pending_decisions }}</h2>
+    </article>
+    <article>
+        <h3>Allocation</h3>
+        <p>Equities: {{ allocation.equities }}%</p>
+        <p>Bonds: {{ allocation.bonds }}%</p>
+        <p>Cash: {{ allocation.cash }}%</p>
+        <progress value="{{ allocation.equities }}" max="100"></progress>
+    </article>
+</div>
+
+{% if guardian_alerts %}
+<article>
+    <h3>Guardian Alerts</h3>
+    {% for alert in guardian_alerts %}
+    <p>{{ alert }}</p>
+    {% endfor %}
+</article>
+{% endif %}
+
+<article>
+    <h3>Latest Research</h3>
+    <p>{{ last_research }}</p>
+</article>
+{% endblock %}
