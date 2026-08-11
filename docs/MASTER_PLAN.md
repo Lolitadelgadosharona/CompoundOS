@@ -282,8 +282,9 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Slice D: Family Office (multi-portfolio, owner/advisor roles)
 - 14 tests
 
-### Sprint 023: DESIGN PHASE — NOT AUTHORIZED FOR IMPLEMENTATION
+### Sprint 023: DESIGN COMPLETE — AWAITING OWNER DECISIONS
 - Design Direction: docs/sprints/SPRINT_023_DESIGN_DIRECTION.md
+- Owner Decisions: docs/sprints/SPRINT_023_OWNER_DECISIONS.md (8 pending)
 
 ### Sprint 013: COMPLETE — ALL 4 SLICES DONE
 - Slice A: DONE — merged as 82bb43e (PR #94)
