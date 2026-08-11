@@ -1,0 +1,64 @@
+# Production docker-compose.yml — CompoundOS V1
+# Services: API + PostgreSQL + Caddy reverse proxy
+# Usage: docker compose up -d
+
+services:
+  api:
+    build: .
+    container_name: compoundos-api
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+psycopg://compoundos:${DB_PASSWORD:?required}@db:5432/compoundos
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./backups:/app/backups:rw
+
+  db:
+    image: postgres:16-alpine
+    container_name: compoundos-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: compoundos
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?required}
+      POSTGRES_DB: compoundos
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U compoundos"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: compoundos-redis
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: compoundos-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  pgdata:
+  redisdata:
+  caddy_data:
+  caddy_config:
