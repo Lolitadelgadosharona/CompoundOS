@@ -1,5 +1,34 @@
 # Changelog
 
+## Sprint 021 — Real Operation & Calibration — COMPLETE (2026-08-11)
+
+### Sprint Summary
+4 slices delivered: Decision Accuracy Expansion, Knowledge
+Compounding, Real Portfolio Validation, and Workflow Automation.
+CompoundOS now tracks decision outcomes, cross-references past
+analyses, validates CSV portfolio imports, and provides workflow
+reminders — without ever executing trades.
+
+### Slice A — Portfolio Validation (d99b8d9)
+- CSV import: 4 required + 4 optional fields
+- Calculation verification: ±1% tolerance
+- Non-USD currency flagging
+
+### Slice B — Decision Accuracy (d99b8d9)
+- Outcome tracking with direction_correct flag
+- 3 metrics: direction accuracy, return, confidence calibration
+- Perspective-level accuracy scoring
+
+### Slice C — Workflow Automation (d99b8d9)
+- Monthly snapshot (auto), research reminders (manual)
+- Never auto-executes trades or decisions
+
+### Slice D — Knowledge Compounding (d99b8d9)
+- Cross-reference current thesis vs past memos
+- Contradiction detection (BUY→SELL, confidence swing)
+
+### 14 tests
+
 ## Sprint 020 — Production Hardening & Real Usage — COMPLETE (2026-08-11)
 
 ### Sprint Summary
