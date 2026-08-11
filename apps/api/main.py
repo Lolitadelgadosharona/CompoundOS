@@ -28,6 +28,7 @@ from apps.api.routers.investment_os import router as investment_os_router
 from apps.api.routers.production import router as production_router
 from apps.api.routers.real_ops import router as real_ops_router
 from apps.api.routers.scale import router as scale_router
+from apps.api.routers.household import router as household_router
 
 app = FastAPI(title="CompoundOS API", version="0.1.0")
 
@@ -180,4 +181,5 @@ app.include_router(investment_os_router)
 app.include_router(production_router)
 app.include_router(real_ops_router)
 app.include_router(scale_router)
+app.include_router(household_router)
 app.include_router(auth_router)
