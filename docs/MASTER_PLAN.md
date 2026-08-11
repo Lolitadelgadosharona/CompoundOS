@@ -226,8 +226,9 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Slice C: DONE — First Real Investment Workflow (POST /api/research/start)
 - Slice D: DONE — Portfolio Intelligence (allocation, concentration, impact)
 
-### Sprint 015: DESIGN PHASE — NOT AUTHORIZED FOR IMPLEMENTATION
+### Sprint 015: DESIGN COMPLETE — AWAITING OWNER DECISIONS
 - Design Direction: docs/sprints/SPRINT_015_DESIGN_DIRECTION.md
+- Owner Decisions: docs/sprints/SPRINT_015_OWNER_DECISIONS.md (9 pending)
 
 ### Sprint 013: COMPLETE — ALL 4 SLICES DONE
 - Slice A: DONE — merged as 82bb43e (PR #94)
