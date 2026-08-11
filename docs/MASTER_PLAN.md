@@ -233,9 +233,12 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Slice D: Personal Workflow Automation (manual only, badges)
 - 23 tests
 
-### Sprint 016: DESIGN COMPLETE — AWAITING OWNER DECISIONS
-- Design Direction: docs/sprints/SPRINT_016_DESIGN_DIRECTION.md
-- Owner Decisions: docs/sprints/SPRINT_016_OWNER_DECISIONS.md (8 pending)
+### Sprint 016: IN PROGRESS — ALL 4 SLICES IMPLEMENTED
+- Slice A: Owner Feedback Capture (4-question form, summary metrics)
+- Slice B: Learning Loop (direction accuracy, confidence error, 30d/90d)
+- Slice C: Data Quality (4 freshness rules, stale/missing detection)
+- Slice D: Daily Operating View (decisions > research > portfolio > alerts)
+- 18 tests
 
 ### Sprint 013: COMPLETE — ALL 4 SLICES DONE
 - Slice A: DONE — merged as 82bb43e (PR #94)
