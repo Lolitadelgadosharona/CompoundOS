@@ -240,9 +240,12 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Slice D: Daily Operating View (decisions > research > portfolio > alerts)
 - 18 tests
 
-### Sprint 017: DESIGN COMPLETE — AWAITING OWNER DECISIONS
-- Design Direction: docs/sprints/SPRINT_017_DESIGN_DIRECTION.md
-- Owner Decisions: docs/sprints/SPRINT_017_OWNER_DECISIONS.md (8 pending)
+### Sprint 017: IN PROGRESS — ALL 4 SLICES IMPLEMENTED
+- Slice A: Research Memory (per-entity, immutable, append-only)
+- Slice B: Multi-Asset (ETFs, classification, detail)
+- Slice C: Macro Intelligence (6 indicators, facts-only context)
+- Slice D: Research Quality Scoring (5 dimensions, informational only)
+- 15 tests
 
 ### Sprint 013: COMPLETE — ALL 4 SLICES DONE
 - Slice A: DONE — merged as 82bb43e (PR #94)
