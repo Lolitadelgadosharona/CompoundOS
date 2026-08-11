@@ -282,7 +282,9 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Slice D: Family Office (multi-portfolio, owner/advisor roles)
 - 14 tests
 
-### Sprint 023: IN PROGRESS — ALL 4 SLICES IMPLEMENTED
+### Sprint 024: DESIGN PHASE — REAL OPERATION VALIDATION (Revised)
+- Design Direction: docs/sprints/SPRINT_024_DESIGN_DIRECTION.md
+- Strategic shift: no new features — validate with real data
 - Slice A: Household (net worth, emergency fund, savings rate)
 - Slice B: Calibration (weekly report, perspective accuracy)
 - Slice C: Behavior (5 signals, privacy-preserving)
