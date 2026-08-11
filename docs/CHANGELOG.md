@@ -1,5 +1,32 @@
 # Changelog
 
+## Sprint 019 — Investment Operating System — COMPLETE (2026-08-11)
+
+### Sprint Summary
+4 slices delivered: Portfolio Review Workflow, Risk Monitoring,
+Capital Allocation Assistant, and Family Office Reporting.
+CompoundOS now has structured review cadences, stress scenario
+modeling, capital deployment guidance, and professional reporting.
+
+### Slice A — Review Workflow (ef0971b)
+- Monthly review: 6 sections + decision history + stale detection
+- Quarterly review: headline, findings, recommendations
+
+### Slice B — Risk Monitoring (ef0971b)
+- 4 stress scenarios: correction, rate, sector, recession
+- 5 alert rules: position, sector, beta, drawdown, data stale
+
+### Slice C — Allocation (ef0971b)
+- Deploy guidance: ranked by confidence, allocation-aware
+- Sell options: underperformer + tax flags
+- Disclaimer: guidance only, not financial advice
+
+### Slice D — Reporting (ef0971b)
+- Monthly, quarterly, custom dashboard reports
+- CSV export for external tools
+
+### 15 tests
+
 ## Sprint 018 — Portfolio Intelligence Upgrade — COMPLETE (2026-08-11)
 
 ### Sprint Summary
