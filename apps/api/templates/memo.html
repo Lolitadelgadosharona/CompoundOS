@@ -37,6 +37,12 @@
     <article class="memo-section">
         <h3>Portfolio Impact</h3>
         <p>{{ portfolio_impact }}</p>
+        {% if allocation_warning %}
+        <p><mark>{{ allocation_warning }}</mark></p>
+        {% endif %}
+        {% if concentration_warning %}
+        <p><mark>{{ concentration_warning }}</mark></p>
+        {% endif %}
     </article>
     <article class="memo-section">
         <h3>Guardian Impact</h3>

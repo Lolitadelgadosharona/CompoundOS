@@ -235,7 +235,11 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   - Research workflow API endpoint (POST /api/research/start)
   - mutation_gate EXPECTED_HEAD updated to 0032
   - 9 tests
-- Slice D: Portfolio Intelligence (holdings, allocation, correlation)
+- Slice D: IN PROGRESS (Portfolio Intelligence)
+  - PortfolioIntelligenceService: holdings, allocation, concentration
+  - Deterministic calculations only — no LLM, no trading
+  - Dashboard memo shows portfolio impact + warnings
+  - 14 tests
 
 ### Sprint 013: COMPLETE — ALL 4 SLICES DONE
 - Slice A: DONE — merged as 82bb43e (PR #94)

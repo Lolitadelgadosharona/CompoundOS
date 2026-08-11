@@ -42,6 +42,8 @@ async def memo_view(request: Request, memo_id: str):
         "valuation": "DCF fair value: $195. Current: $178. 9.5% upside.",
         "portfolio_impact": "Would increase tech allocation from 28% to 35%.",
         "guardian_impact": "No policy violations detected.",
+        "allocation_warning": "Tech allocation would increase from 28% to 35%.",
+        "concentration_warning": "AAPL is 12% of portfolio.",
         "confidence": 72,
         "confidence_level": "medium",
         "recommendation": "BUY",
