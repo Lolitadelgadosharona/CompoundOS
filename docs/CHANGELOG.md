@@ -1,5 +1,35 @@
 # Changelog
 
+## Sprint 016 — Real World Operation & Calibration — COMPLETE (2026-08-11)
+
+### Sprint Summary
+4 slices delivered: Daily Operating View, Owner Feedback, Learning
+Loop, and Data Quality. CompoundOS now has a daily decision center,
+owner feedback capture, prediction accuracy tracking, and data
+freshness monitoring.
+
+### Slice A — Owner Feedback (a018a02)
+- 4-question form: thesis, evidence, confidence, would_act
+- FeedbackService with summary metrics
+- <30 seconds per memo
+
+### Slice B — Learning Loop (a018a02)
+- Direction accuracy: confidence≥50 + positive return = correct
+- Confidence error: |confidence - (50 + return×5)|
+- 30d check-in, 90d formal review
+
+### Slice C — Data Quality (a018a02)
+- 4 freshness rules: price 6h, overview 7d, financials 90d, news 24h
+- Status: fresh / stale / missing
+- Confidence impact scoring
+
+### Slice D — Daily Operating View (a018a02)
+- DailyBrief: pending decisions, research, portfolio warnings
+- Guardian alerts, learning updates
+- needs_attention flag
+
+### 18 tests
+
 ## Sprint 015 — Real Usage Validation & Refinement — COMPLETE (2026-08-11)
 
 ### Sprint Summary
