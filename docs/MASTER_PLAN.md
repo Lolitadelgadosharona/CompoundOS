@@ -268,9 +268,12 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Slice D: Owner Experience (UX settings, shortcuts, accessibility)
 - 15 tests
 
-### Sprint 021: DESIGN COMPLETE — AWAITING OWNER DECISIONS
-- Design Direction: docs/sprints/SPRINT_021_DESIGN_DIRECTION.md
-- Owner Decisions: docs/sprints/SPRINT_021_OWNER_DECISIONS.md (8 pending)
+### Sprint 021: IN PROGRESS — ALL 4 SLICES IMPLEMENTED
+- Slice A: Real Portfolio Validation (CSV import, ±1% tolerance, currency flags)
+- Slice B: Decision Accuracy (outcomes, metrics, perspective scoring)
+- Slice C: Workflow Automation (snapshots, reminders, no auto-execution)
+- Slice D: Knowledge Compounding (cross-refs, contradiction detection)
+- 14 tests
 
 ### Sprint 013: COMPLETE — ALL 4 SLICES DONE
 - Slice A: DONE — merged as 82bb43e (PR #94)
