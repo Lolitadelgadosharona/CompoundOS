@@ -24,6 +24,7 @@ from apps.api.routers.dashboard_data import router as dashboard_data_router
 from apps.api.routers.daily_ops import router as daily_ops_router
 from apps.api.routers.intelligence import router as intelligence_router
 from apps.api.routers.portfolio_upgrade import router as portfolio_upgrade_router
+from apps.api.routers.investment_os import router as investment_os_router
 
 app = FastAPI(title="CompoundOS API", version="0.1.0")
 
@@ -172,4 +173,5 @@ app.include_router(dashboard_data_router)
 app.include_router(daily_ops_router)
 app.include_router(intelligence_router)
 app.include_router(portfolio_upgrade_router)
+app.include_router(investment_os_router)
 app.include_router(auth_router)

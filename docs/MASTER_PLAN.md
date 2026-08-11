@@ -254,9 +254,12 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Slice D: Benchmark Tracking (S&P 500 + 60/40 comparison)
 - 14 tests
 
-### Sprint 019: DESIGN COMPLETE — AWAITING OWNER DECISIONS
-- Design Direction: docs/sprints/SPRINT_019_DESIGN_DIRECTION.md
-- Owner Decisions: docs/sprints/SPRINT_019_OWNER_DECISIONS.md (8 pending)
+### Sprint 019: IN PROGRESS — ALL 4 SLICES IMPLEMENTED
+- Slice A: Portfolio Review (monthly/quarterly, decision history)
+- Slice B: Risk Monitoring (4 stress scenarios, 5 alert rules)
+- Slice C: Capital Allocation (deploy + sell guidance, no execution)
+- Slice D: Family Office Reporting (dashboard + CSV export)
+- 15 tests
 
 ### Sprint 013: COMPLETE — ALL 4 SLICES DONE
 - Slice A: DONE — merged as 82bb43e (PR #94)
