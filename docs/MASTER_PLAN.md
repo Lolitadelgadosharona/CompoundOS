@@ -220,6 +220,14 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 
 ## Backlog
 
+### Sprint 014: DESIGN PHASE — NOT AUTHORIZED FOR IMPLEMENTATION
+- Design Direction: docs/sprints/SPRINT_014_DESIGN_DIRECTION.md
+- Owner Decisions: docs/sprints/SPRINT_014_OWNER_DECISIONS.md (8 pending)
+- Slice A: Production Foundation (deployment, DB, secrets, backup)
+- Slice B: Owner Dashboard (HTMX + FastAPI + Pico.css)
+- Slice C: First Real Investment Workflow
+- Slice D: Portfolio Intelligence (holdings, allocation, correlation)
+
 ### Sprint 013: COMPLETE — ALL 4 SLICES DONE
 - Slice A: DONE — merged as 82bb43e (PR #94)
   - Real LLM Provider Runtime: LLMProvider Protocol, 3 adapters, ProviderRouter
