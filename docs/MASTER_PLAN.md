@@ -261,12 +261,15 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 - Slice D: Family Office Reporting (dashboard + CSV export)
 - 15 tests
 
-### Sprint 020: IN PROGRESS — ALL 4 SLICES IMPLEMENTED
+### Sprint 020: COMPLETE — ALL 4 SLICES DONE
 - Slice A: Security Hardening (7-point audit, rate limiting guidance)
 - Slice B: Data Reliability (provider health, cache validation, pipeline)
 - Slice C: AI Quality (calibration, hallucination detection, consistency)
 - Slice D: Owner Experience (UX settings, shortcuts, accessibility)
 - 15 tests
+
+### Sprint 021: DESIGN PHASE — NOT AUTHORIZED FOR IMPLEMENTATION
+- Design Direction: docs/sprints/SPRINT_021_DESIGN_DIRECTION.md
 
 ### Sprint 013: COMPLETE — ALL 4 SLICES DONE
 - Slice A: DONE — merged as 82bb43e (PR #94)

@@ -1,5 +1,35 @@
 # Changelog
 
+## Sprint 020 — Production Hardening & Real Usage — COMPLETE (2026-08-11)
+
+### Sprint Summary
+4 slices delivered: AI Quality Calibration, Data Reliability,
+Security Hardening, and Owner Experience. CompoundOS now has
+confidence calibration, hallucination detection, provider health
+monitoring, a 7-point security audit, and UX improvements.
+
+### Slice A — Security (6874622)
+- 7-point audit: deps, SQL injection, env vars, CORS, keys,
+  rate limiting, error sanitization
+- Pass/warn/fail scoring; production readiness flag
+
+### Slice B — Reliability (6874622)
+- 4 provider health monitors (latency + failure counts)
+- Cache validation: fresh / stale / invalid
+- Pipeline health: 5-component check
+
+### Slice C — AI Quality (6874622)
+- 5-run confidence calibration (±10 target)
+- 3-layer hallucination defense: evidence → validate → flag
+- Quality penalty for unverified claims
+
+### Slice D — UX (6874622)
+- Theme, font, keyboard shortcuts (6 keys)
+- Loading states documentation
+- Accessibility checklist (WCAG AA)
+
+### 15 tests
+
 ## Sprint 019 — Investment Operating System — COMPLETE (2026-08-11)
 
 ### Sprint Summary
