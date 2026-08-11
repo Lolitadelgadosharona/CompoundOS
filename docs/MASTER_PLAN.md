@@ -220,7 +220,7 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
 
 ## Backlog
 
-### Sprint 013: OWNER DECISIONS APPROVED — IMPLEMENTATION AUTHORIZED
+### Sprint 013: COMPLETE — ALL 4 SLICES DONE
 - Slice A: DONE — merged as 82bb43e (PR #94)
   - Real LLM Provider Runtime: LLMProvider Protocol, 3 adapters, ProviderRouter
   - GovernedLLMExecutor: 7-step chain, ResponseValidator, retry + fallback
@@ -231,10 +231,10 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   - 24 mock tests (CI-safe, no real AV calls)
 - Slice C: DONE — merged as f7c46ef (PR #96)
   - ResearchIntelligencePipeline, MemoGenerator, ConfidenceEngine
-  - Slice D: IN PROGRESS (PR #97)
+  - Slice D: DONE — merged as df3e7bc (PR #97)
   - CommitteeIntegrationService, OwnerDecisionService, LearningLoopService
   - ProvenanceService: full chain from decision → memo → perspectives
-  - 5 tests pass; DB constraint follow-up: COS-013-D-FU-M1
+  - 12 tests + migration 0032 (reversible)
 
 
 

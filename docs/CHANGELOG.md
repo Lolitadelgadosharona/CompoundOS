@@ -1,6 +1,45 @@
 # Changelog
 
-## Sprint 013 Slice C — Active Research Intelligence Loop — Done (2026-08-10)
+## Sprint 013 — First Real Investment Intelligence — COMPLETE (2026-08-11)
+
+### Sprint Summary
+4 slices delivered: Real LLM Provider Runtime, Real Research Evidence Layer,
+Active Research Intelligence Loop, and Investment Committee Decision Lifecycle.
+CompoundOS can now execute governed real LLM calls through provider-neutral
+interfaces, collect real market data with provenance, generate structured
+investment memos with deterministic confidence scoring, and record owner
+decisions in the committee lifecycle.
+
+### Slice A — Real LLM Provider Runtime (82bb43e, PR #94)
+- LLMProvider Protocol + 3 adapters (Anthropic, OpenAI, Gemini/google-genai)
+- ProviderRouter, GovernedLLMExecutor with 7-step chain
+- ResponseValidator, retry 3× + fallback, auth fail-fast
+- 27 CI-safe mock tests
+
+### Slice B — Real Research Evidence Layer (4fe15ea, PR #95)
+- AlphaVantageProvider + DatabaseKnowledgeProvider + CacheService
+- Error normalization into CompoundOS-owned categories
+- Graceful degradation with missing_sources
+- 24 CI-safe mock tests
+
+### Slice C — Active Research Intelligence Loop (f7c46ef, PR #96)
+- MemoGenerator: 6 perspectives → 11-section Investment Memo
+- ConfidenceEngine: deterministic 6-dimension scoring (not LLM-generated)
+- ResearchIntelligencePipeline: end-to-end orchestration
+- 22 tests (15 integration + 7 hardening)
+
+### Slice D — Investment Committee Decision Lifecycle (df3e7bc, PR #97)
+- CommitteeIntegrationService: memo → committee session + evidence items
+- OwnerDecisionService: approve/reject with decisions table + audit logging
+- LearningLoopService: 30d/90d/1yr outcome reviews + prediction accuracy
+- ProvenanceService: Decision → Memo → Perspectives → Evidence chain
+- Migration 0032: 4 CHECK constraints aligned (reversible)
+- 12 tests
+
+### Total: 85 tests across 4 slices
+### No credentials, no broker, no trading, no autonomous AI decisions
+
+## Sprint 012 — AI Runtime + Research Execution Engine — COMPLETE (2026-08-10)
 
 ### Implementation
 - PR #96: `feat(intelligence): add active research intelligence loop`
