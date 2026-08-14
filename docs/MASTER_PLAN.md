@@ -307,6 +307,16 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   - ProvenanceService: full chain from decision → memo → perspectives
   - 12 tests + migration 0032 (reversible)
 
+### Phase 3.4-B — Provider Gateway Layer: COMPLETED
+- Architecture: docs/architecture/AI_PROVIDER_GATEWAY.md
+- Gateway layer between provider adapters and model providers
+- Credential resolution: Anthropic ANTHROPIC_AUTH_TOKEN (priority 1) →
+  ANTHROPIC_API_KEY (fallback); OpenAI OPENAI_API_KEY
+- Model aliasing: COMPOUNDOS_MODEL_ALIASES (canonical → provider-facing,
+  e.g. claude-sonnet-4=claude-sonnet-4-6)
+- Design principles: canonical model identity preserved, provider
+  implementation replaceable, gateway compatible, provenance maintained
+
 
 
 - COS-009-D Follow-ups (from Slice D independent review):

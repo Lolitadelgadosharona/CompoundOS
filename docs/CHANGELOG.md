@@ -1,5 +1,15 @@
 # Changelog
 
+## Provider Gateway Layer — Phase 3.4-B — COMPLETE (2026-08-14)
+
+### Provider Gateway compatibility
+- Gateway layer between provider adapters and model providers
+- Anthropic credential resolution: ANTHROPIC_AUTH_TOKEN (priority 1) →
+  ANTHROPIC_API_KEY (fallback)
+- OpenAI credential resolution: OPENAI_API_KEY
+- Model aliasing via COMPOUNDOS_MODEL_ALIASES (e.g. claude-sonnet-4=claude-sonnet-4-6)
+- Canonical model identity preserved; provider implementation replaceable
+
 ## Sprint 022 — Scale & Intelligence Enhancement — COMPLETE (2026-08-11)
 
 ### Sprint Summary
