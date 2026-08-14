@@ -8,6 +8,7 @@ complete end-to-end AI investment research workflow.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
@@ -51,9 +52,28 @@ class MemoGenerator:
     """
 
     REQUIRED_PERSPECTIVES = 6
+    DEFAULT_MAX_OUTPUT_TOKENS = 8000
 
     def __init__(self, executor: GovernedLLMExecutor):
         self.executor = executor
+
+    @staticmethod
+    def resolve_max_output_tokens() -> int:
+        """Return the memo synthesis output-token cap.
+
+        Configurable via MEMO_MAX_OUTPUT_TOKENS (default 8000). Invalid or
+        non-positive values fall back to the default so a bad env override
+        can never silently truncate synthesis below a usable floor.
+        """
+        raw = os.environ.get("MEMO_MAX_OUTPUT_TOKENS", "").strip()
+        if raw:
+            try:
+                value = int(raw)
+            except ValueError:
+                return MemoGenerator.DEFAULT_MAX_OUTPUT_TOKENS
+            if value > 0:
+                return value
+        return MemoGenerator.DEFAULT_MAX_OUTPUT_TOKENS
 
     def generate(self, session: Session, run_id: UUID,
                  perspectives: list[PerspectiveResult],
@@ -76,6 +96,7 @@ class MemoGenerator:
                 ),
                 user_prompt=synthesis_prompt,
                 caller="ai",
+                max_output_tokens=self.resolve_max_output_tokens(),
             )
         except Exception:
             return None
@@ -314,7 +335,7 @@ class ResearchIntelligencePipeline:
     ) -> list[PerspectiveResult]:
         PERSPECTIVES = [
             ("value", "claude-sonnet-4"),
-            ("growth", "claude-sonnet-4"),
+            ("growth", "gpt-4o"),
             ("risk", "claude-sonnet-4"),
             ("macro", "gpt-4o"),
             ("policy", "claude-sonnet-4"),
@@ -351,17 +372,18 @@ class ResearchIntelligencePipeline:
             perspective, bundle,
         )
 
-        # Execute governed LLM call (mock for Slice C)
+        # Execute governed LLM call, requesting the configured model
         result = self.executor.execute(
             session, run_id, perspective, sys_prompt, user_prompt,
+            requested_model=model,
         )
 
-        # Store perspective_analyses
-        self._store_analysis(session, run_id, perspective, model,
-                             result)
+        # Store perspective_analyses with real provenance
+        self._store_analysis(session, run_id, perspective, result)
 
         return PerspectiveResult(
-            perspective=perspective, model=model,
+            perspective=perspective,
+            model=result.actual_model,
             provider=result.actual_provider,
             analysis=result.validated,
             conviction_score=result.validated.get("conviction_score", 5),
@@ -388,20 +410,31 @@ class ResearchIntelligencePipeline:
         return "\n".join(parts)
 
     def _store_analysis(self, session: Session, run_id: UUID,
-                        perspective: str, model: str,
+                        perspective: str,
                         result: ExecutionResult) -> None:
+        # Record the REAL execution result, never the requested model. The
+        # legacy `model` column stores the actual (served) model for backward
+        # compatibility; requested/resolved/provider/actual_model are stored
+        # explicitly for provenance (Learning Loop / model evaluation).
         now = datetime.now(timezone.utc)
         session.execute(
             text(
                 "INSERT INTO perspective_analyses"
                 " (id, run_id, perspective, model, prompt_version,"
+                " requested_model, resolved_model, provider, actual_model,"
                 " analysis, conviction_score, started_at, completed_at)"
                 " VALUES (:id, :rid, :p, :m, 1,"
+                " :rm, :rvm, :prov, :am,"
                 " CAST(:a AS jsonb), :cs, :now, :now)"
             ),
             {
                 "id": uuid4(), "rid": run_id, "p": perspective,
-                "m": model, "a": json.dumps(result.validated),
+                "m": result.actual_model,
+                "rm": result.requested_model,
+                "rvm": result.resolved_model,
+                "prov": result.actual_provider,
+                "am": result.actual_model,
+                "a": json.dumps(result.validated),
                 "cs": result.validated.get("conviction_score", 5),
                 "now": now,
             },

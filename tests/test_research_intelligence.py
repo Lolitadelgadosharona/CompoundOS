@@ -28,13 +28,16 @@ def _now():
 
 class MockExecutionResult:
     def __init__(self, validated=None, provider="mock",
-                 model="claude-sonnet-4"):
+                 model="claude-sonnet-4", requested_model=None,
+                 resolved_model=None):
         self.validated = validated or {
             "perspective": "value", "thesis": "Mock thesis",
             "conviction_score": 7,
         }
         self.actual_provider = provider
         self.actual_model = model
+        self.requested_model = requested_model or model
+        self.resolved_model = resolved_model or model
         self.retries = 0
         self.fallback_used = False
 
@@ -45,20 +48,30 @@ class MockExecutor:
     def __init__(self, responses=None):
         self._responses = responses or {}
         self.calls = []
+        self.last_kwargs = {}
 
     def execute(self, session, run_id, perspective, system_prompt,
-                user_prompt, caller="ai"):
+                user_prompt, caller="ai", max_output_tokens=None,
+                requested_model=None):
         self.calls.append(perspective)
+        self.last_kwargs[perspective] = {
+            "max_output_tokens": max_output_tokens,
+            "requested_model": requested_model,
+        }
         validated = self._responses.get(perspective, {
             "perspective": perspective,
             "thesis": f"Mock {perspective} analysis",
             "conviction_score": 7,
         })
+        model = requested_model or (
+            "claude-sonnet-4" if "claude" in str(
+                self._responses.get(perspective, {}),
+            ) else "gpt-4o")
         return MockExecutionResult(
             validated=validated,
-            model="claude-sonnet-4" if "claude" in str(
-                self._responses.get(perspective, {}),
-            ) else "gpt-4o",
+            model=model,
+            requested_model=requested_model,
+            resolved_model=model,
         )
 
 
@@ -506,3 +519,101 @@ class TestHardeningMemoGate:
         assert memo is not None
         # Evidence section records missing sources
         assert "evidence" in memo
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Model provenance (Problem 2 / M5-003)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestModelProvenance:
+    def test_growth_records_actual_model_not_requested(self, db_session):
+        """Regression: the `growth` DB row must record the REAL execution
+        result (actual_model / provider), not the requested/configured model.
+
+        Simulates the FULL_AAPL failure: growth was requested as
+        claude-sonnet-4 but actually served by openai/gpt-4o (fallback).
+        """
+        run_id, hh = TestPipeline().setup_run(db_session)
+
+        class ProvenanceExecutor:
+            def execute(self, session, run_id, perspective, *args, **kwargs):
+                if perspective == "growth":
+                    return MockExecutionResult(
+                        validated={"perspective": "growth",
+                                   "thesis": "gpt-4o growth thesis",
+                                   "conviction_score": 7},
+                        provider="openai", model="gpt-4o",
+                        requested_model="claude-sonnet-4",
+                        resolved_model="gpt-4o",
+                    )
+                return MockExecutionResult(
+                    validated={"perspective": perspective,
+                               "thesis": f"thesis-{perspective}",
+                               "conviction_score": 7},
+                    provider="anthropic", model="claude-sonnet-4",
+                    requested_model="claude-sonnet-4",
+                    resolved_model="claude-sonnet-4",
+                )
+
+        pipeline = ResearchIntelligencePipeline(
+            evidence_collector=MockEvidenceCollector(),
+            perspective_executor=ProvenanceExecutor(),
+            memo_generator=MemoGenerator(MockExecutor()),
+            confidence_engine=ConfidenceEngine(),
+        )
+        pipeline.execute(db_session, run_id, hh, "AAPL")
+
+        row = db_session.execute(
+            text("SELECT model, requested_model, provider, actual_model"
+                 " FROM perspective_analyses"
+                 " WHERE run_id = :rid AND perspective = 'growth'"),
+            {"rid": run_id},
+        ).fetchone()
+        assert row is not None
+        model, requested, provider, actual = row
+        assert model == "gpt-4o"
+        assert requested == "claude-sonnet-4"
+        assert provider == "openai"
+        assert actual == "gpt-4o"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Memo synthesis token cap (Problem 3 / M5-003)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestMemoTokenConfig:
+    def test_default_value(self, monkeypatch):
+        monkeypatch.delenv("MEMO_MAX_OUTPUT_TOKENS", raising=False)
+        assert MemoGenerator.resolve_max_output_tokens() == 8000
+
+    def test_environment_override(self, monkeypatch):
+        monkeypatch.setenv("MEMO_MAX_OUTPUT_TOKENS", "12000")
+        assert MemoGenerator.resolve_max_output_tokens() == 12000
+
+    def test_invalid_value_falls_back_to_default(self, monkeypatch):
+        monkeypatch.setenv("MEMO_MAX_OUTPUT_TOKENS", "not-a-number")
+        assert MemoGenerator.resolve_max_output_tokens() == 8000
+
+    def test_non_positive_value_falls_back_to_default(self, monkeypatch):
+        monkeypatch.setenv("MEMO_MAX_OUTPUT_TOKENS", "0")
+        assert MemoGenerator.resolve_max_output_tokens() == 8000
+
+    def test_generate_passes_token_cap_to_executor(self, db_session,
+                                                   monkeypatch):
+        """MemoGenerator passes the resolved token cap through execute()."""
+        monkeypatch.setenv("MEMO_MAX_OUTPUT_TOKENS", "9000")
+        executor = MockExecutor()
+        generator = MemoGenerator(executor)
+        perspectives = [
+            PerspectiveResult(perspective=p, model="c", provider="a",
+                              analysis={"thesis": "x"},
+                              conviction_score=7, success=True)
+            for p in ["value", "growth", "risk", "macro", "policy",
+                      "portfolio_fit"]
+        ]
+        memo = generator.generate(db_session, uuid4(), perspectives,
+                                  EvidenceBundle())
+        assert memo is not None
+        assert executor.last_kwargs["synthesis"]["max_output_tokens"] == 9000

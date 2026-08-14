@@ -24,7 +24,7 @@ from apps.api.models import (
 
 pytestmark = pytest.mark.postgres
 
-HEAD_REVISION = "0032_decision_lifecycle_hardening"
+HEAD_REVISION = "0033_perspective_provenance"
 PREVIOUS_REVISION = "0011_fencing_closure"
 
 COMMITTEE_TABLES = {

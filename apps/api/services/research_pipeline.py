@@ -154,7 +154,7 @@ class PerspectiveExecutor:
 
     PERSPECTIVES = [
         ("value", "claude-sonnet-4"),
-        ("growth", "claude-sonnet-4"),
+        ("growth", "gpt-4o"),
         ("risk", "claude-sonnet-4"),
         ("macro", "gpt-4o"),
         ("policy", "claude-sonnet-4"),

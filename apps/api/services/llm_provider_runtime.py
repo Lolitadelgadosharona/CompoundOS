@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -372,6 +373,31 @@ class ValidationResult:
     error: Optional[str] = None
 
 
+_FENCE_RE = re.compile(r"```[^\n`]*\n?(.*?)```", re.DOTALL)
+
+
+def _extract_json(content: str) -> str:
+    """Extract the first JSON object from an LLM response.
+
+    Real Claude/GPT-4o responses wrap JSON in three ways:
+      1. pure JSON            -> returned verbatim
+      2. markdown fenced JSON -> ```json ... ``` (any language tag)
+      3. prose-wrapped JSON   -> surrounding text stripped
+
+    Returns the raw JSON text (possibly empty). The caller
+    (ResponseValidator) is responsible for parsing and failing closed on
+    invalid output.
+    """
+    c = (content or "").strip()
+    fence = _FENCE_RE.search(c)
+    if fence:
+        c = fence.group(1).strip()
+    start, end = c.find("{"), c.rfind("}")
+    if start != -1 and end != -1:
+        c = c[start:end + 1]
+    return c
+
+
 class ResponseValidator:
     """Validates LLM responses before acceptance. Hard enforcement."""
 
@@ -381,7 +407,7 @@ class ResponseValidator:
     @staticmethod
     def validate(content: str, perspective: str) -> ValidationResult:
         try:
-            parsed = json.loads(content)
+            parsed = json.loads(_extract_json(content))
         except (json.JSONDecodeError, TypeError):
             return ValidationResult(
                 valid=False, error="Response is not valid JSON",
@@ -428,6 +454,8 @@ class ResponseValidator:
 class ExecutionResult:
     response: LLMResponse
     validated: dict
+    requested_model: str
+    resolved_model: str
     actual_provider: str
     actual_model: str
     retries: int = 0
@@ -469,6 +497,8 @@ class GovernedLLMExecutor:
         system_prompt: str,
         user_prompt: str,
         caller: str = "ai",
+        max_output_tokens: Optional[int] = None,
+        requested_model: Optional[str] = None,
     ) -> ExecutionResult:
         # 1. PermissionGate
         if self.gate:
@@ -478,7 +508,7 @@ class GovernedLLMExecutor:
 
         # 2. PromptGovernor
         prompt_id: Optional[UUID] = None
-        active_model: str = "claude-sonnet-4"
+        active_model: str = requested_model or "claude-sonnet-4"
         if self.governor:
             pv = self.governor.require_active(session, perspective)
             if not pv.valid:
@@ -492,12 +522,20 @@ class GovernedLLMExecutor:
         )
 
         # 4. Execute with retry + fallback
-        response, actual_provider, actual_model, retries, fallback = (
+        response, model_used, retries, fallback = (
             self._execute_with_retry(
                 primary_provider, primary_model, perspective,
-                system_prompt, user_prompt,
+                system_prompt, user_prompt, max_output_tokens,
             )
         )
+
+        # Provenance: record the REAL execution result, never the requested
+        # (possibly overridden) model. resolved_model is the provider-facing
+        # name after COMPOUNDOS_MODEL_ALIASES; actual_model is what the
+        # provider reported serving.
+        resolved_model = resolve_model(model_used)
+        actual_model = response.model or model_used
+        actual_provider = response.provider or ""
 
         # 5. ResponseValidator
         vr = self.validator.validate(response.content, perspective)
@@ -520,6 +558,8 @@ class GovernedLLMExecutor:
         return ExecutionResult(
             response=response,
             validated=vr.parsed or {},
+            requested_model=active_model,
+            resolved_model=resolved_model,
             actual_provider=actual_provider,
             actual_model=actual_model,
             retries=retries,
@@ -530,18 +570,29 @@ class GovernedLLMExecutor:
     def _execute_with_retry(
         self, provider: LLMProvider, model: str, perspective: str,
         system_prompt: str, user_prompt: str,
-    ) -> tuple[LLMResponse, str, str, int, bool]:
+        max_output_tokens: Optional[int] = None,
+    ) -> tuple[LLMResponse, str, int, bool]:
         """Retry 3× with exponential backoff. Auth fails fast. Fallback on
-        exhaustion."""
+        exhaustion.
+
+        Returns (response, model_used, retries, fallback_used). model_used is
+        the canonical model passed to the successful generate() call; the
+        provider-reported model lives on response.model.
+        """
         retries = 0
         delays = [1, 4, 16]
         last_error = None
 
+        def _gen(prov: LLMProvider, mdl: str) -> LLMResponse:
+            if max_output_tokens is not None:
+                return prov.generate(mdl, system_prompt, user_prompt,
+                                     max_output_tokens=max_output_tokens)
+            return prov.generate(mdl, system_prompt, user_prompt)
+
         for attempt in range(3):
             try:
-                return (provider.generate(model, system_prompt,
-                                          user_prompt),
-                        provider.__class__.__name__, model, retries, False)
+                return (_gen(provider, model),
+                        model, retries, False)
             except Exception as exc:
                 retries = attempt + 1
                 last_error = str(exc)
@@ -564,11 +615,8 @@ class GovernedLLMExecutor:
         if fb:
             fb_provider, fb_model = fb
             try:
-                resp = fb_provider.generate(fb_model, system_prompt,
-                                            user_prompt)
-                return (resp,
-                        fb_provider.__class__.__name__,
-                        fb_model, retries, True)
+                resp = _gen(fb_provider, fb_model)
+                return (resp, fb_model, retries, True)
             except Exception:
                 pass
 

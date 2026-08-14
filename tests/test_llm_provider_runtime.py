@@ -312,6 +312,58 @@ class TestResponseValidator:
         result = ResponseValidator.validate(content, "synthesis")
         assert result.valid
 
+    # ── JSON robustness (Problem 1 / M5-003) ──
+
+    def test_raw_json_success(self):
+        content = json.dumps({
+            "perspective": "value", "thesis": "Raw JSON",
+            "conviction_score": 7,
+        })
+        result = ResponseValidator.validate(content, "value")
+        assert result.valid
+        assert result.parsed["conviction_score"] == 7
+
+    def test_fenced_json_success(self):
+        content = "```json\n" + json.dumps({
+            "perspective": "value", "thesis": "Fenced JSON",
+            "conviction_score": 8,
+        }) + "\n```"
+        result = ResponseValidator.validate(content, "value")
+        assert result.valid
+        assert result.parsed["conviction_score"] == 8
+
+    def test_fenced_json_any_language_tag_success(self):
+        content = "```JSON\n" + json.dumps({
+            "perspective": "value", "thesis": "Uppercase fence",
+            "conviction_score": 6,
+        }) + "\n```"
+        result = ResponseValidator.validate(content, "value")
+        assert result.valid
+
+    def test_wrapped_text_json_success(self):
+        content = ("Here is the analysis you requested:\n"
+                   + json.dumps({
+                       "perspective": "value", "thesis": "Wrapped JSON",
+                       "conviction_score": 7,
+                   })
+                   + "\nLet me know if you need anything else.")
+        result = ResponseValidator.validate(content, "value")
+        assert result.valid
+        assert result.parsed["thesis"] == "Wrapped JSON"
+
+    def test_invalid_json_failure(self):
+        result = ResponseValidator.validate(
+            "I can't produce JSON right now.", "value",
+        )
+        assert not result.valid
+        assert "JSON" in result.error
+
+    def test_unbalanced_braces_failure(self):
+        result = ResponseValidator.validate(
+            '{"perspective": "value", "thesis": "x"', "value",
+        )
+        assert not result.valid
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # ProviderRouter
@@ -502,8 +554,57 @@ class TestGovernedExecutor:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Credential isolation
+# Model provenance (Problem 2 / M5-003)
 # ═══════════════════════════════════════════════════════════════════════
+
+
+class TestModelProvenance:
+    def test_requested_model_drives_routing(self, db_session):
+        """requested_model drives routing; provenance records the real result."""
+        router = ProviderRouter({"openai": MockOpenAIProvider(),
+                                 "anthropic": MockAnthropicProvider()})
+        executor = GovernedLLMExecutor(router=router)
+        result = executor.execute(
+            db_session, uuid4(), "growth", "s", "u",
+            requested_model="gpt-4o",
+        )
+        assert result.requested_model == "gpt-4o"
+        assert result.resolved_model == "gpt-4o"
+        assert result.actual_model == "gpt-4o"
+        assert result.actual_provider == "openai"
+
+    def test_requested_model_resolved_via_alias(self, monkeypatch, db_session):
+        """resolved_model reflects COMPOUNDOS_MODEL_ALIASES; requested stays
+        canonical."""
+        monkeypatch.setenv("COMPOUNDOS_MODEL_ALIASES",
+                           "gpt-4o=openai/gpt-4o")
+        router = ProviderRouter({"openai": MockOpenAIProvider()})
+        executor = GovernedLLMExecutor(router=router)
+        result = executor.execute(
+            db_session, uuid4(), "growth", "s", "u",
+            requested_model="gpt-4o",
+        )
+        assert result.requested_model == "gpt-4o"
+        assert result.resolved_model == "openai/gpt-4o"
+
+    def test_fallback_records_actual_model_not_primary(self, db_session):
+        """Fallback provenance: actual_model is the fallback model, requested
+        stays the primary model."""
+        _setup_prompt(db_session, "growth")
+        router = ProviderRouter({"anthropic": FailingProvider(),
+                                 "openai": MockOpenAIProvider()})
+        executor = GovernedLLMExecutor(
+            router=router, permission_gate=MockPermissionGate,
+            prompt_governor=MockPromptGovernor, cost_tracker=None,
+        )
+        result = executor.execute(
+            db_session, uuid4(), "growth", "s", "u",
+            requested_model="claude-sonnet-4",
+        )
+        assert result.fallback_used
+        assert result.requested_model == "claude-sonnet-4"
+        assert result.actual_model == "gpt-4o"
+        assert result.actual_provider == "openai"
 
 
 class TestCredentialIsolation:
