@@ -6,6 +6,8 @@ No dependency on sprint-012-slice-d governance module (not yet merged).
 
 import json
 import os
+import sys
+import types
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
@@ -24,6 +26,7 @@ from apps.api.services.llm_provider_runtime import (
     OpenAIAdapter,
     ProviderRouter,
     ResponseValidator,
+    resolve_model,
 )
 
 pytestmark = pytest.mark.postgres
@@ -505,13 +508,16 @@ class TestGovernedExecutor:
 
 class TestCredentialIsolation:
     def test_anthropic_fails_closed_without_key(self):
-        old = os.environ.pop("ANTHROPIC_API_KEY", None)
+        old_key = os.environ.pop("ANTHROPIC_API_KEY", None)
+        old_token = os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
         try:
             with pytest.raises(ConfigurationError):
                 AnthropicAdapter(api_key="")
         finally:
-            if old:
-                os.environ["ANTHROPIC_API_KEY"] = old
+            if old_key:
+                os.environ["ANTHROPIC_API_KEY"] = old_key
+            if old_token:
+                os.environ["ANTHROPIC_AUTH_TOKEN"] = old_token
 
     def test_openai_fails_closed_without_key(self):
         old = os.environ.pop("OPENAI_API_KEY", None)
@@ -538,7 +544,139 @@ class TestCredentialIsolation:
         assert "<redacted>" in r
 
 
-# ═══════════════════════════════════════════════════════════════════════
+def _install_fake_sdk(monkeypatch, module_name, client_attr):
+    """Inject a fake SDK module whose client records constructor kwargs."""
+    captured = {}
+
+    class _FakeClient:
+        def __init__(self, **kwargs):
+            captured["kwargs"] = kwargs
+
+    fake_module = types.ModuleType(module_name)
+    setattr(fake_module, client_attr, _FakeClient)
+    monkeypatch.setitem(sys.modules, module_name, fake_module)
+    return captured
+
+
+class TestProviderGateway:
+    """Phase 3.3-B — configurable base_url (official API vs ZenMux gateway)."""
+
+    def test_anthropic_official_mode_without_base_url(self, monkeypatch):
+        captured = _install_fake_sdk(monkeypatch, "anthropic", "Anthropic")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+        adapter = AnthropicAdapter()
+        adapter._ensure()
+        assert captured["kwargs"]["api_key"] == "test-key"
+        assert "base_url" not in captured["kwargs"]
+
+    def test_anthropic_gateway_mode_with_base_url(self, monkeypatch):
+        captured = _install_fake_sdk(monkeypatch, "anthropic", "Anthropic")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://gw.example.com/v1")
+        adapter = AnthropicAdapter()
+        adapter._ensure()
+        assert captured["kwargs"]["base_url"] == "https://gw.example.com/v1"
+
+    def test_anthropic_auth_token_mode(self, monkeypatch):
+        captured = _install_fake_sdk(monkeypatch, "anthropic", "Anthropic")
+        monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "zenmux-token")
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        adapter = AnthropicAdapter()
+        adapter._ensure()
+        assert captured["kwargs"]["auth_token"] == "zenmux-token"
+        assert "api_key" not in captured["kwargs"]
+
+    def test_anthropic_auth_token_precedence_over_api_key(self, monkeypatch):
+        captured = _install_fake_sdk(monkeypatch, "anthropic", "Anthropic")
+        monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "zenmux-token")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "plain-key")
+        adapter = AnthropicAdapter()
+        adapter._ensure()
+        assert captured["kwargs"]["auth_token"] == "zenmux-token"
+        assert "api_key" not in captured["kwargs"]
+
+    def test_openai_official_mode_without_base_url(self, monkeypatch):
+        captured = _install_fake_sdk(monkeypatch, "openai", "OpenAI")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+        adapter = OpenAIAdapter()
+        adapter._ensure()
+        assert captured["kwargs"]["api_key"] == "test-key"
+        assert "base_url" not in captured["kwargs"]
+
+    def test_openai_gateway_mode_with_base_url(self, monkeypatch):
+        captured = _install_fake_sdk(monkeypatch, "openai", "OpenAI")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_BASE_URL", "https://gw.example.com/v1")
+        adapter = OpenAIAdapter()
+        adapter._ensure()
+        assert captured["kwargs"]["base_url"] == "https://gw.example.com/v1"
+
+
+def _install_anthropic_fake_with_create(monkeypatch):
+    """Inject a fake anthropic SDK that records the model sent to
+    messages.create(), so adapter-level model aliasing can be asserted."""
+    captured = {}
+
+    class _FakeMessage:
+        def __init__(self):
+            self.content = [types.SimpleNamespace(text="hi")]
+            self.model = "anthropic/claude-sonnet-4.6"
+            self.usage = types.SimpleNamespace(input_tokens=1, output_tokens=1)
+            self.stop_reason = "end_turn"
+
+    class _FakeMessages:
+        def create(self, **kwargs):
+            captured["create_model"] = kwargs.get("model")
+            return _FakeMessage()
+
+    class _FakeClient:
+        def __init__(self, **kwargs):
+            captured["kwargs"] = kwargs
+
+        @property
+        def messages(self):
+            return _FakeMessages()
+
+    fake = types.ModuleType("anthropic")
+    setattr(fake, "Anthropic", _FakeClient)
+    monkeypatch.setitem(sys.modules, "anthropic", fake)
+    return captured
+
+
+class TestModelAliasing:
+    def test_identity_when_unset(self, monkeypatch):
+        monkeypatch.delenv("COMPOUNDOS_MODEL_ALIASES", raising=False)
+        assert resolve_model("claude-sonnet-4") == "claude-sonnet-4"
+
+    def test_maps_canonical_to_provider(self, monkeypatch):
+        monkeypatch.setenv(
+            "COMPOUNDOS_MODEL_ALIASES",
+            "claude-sonnet-4=claude-sonnet-4-6,gpt-4o=openai/gpt-4o",
+        )
+        assert resolve_model("claude-sonnet-4") == "claude-sonnet-4-6"
+        assert resolve_model("gpt-4o") == "openai/gpt-4o"
+        assert resolve_model("gemini-2.5-pro") == "gemini-2.5-pro"
+
+    def test_ignores_malformed_entries(self, monkeypatch):
+        monkeypatch.setenv("COMPOUNDOS_MODEL_ALIASES", "a=b,,c,=,d=e, f = g ")
+        assert resolve_model("a") == "b"
+        assert resolve_model("d") == "e"
+        assert resolve_model("f") == "g"
+        assert resolve_model("c") == "c"
+
+    def test_anthropic_generate_applies_alias(self, monkeypatch):
+        captured = _install_anthropic_fake_with_create(monkeypatch)
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setenv("COMPOUNDOS_MODEL_ALIASES",
+                           "claude-sonnet-4=claude-sonnet-4-6")
+        adapter = AnthropicAdapter()
+        adapter.generate(model="claude-sonnet-4")
+        assert captured["create_model"] == "claude-sonnet-4-6"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # AI Authority
 # ═══════════════════════════════════════════════════════════════════════
 

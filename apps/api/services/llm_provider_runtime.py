@@ -66,24 +66,78 @@ class ConfigurationError(Exception):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Model aliasing — canonical internal name → provider-facing model name
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def _load_model_aliases() -> dict[str, str]:
+    """Parse COMPOUNDOS_MODEL_ALIASES into a canonical→provider model map.
+
+    Format: "claude-sonnet-4=claude-sonnet-4-6,gpt-4o=openai/gpt-4o".
+    Empty and malformed entries are ignored. Values are trimmed.
+    """
+    raw = os.environ.get("COMPOUNDOS_MODEL_ALIASES", "")
+    aliases: dict[str, str] = {}
+    for part in raw.split(","):
+        part = part.strip()
+        if not part or "=" not in part:
+            continue
+        src, _, dst = part.partition("=")
+        src, dst = src.strip(), dst.strip()
+        if src and dst:
+            aliases[src] = dst
+    return aliases
+
+
+def resolve_model(model: str) -> str:
+    """Translate a canonical model name to its provider-facing name.
+
+    Uses COMPOUNDOS_MODEL_ALIASES (canonical=provider pairs). Returns the
+    input unchanged when no alias is configured for it, so behaviour is
+    identical when the env var is unset.
+    """
+    return _load_model_aliases().get(model, model)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # AnthropicAdapter
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 class AnthropicAdapter:
-    """Wraps anthropic.Anthropic client. Lazy import. Credential isolated."""
+    """Wraps anthropic.Anthropic client. Lazy import. Credential isolated.
 
-    def __init__(self, api_key: Optional[str] = None):
-        key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
-        if not key:
-            raise ConfigurationError("ANTHROPIC_API_KEY is required")
-        self._key = key
+    Credentials come from ANTHROPIC_API_KEY (x-api-key) or
+    ANTHROPIC_AUTH_TOKEN (Authorization: Bearer) — the latter for gateways
+    such as ZenMux. When ANTHROPIC_AUTH_TOKEN is set it takes precedence.
+    Supports an optional ANTHROPIC_BASE_URL gateway endpoint; when set, the
+    client is created with base_url=...; otherwise the official Anthropic
+    endpoint is used.
+    """
+
+    def __init__(self, api_key: Optional[str] = None,
+                 base_url: Optional[str] = None):
+        self._key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+        self._auth_token = os.environ.get("ANTHROPIC_AUTH_TOKEN", "")
+        if not self._key and not self._auth_token:
+            raise ConfigurationError(
+                "ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN is required")
+        self._base_url = (base_url
+                          or os.environ.get("ANTHROPIC_BASE_URL", "")
+                          or None)
         self._client = None
 
     def _ensure(self):
         if self._client is None:
             import anthropic
-            self._client = anthropic.Anthropic(api_key=self._key)
+            kwargs: dict = {}
+            if self._auth_token:
+                kwargs["auth_token"] = self._auth_token
+            else:
+                kwargs["api_key"] = self._key
+            if self._base_url:
+                kwargs["base_url"] = self._base_url
+            self._client = anthropic.Anthropic(**kwargs)
 
     def generate(
         self,
@@ -93,6 +147,7 @@ class AnthropicAdapter:
         max_output_tokens: int = 2000,
     ) -> LLMResponse:
         self._ensure()
+        model = resolve_model(model)
         t0 = time.monotonic()
         msg = self._client.messages.create(
             model=model,
@@ -121,19 +176,33 @@ class AnthropicAdapter:
 
 
 class OpenAIAdapter:
-    """Wraps openai.OpenAI client. Lazy import. Credential isolated."""
+    """Wraps openai.OpenAI client. Lazy import. Credential isolated.
 
-    def __init__(self, api_key: Optional[str] = None):
+    Supports an optional OPENAI_BASE_URL gateway endpoint (e.g. ZenMux).
+    When set, the client is created with base_url=...; otherwise the official
+    OpenAI endpoint is used.
+    """
+
+    def __init__(self, api_key: Optional[str] = None,
+                 base_url: Optional[str] = None):
         key = api_key or os.environ.get("OPENAI_API_KEY", "")
         if not key:
             raise ConfigurationError("OPENAI_API_KEY is required")
         self._key = key
+        self._base_url = (base_url
+                          or os.environ.get("OPENAI_BASE_URL", "")
+                          or None)
         self._client = None
 
     def _ensure(self):
         if self._client is None:
             import openai
-            self._client = openai.OpenAI(api_key=self._key)
+            if self._base_url:
+                self._client = openai.OpenAI(
+                    api_key=self._key, base_url=self._base_url,
+                )
+            else:
+                self._client = openai.OpenAI(api_key=self._key)
 
     def generate(
         self,
@@ -143,6 +212,7 @@ class OpenAIAdapter:
         max_output_tokens: int = 2000,
     ) -> LLMResponse:
         self._ensure()
+        model = resolve_model(model)
         t0 = time.monotonic()
         completion = self._client.chat.completions.create(
             model=model,
@@ -177,6 +247,11 @@ class GeminiAdapter:
     """Wraps google-genai client. Lazy import. Credential isolated.
 
     Uses google-genai (new unified SDK). No global configure() call.
+
+    GEMINI_GATEWAY_SUPPORT_PENDING: endpoint override via http_options.base_url
+    is technically supported by google-genai, but it is a nested option with
+    api_version/resource-scope semantics (unlike the flat base_url kwargs of
+    Anthropic/OpenAI). Left unchanged pending a dedicated gateway decision.
     """
 
     def __init__(self, api_key: Optional[str] = None):
@@ -200,6 +275,7 @@ class GeminiAdapter:
         max_output_tokens: int = 2000,
     ) -> LLMResponse:
         self._ensure()
+        model = resolve_model(model)
         t0 = time.monotonic()
         response = self._client.models.generate_content(
             model=model,
