@@ -535,8 +535,8 @@ def test_alembic_revision_chain_valid(postgres_engine) -> None:
 
     heads = list(script.get_revisions("heads"))
     assert len(heads) == 1, f"Expected 1 head, got {len(heads)}: {heads}"
-    assert heads[0].revision == "0032_decision_lifecycle_hardening", (
-        f"Expected head 0032_decision_lifecycle_hardening, "
+    assert heads[0].revision == "0033_perspective_provenance", (
+        f"Expected head 0033_perspective_provenance, "
         f"got {heads[0].revision}"
     )
 
@@ -686,5 +686,5 @@ def test_migration_chain_0004_0005_0006(postgres_engine) -> None:
     with postgres_engine.connect() as conn:
         row = conn.execute(text("SELECT version_num FROM alembic_version")).fetchone()
         assert row is not None
-        assert row[0] == "0032_decision_lifecycle_hardening"
+        assert row[0] == "0033_perspective_provenance"
         assert len(row[0]) <= 32

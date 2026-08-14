@@ -1,5 +1,38 @@
 # Changelog
 
+## M5-003 — Production Hardening (Research Pipeline Reliability) — COMPLETE (2026-08-14)
+
+### ResponseValidator JSON robustness
+- `_extract_json` now strips markdown fences (any language tag) and
+  surrounding prose before `json.loads`. Raw / fenced / prose-wrapped JSON
+  all validate; invalid input still fails closed.
+
+### Model provenance correctness
+- `GovernedLLMExecutor.execute()` accepts `requested_model`; no hardcoded
+  `claude-sonnet-4` default override when a governor is absent.
+- `ExecutionResult` now carries `requested_model`, `resolved_model`,
+  `actual_provider`, `actual_model` (real execution result).
+- `perspective_analyses` records real provenance (migration
+  `0033_perspective_provenance`): `requested_model`, `resolved_model`,
+  `provider`, `actual_model` columns.
+
+### Memo synthesis token cap
+- `MEMO_MAX_OUTPUT_TOKENS` env var (default 8000) replaces the hardcoded
+  cap; invalid/non-positive values fall back to the default.
+
+### Runtime shim boundary clarified
+- See docs/M5_003_PRODUCTION_HARDENING_REPORT.md §7-§8.
+
+## Provider Gateway Layer — Phase 3.4-B — COMPLETE (2026-08-14)
+
+### Provider Gateway compatibility
+- Gateway layer between provider adapters and model providers
+- Anthropic credential resolution: ANTHROPIC_AUTH_TOKEN (priority 1) →
+  ANTHROPIC_API_KEY (fallback)
+- OpenAI credential resolution: OPENAI_API_KEY
+- Model aliasing via COMPOUNDOS_MODEL_ALIASES (e.g. claude-sonnet-4=claude-sonnet-4-6)
+- Canonical model identity preserved; provider implementation replaceable
+
 ## Sprint 022 — Scale & Intelligence Enhancement — COMPLETE (2026-08-11)
 
 ### Sprint Summary
