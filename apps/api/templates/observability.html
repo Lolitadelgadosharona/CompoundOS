@@ -154,6 +154,34 @@
 </article>
 
 <article>
+    <h3>Prompt Versions</h3>
+    {% if prompt_stats %}
+    <table>
+        <thead>
+            <tr><th>Perspective</th><th>Version</th><th>Status</th>
+                <th>Executions</th><th>Success Rate</th>
+                <th>Avg Latency</th><th>Est. Cost</th></tr>
+        </thead>
+        <tbody>
+        {% for p in prompt_stats %}
+            <tr>
+                <td>{{ p.perspective }}</td>
+                <td>{{ p.version }}</td>
+                <td>{{ p.status }}</td>
+                <td>{{ p.executions }}</td>
+                <td>{{ "%.0f"|format(p.success_rate * 100) }}%</td>
+                <td>{{ p.avg_latency_ms }} ms</td>
+                <td>${{ "%.4f"|format(p.cost) }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>No prompt templates.</p>
+    {% endif %}
+</article>
+
+<article>
     <h3>Recent Executions</h3>
     {% if executions %}
     <table>

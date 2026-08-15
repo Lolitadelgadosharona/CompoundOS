@@ -230,3 +230,40 @@ def cost_trend(session: Session, days: int = 14) -> dict:
         ],
         "by_run": cost_by_run(session, 20),
     }
+
+
+def prompt_version_stats(session: Session) -> list[dict]:
+    """Per prompt-version execution analytics (read-only join).
+
+    Joins llm_execution_log.prompt_template_id → prompt_templates so each
+    prompt version shows its execution count, success/failure rates,
+    latency and estimated cost. No autonomous optimization.
+    """
+    rows = session.execute(
+        text(
+            "SELECT pt.perspective, pt.version, pt.status,"
+            " COUNT(l.id) AS executions,"
+            " COALESCE(SUM(CASE WHEN l.status = 'success'"
+            "  THEN 1 ELSE 0 END), 0) AS success,"
+            " COALESCE(SUM(CASE WHEN l.status IN ('failure','timeout',"
+            "  'rate_limited') THEN 1 ELSE 0 END), 0) AS failure,"
+            " COALESCE(AVG(l.duration_ms), 0) AS avg_latency,"
+            " COALESCE(SUM(l.cost_estimate), 0) AS cost"
+            " FROM prompt_templates pt"
+            " LEFT JOIN llm_execution_log l ON l.prompt_template_id = pt.id"
+            " GROUP BY pt.id, pt.perspective, pt.version, pt.status"
+            " ORDER BY pt.perspective, pt.version"
+        ),
+    ).fetchall()
+    return [
+        {
+            "perspective": r[0], "version": r[1], "status": r[2],
+            "executions": int(r[3] or 0),
+            "success": int(r[4] or 0),
+            "failure": int(r[5] or 0),
+            "success_rate": round(r[4] / r[3], 3) if r[3] else 0.0,
+            "avg_latency_ms": round(_f(r[6]), 1),
+            "cost": round(_f(r[7]), 6),
+        }
+        for r in rows
+    ]

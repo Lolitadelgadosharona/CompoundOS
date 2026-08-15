@@ -1,6 +1,6 @@
 """M5-007 tests — prompt governance, cost tracking, execution logging."""
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
@@ -84,14 +84,24 @@ class _FailingCost:
         raise RuntimeError("cost failure")
 
 
+def _seed_and_approve(db_session):
+    """Seed default prompts (draft) then Owner-approve all of them."""
+    gov = PromptGovernor()
+    gov.seed_defaults(db_session)
+    db_session.commit()
+    for p in gov.list_prompts(db_session):
+        if p["status"] == "draft":
+            gov.approve(db_session, UUID(p["id"]))
+    db_session.commit()
+    return gov
+
+
 # ── PromptGovernor ───────────────────────────────────────────────────────
 
 
 class TestPromptGovernor:
-    def test_require_active_returns_prompt(self, db_session):
-        gov = PromptGovernor()
-        gov.seed_defaults(db_session)
-        db_session.commit()
+    def test_require_active_returns_prompt_after_approval(self, db_session):
+        gov = _seed_and_approve(db_session)
         result = gov.require_active(db_session, "value")
         assert result.valid is True
         assert result.prompt_id is not None
@@ -104,6 +114,14 @@ class TestPromptGovernor:
         assert result.valid is False
         assert result.error and "No active prompt" in result.error
 
+    def test_require_active_fails_closed_for_draft(self, db_session):
+        # Seeded as draft but NOT approved → still no active prompt.
+        gov = PromptGovernor()
+        gov.seed_defaults(db_session)
+        db_session.commit()
+        result = gov.require_active(db_session, "value")
+        assert result.valid is False
+
     def test_seed_defaults_idempotent(self, db_session):
         gov = PromptGovernor()
         first = gov.seed_defaults(db_session)
@@ -112,14 +130,18 @@ class TestPromptGovernor:
         assert first == 7
         assert second == 0
 
-    def test_seed_covers_all_perspectives(self, db_session):
+    def test_seed_defaults_as_draft(self, db_session):
         gov = PromptGovernor()
         gov.seed_defaults(db_session)
         db_session.commit()
-        count = db_session.execute(text(
+        draft = db_session.execute(text(
+            "SELECT COUNT(*) FROM prompt_templates WHERE status = 'draft'"
+        )).scalar()
+        active = db_session.execute(text(
             "SELECT COUNT(*) FROM prompt_templates WHERE status = 'active'"
         )).scalar()
-        assert count == 7
+        assert draft == 7
+        assert active == 0
 
 
 # ── CostTracker ──────────────────────────────────────────────────────────
@@ -152,9 +174,7 @@ class TestCostTracker:
 
 class TestGovernedExecutorLogging:
     def _executor(self, db_session, cost=None):
-        gov = PromptGovernor()
-        gov.seed_defaults(db_session)
-        db_session.commit()
+        gov = _seed_and_approve(db_session)
         router = ProviderRouter({"anthropic": _MockProvider()})
         return GovernedLLMExecutor(
             router, prompt_governor=gov,

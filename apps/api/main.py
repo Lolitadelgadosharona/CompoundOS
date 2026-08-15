@@ -26,6 +26,7 @@ from apps.api.routers.policies import router as policies_router
 from apps.api.routers.portfolio_upgrade import router as portfolio_upgrade_router
 from apps.api.routers.portfolios import router as portfolios_router
 from apps.api.routers.production import router as production_router
+from apps.api.routers.prompts import router as prompts_router
 from apps.api.routers.real_ops import router as real_ops_router
 from apps.api.routers.research import router as research_router
 from apps.api.routers.research_workflow import router as research_workflow_router
@@ -180,6 +181,7 @@ app.include_router(intelligence_router)
 app.include_router(portfolio_upgrade_router)
 app.include_router(investment_os_router)
 app.include_router(production_router)
+app.include_router(prompts_router)
 app.include_router(real_ops_router)
 app.include_router(scale_router)
 app.include_router(household_router)
