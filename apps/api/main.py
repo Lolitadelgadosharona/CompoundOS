@@ -9,26 +9,27 @@ from apps.api.routers.automation import router as automation_router
 from apps.api.routers.backup import router as backup_router
 from apps.api.routers.committee import router as committee_router
 from apps.api.routers.committee_bridge import router as committee_bridge_router
+from apps.api.routers.daily_ops import router as daily_ops_router
 from apps.api.routers.dashboard import router as dashboard_router
+from apps.api.routers.dashboard_data import router as dashboard_data_router
 from apps.api.routers.decisions import router as decisions_router
 from apps.api.routers.guardian import router as guardian_router
 from apps.api.routers.health import router as health_router
+from apps.api.routers.household import router as household_router
 from apps.api.routers.households import router as households_router
 from apps.api.routers.imports import router as imports_router
-from apps.api.routers.notifications import router as notifications_router
-from apps.api.routers.policies import router as policies_router
-from apps.api.routers.portfolios import router as portfolios_router
-from apps.api.routers.research import router as research_router
-from apps.api.routers.research_workflow import router as research_workflow_router
-from apps.api.routers.dashboard_data import router as dashboard_data_router
-from apps.api.routers.daily_ops import router as daily_ops_router
 from apps.api.routers.intelligence import router as intelligence_router
-from apps.api.routers.portfolio_upgrade import router as portfolio_upgrade_router
 from apps.api.routers.investment_os import router as investment_os_router
+from apps.api.routers.notifications import router as notifications_router
+from apps.api.routers.observability import router as observability_router
+from apps.api.routers.policies import router as policies_router
+from apps.api.routers.portfolio_upgrade import router as portfolio_upgrade_router
+from apps.api.routers.portfolios import router as portfolios_router
 from apps.api.routers.production import router as production_router
 from apps.api.routers.real_ops import router as real_ops_router
+from apps.api.routers.research import router as research_router
+from apps.api.routers.research_workflow import router as research_workflow_router
 from apps.api.routers.scale import router as scale_router
-from apps.api.routers.household import router as household_router
 
 app = FastAPI(title="CompoundOS API", version="0.1.0")
 
@@ -183,3 +184,4 @@ app.include_router(real_ops_router)
 app.include_router(scale_router)
 app.include_router(household_router)
 app.include_router(auth_router)
+app.include_router(observability_router)
