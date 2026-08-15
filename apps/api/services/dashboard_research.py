@@ -104,13 +104,17 @@ class DashboardResearchService:
 
     @staticmethod
     def list_recent(session: Session, limit: int = 20) -> list[dict]:
-        """List recent research runs for the dashboard."""
+        """List recent research runs for the dashboard (with symbol)."""
         rows = session.execute(
             text(
-                "SELECT r.id, r.status, r.created_at,"
-                " m.id AS memo_id, m.confidence_score"
+                "SELECT r.id, r.status, r.created_at, m.id AS memo_id,"
+                " m.confidence_score, i.title"
                 " FROM research_runs r"
                 " LEFT JOIN investment_memos m ON m.run_id = r.id"
+                " LEFT JOIN research_requests rq ON rq.id = r.request_id"
+                " LEFT JOIN committee_review_requests cr"
+                "   ON cr.id = rq.review_request_id"
+                " LEFT JOIN investment_ideas i ON i.id = cr.investment_idea_id"
                 " ORDER BY r.created_at DESC LIMIT :lim"
             ),
             {"lim": limit},
@@ -121,6 +125,7 @@ class DashboardResearchService:
                 "date": str(r[2])[:10] if r[2] else None,
                 "memo_id": str(r[3]) if r[3] else None,
                 "confidence": r[4],
+                "symbol": (r[5] or "").replace("Research: ", "").strip() or "?",
             }
             for r in rows
         ]

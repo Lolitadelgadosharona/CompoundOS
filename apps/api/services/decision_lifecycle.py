@@ -250,6 +250,50 @@ class OwnerDecisionService:
         return {"decision_id": str(decision.id), "status": "rejected"}
 
     @staticmethod
+    def confirm_decision(session: Session, decision_id: UUID) -> dict:
+        """Owner confirms an EXISTING decision draft (journal confirm).
+
+        The draft is created by the research worker (DecisionBridgeService);
+        this action is the Owner's approval → confirmed snapshot + learning
+        reviews. Requires Owner authentication (API middleware).
+        """
+        from apps.api.decision_schemas import ConfirmDecisionRequest
+        from apps.api.services.decisions import confirm_draft, read_draft
+
+        draft = read_draft(session, decision_id)
+        confirm_draft(session, decision_id, ConfirmDecisionRequest(
+            expected_revision=draft.revision, confirmation=True,
+        ))
+        review_ids = LearningLoopService.schedule_reviews(
+            session, decision_id,
+        )
+        OwnerDecisionService._audit(session, "investment_decision",
+                                    "approved", str(decision_id))
+        return {
+            "decision_id": str(decision_id),
+            "status": "approved",
+            "review_ids": [str(r) for r in review_ids],
+        }
+
+    @staticmethod
+    def reject_decision(session: Session, decision_id: UUID) -> dict:
+        """Owner rejects an EXISTING decision draft (journal discard).
+
+        Removes the pending draft — no decision is made. Requires Owner
+        authentication (API middleware).
+        """
+        from apps.api.decision_schemas import DiscardDecisionRequest
+        from apps.api.services.decisions import discard_draft, read_draft
+
+        draft = read_draft(session, decision_id)
+        discard_draft(session, decision_id, DiscardDecisionRequest(
+            expected_revision=draft.revision,
+        ))
+        OwnerDecisionService._audit(session, "investment_decision",
+                                    "rejected", str(decision_id))
+        return {"decision_id": str(decision_id), "status": "rejected"}
+
+    @staticmethod
     def _load_memo(session: Session, memo_id: UUID) -> dict:
         memo = session.execute(
             text(

@@ -16,8 +16,12 @@
         <td>{{ d.confidence }}%</td>
         <td><a href="/memo/{{ d.memo_id }}">View Memo</a></td>
         <td>
-            <a href="#" role="button" class="contrast" style="background:#2ecc71">APPROVE</a>
-            <a href="#" role="button" class="secondary" style="background:#e74c3c">REJECT</a>
+            <a href="#" role="button" class="contrast" style="background:#2ecc71"
+               hx-post="/api/decisions/{{ d.decision_id }}/approve"
+               hx-swap="none">APPROVE</a>
+            <a href="#" role="button" class="secondary" style="background:#e74c3c"
+               hx-post="/api/decisions/{{ d.decision_id }}/reject"
+               hx-swap="none">REJECT</a>
         </td>
     </tr>
     {% endfor %}
