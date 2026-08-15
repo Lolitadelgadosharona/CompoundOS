@@ -125,17 +125,18 @@ class EvidenceCollector:
 
     def _collect_market(self, session: Session, symbol: str,
                         bundle: EvidenceBundle) -> None:
-        """Collect market data. Cache hit → use. Cache miss → provider.
-        Provider unavailable → graceful degradation (no fabrication).
+        """Collect market data (overview + price + financials).
+
+        Cache hit → use. Cache miss → provider. Provider unavailable →
+        graceful degradation (no fabrication).
         """
+        # Company overview
         if self.cache.is_fresh(symbol, "overview", session):
             cached = self.cache.get(session, symbol, "overview")
             if cached:
                 bundle.market_data["overview"] = cached["data"]
                 bundle.provenance.append(cached["provenance"])
-                return
-
-        if self.market:
+        elif self.market:
             try:
                 overview = self.market.get_overview(symbol)
                 if overview and overview.provenance:
@@ -148,6 +149,34 @@ class EvidenceCollector:
                     bundle.provenance.append(overview.provenance)
             except Exception:
                 bundle.missing_sources.append("market_data")
+
+        # Price history
+        if self.market:
+            try:
+                prices = self.market.get_price_history(symbol, days=100)
+                if prices:
+                    bundle.market_data["price_history"] = [
+                        {"date": str(p.date), "close": p.close,
+                         "volume": p.volume}
+                        for p in prices
+                    ]
+            except Exception:
+                bundle.missing_sources.append("price_history")
+
+        # Financials
+        if self.market:
+            try:
+                fin = self.market.get_financials(symbol)
+                if fin:
+                    bundle.market_data["financials"] = {
+                        "revenue": fin.revenue,
+                        "net_income": fin.net_income,
+                        "free_cash_flow": fin.free_cash_flow,
+                        "total_debt": fin.total_debt,
+                        "fiscal_year": fin.fiscal_year,
+                    }
+            except Exception:
+                bundle.missing_sources.append("financials")
 
     def _collect_knowledge(self, session: Session, symbol: str,
                            bundle: EvidenceBundle) -> None:

@@ -13,7 +13,7 @@ from sqlalchemy.engine.reflection import Inspector
 
 from tests.conftest import postgres_test_database_url
 
-HEAD_REVISION = "0033_perspective_provenance"
+HEAD_REVISION = "0034_research_run_status"
 SLICE_2_REVISION = "0002_investment_policy_foundation"
 SLICE_1_REVISION = "0001_household_persistence"
 

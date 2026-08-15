@@ -702,15 +702,23 @@ def allocation_context(allocation) -> dict:
 
 
 def last_research(session: Session) -> str:
-    """Latest research headline for the dashboard summary."""
+    """Latest research headline (symbol + rec + confidence + timestamp)."""
     row = session.execute(
         text(
-            "SELECT m.confidence_score, m.recommendation"
+            "SELECT m.confidence_score, m.recommendation, m.generated_at,"
+            " i.title"
             " FROM investment_memos m"
+            " LEFT JOIN research_runs r ON r.id = m.run_id"
+            " LEFT JOIN research_requests rq ON rq.id = r.request_id"
+            " LEFT JOIN committee_review_requests cr"
+            "   ON cr.id = rq.review_request_id"
+            " LEFT JOIN investment_ideas i ON i.id = cr.investment_idea_id"
             " ORDER BY m.generated_at DESC LIMIT 1"
         ),
     ).fetchone()
     if row is None:
         return "No research yet"
-    return f"Latest: confidence {row[0]} ({row[1] or '—'})"
+    symbol = (row[3] or "").replace("Research: ", "").strip() or "?"
+    ts = row[2].strftime("%Y-%m-%d %H:%M") if row[2] else ""
+    return f"{symbol}: {row[1] or '—'} (confidence {row[0]}, {ts})"
 

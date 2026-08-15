@@ -70,4 +70,12 @@ def _build_real_executor() -> Any:
 def _build_real_evidence_collector() -> Any:
     from apps.api.services.evidence_collector_v2 import EvidenceCollector
 
-    return EvidenceCollector()
+    market = None
+    try:
+        from apps.api.services.research_evidence import AlphaVantageProvider
+
+        market = AlphaVantageProvider()
+    except Exception:
+        # Missing AV_API_KEY → graceful degradation (internal evidence only).
+        market = None
+    return EvidenceCollector(market_provider=market)
