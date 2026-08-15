@@ -540,20 +540,28 @@ class GovernedLLMExecutor:
         # 5. ResponseValidator
         vr = self.validator.validate(response.content, perspective)
         if not vr.valid:
-            log_id = self._log_failure(
+            try:
+                self._log_failure(
+                    session, run_id, perspective,
+                    actual_provider, actual_model,
+                    prompt_id, response, retries, fallback,
+                    f"Validation failed: {vr.error}",
+                )
+            except Exception:
+                pass  # logging is best-effort (fail-open)
+            raise ValueError(f"LLM response validation failed: {vr.error}")
+
+        # 6. Logger (llm_execution_log) — fail-open: a logging/cost error
+        #    must never break the research run.
+        log_id = None
+        try:
+            log_id = self._log_success(
                 session, run_id, perspective,
                 actual_provider, actual_model,
                 prompt_id, response, retries, fallback,
-                f"Validation failed: {vr.error}",
             )
-            raise ValueError(f"LLM response validation failed: {vr.error}")
-
-        # 6. Logger (llm_execution_log)
-        log_id = self._log_success(
-            session, run_id, perspective,
-            actual_provider, actual_model,
-            prompt_id, response, retries, fallback,
-        )
+        except Exception:
+            log_id = None
 
         return ExecutionResult(
             response=response,
@@ -633,9 +641,14 @@ class GovernedLLMExecutor:
         from uuid import uuid4 as _u4
         eid = _u4()
         now = datetime.now(timezone.utc)
-        cost_est = _estimate_cost(actual_model,
-                                  response.input_tokens,
-                                  response.output_tokens)
+        if hasattr(self.cost, "estimate"):
+            cost_est = self.cost.estimate(
+                actual_model, response.input_tokens, response.output_tokens,
+            )
+        else:
+            cost_est = _estimate_cost(
+                actual_model, response.input_tokens, response.output_tokens,
+            )
         session.execute(
             text(
                 "INSERT INTO llm_execution_log"
