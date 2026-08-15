@@ -145,6 +145,13 @@ async def execute_pipeline(run_id: UUID, symbol: str,
     tracker = PipelineProgressTracker
     session = SessionLocal()
     try:
+        # Seed the default prompt templates (idempotent) so prompt
+        # governance can resolve an active version before execution.
+        from apps.api.services.prompt_governor import PromptGovernor
+
+        PromptGovernor().seed_defaults(session)
+        session.commit()
+
         _set_run_status(session, run_id, "collecting_evidence")
         session.commit()
         tracker.update(run_id, PipelineState.COLLECTING)

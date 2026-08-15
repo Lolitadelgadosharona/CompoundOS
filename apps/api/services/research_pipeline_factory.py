@@ -64,7 +64,16 @@ def _build_real_executor() -> Any:
             "(ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY)"
         )
     router = ProviderRouter(providers)
-    return GovernedLLMExecutor(router)
+    from apps.api.services.cost_tracker import CostTracker
+    from apps.api.services.prompt_governor import PromptGovernor
+
+    # Wire the governance layer: prompt resolution (fail-closed) + cost
+    # tracking (fail-open). This also activates llm_execution_log.
+    return GovernedLLMExecutor(
+        router,
+        prompt_governor=PromptGovernor(),
+        cost_tracker=CostTracker(),
+    )
 
 
 def _build_real_evidence_collector() -> Any:
