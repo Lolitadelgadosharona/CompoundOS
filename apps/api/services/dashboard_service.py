@@ -6,6 +6,7 @@ All data is computed live from existing systems. No caching.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
@@ -501,3 +502,215 @@ def _load_activity_feed(
     # Sort by time desc, truncate
     items.sort(key=lambda i: i.occurred_at, reverse=True)
     return ActivityFeed(items=items[:ACTIVITY_FEED_LIMIT])
+
+
+# ── M5-005: read-only display helpers ────────────────────────────────────
+#
+# These surface the M5-004 lifecycle (memo → decision → learning) through
+# the dashboard templates. Read-only; no business logic duplicated.
+
+
+def _parse_run_id(source: Optional[str]) -> Optional[UUID]:
+    if not source:
+        return None
+    marker = "research_run_id="
+    if marker in source:
+        try:
+            return UUID(source.split(marker, 1)[1].strip())
+        except ValueError:
+            return None
+    return None
+
+
+def _memo_text(value) -> str:
+    """Coerce a memo JSON fragment into a display string."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        return ", ".join(str(x) for x in value)
+    if isinstance(value, dict):
+        if "narrative" in value:
+            return str(value["narrative"])
+        if "compliant" in value:
+            return ("No policy violations detected."
+                    if value["compliant"] else "Policy violations detected.")
+        return json.dumps(value)
+    return str(value)
+
+
+def list_memo(session: Session, memo_id: UUID) -> Optional[dict]:
+    """Read a single investment memo for the memo page."""
+    row = session.execute(
+        text(
+            "SELECT memo, confidence_score, confidence_level, recommendation"
+            " FROM investment_memos WHERE id = :id"
+        ),
+        {"id": memo_id},
+    ).fetchone()
+    if row is None:
+        return None
+    memo = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+    return {
+        "memo_id": str(memo_id),
+        "thesis": _memo_text(memo.get("thesis")),
+        "evidence": _memo_text(memo.get("evidence")),
+        "bull_case": _memo_text(memo.get("bull_case")),
+        "bear_case": _memo_text(memo.get("bear_case")),
+        "risks": _memo_text(memo.get("risks")),
+        "valuation": _memo_text(memo.get("valuation")),
+        "portfolio_impact": _memo_text(memo.get("portfolio_impact")),
+        "guardian_impact": _memo_text(memo.get("guardian_impact")),
+        "confidence": row[1],
+        "confidence_level": row[2],
+        "recommendation": row[3],
+    }
+
+
+def _memo_summary(session: Session, run_id: Optional[UUID]) -> tuple:
+    """Return (recommendation, confidence, memo_id) for a run, if any."""
+    if run_id is None:
+        return ("—", None, None)
+    row = session.execute(
+        text(
+            "SELECT id, recommendation, confidence_score"
+            " FROM investment_memos WHERE run_id = :rid"
+        ),
+        {"rid": run_id},
+    ).fetchone()
+    if row is None:
+        return ("—", None, None)
+    return (row[1] or "—", row[2], str(row[0]))
+
+
+def list_pending_decisions_detail(session: Session,
+                                  household_id: UUID) -> list[dict]:
+    """Pending (draft) decisions with memo summary for the decisions page."""
+    rows = session.execute(
+        text(
+            "SELECT d.id, dd.title, dd.evidence_or_sources"
+            " FROM decisions d"
+            " JOIN decision_drafts dd ON dd.decision_id = d.id"
+            " WHERE d.household_id = :hid AND d.status = 'draft'"
+            " ORDER BY d.created_at DESC"
+        ),
+        {"hid": household_id},
+    ).fetchall()
+    result = []
+    for r in rows:
+        title = r[1] or "Untitled"
+        symbol = title.replace(" investment decision", "").strip() or "?"
+        recommendation, confidence, memo_id = _memo_summary(
+            session, _parse_run_id(r[2]),
+        )
+        result.append({
+            "decision_id": str(r[0]),
+            "symbol": symbol,
+            "recommendation": recommendation,
+            "confidence": confidence,
+            "memo_id": memo_id,
+        })
+    return result
+
+
+def list_decision_history(session: Session, household_id: UUID) -> list[dict]:
+    """Confirmed/archived decisions for the decisions page history table."""
+    rows = session.execute(
+        text(
+            "SELECT s.title, s.decision_summary, s.confirmed_at"
+            " FROM decisions d"
+            " JOIN decision_confirmed_snapshots s ON s.decision_id = d.id"
+            " WHERE d.household_id = :hid"
+            "   AND d.status IN ('confirmed', 'archived')"
+            " ORDER BY s.confirmed_at DESC"
+        ),
+        {"hid": household_id},
+    ).fetchall()
+    result = []
+    for r in rows:
+        title = r[0] or "Untitled"
+        symbol = title.replace(" investment decision", "").strip() or "?"
+        result.append({
+            "symbol": symbol,
+            "decision": r[1] or title,
+            "date": str(r[2])[:10] if r[2] else None,
+            "outcome": None,
+        })
+    return result
+
+
+def learning_metrics(session: Session) -> dict:
+    """Learning page metrics from decision_reviews + knowledge memory."""
+    review_count = session.execute(
+        text("SELECT COUNT(*) FROM decision_reviews"),
+    ).scalar() or 0
+    completed = session.execute(
+        text("SELECT COUNT(*) FROM decision_reviews"
+             " WHERE completed_at IS NOT NULL"),
+    ).scalar() or 0
+
+    # Best-effort prediction accuracy from knowledge memory.
+    rows = session.execute(
+        text(
+            "SELECT prediction_accuracy FROM investment_knowledge_memory"
+            " WHERE prediction_accuracy IS NOT NULL"
+        ),
+    ).fetchall()
+    errors = []
+    for r in rows:
+        try:
+            data = r[0] if isinstance(r[0], dict) else json.loads(r[0])
+            if data and "error" in data:
+                errors.append(abs(float(data["error"])))
+        except (ValueError, TypeError):
+            continue
+    accuracy = 0.0
+    if errors:
+        avg_err = sum(errors) / len(errors)
+        accuracy = max(0.0, min(1.0, 1.0 - avg_err / 100.0))
+
+    perspectives = [
+        {"name": n, "accuracy": 0.0}
+        for n in ("Value", "Growth", "Risk", "Macro", "Policy", "Portfolio Fit")
+    ]
+    return {
+        "accuracy": round(accuracy, 2),
+        "review_count": review_count,
+        "completed_reviews": completed,
+        "perspectives": perspectives,
+    }
+
+
+def allocation_context(allocation) -> dict:
+    """Map DashboardSnapshot.allocation → the dashboard template's 3-card
+    equities/bonds/cash shape (best-effort from asset classes)."""
+    result = {"equities": 0.0, "bonds": 0.0, "cash": 0.0}
+    for cls, entry in allocation.by_asset_class.items():
+        try:
+            pct = float(entry.percentage)
+        except (ValueError, TypeError):
+            pct = 0.0
+        low = (cls or "").lower()
+        if "equit" in low or "stock" in low:
+            result["equities"] += pct
+        elif "bond" in low or "fixed" in low:
+            result["bonds"] += pct
+        elif "cash" in low or "money" in low:
+            result["cash"] += pct
+    return result
+
+
+def last_research(session: Session) -> str:
+    """Latest research headline for the dashboard summary."""
+    row = session.execute(
+        text(
+            "SELECT m.confidence_score, m.recommendation"
+            " FROM investment_memos m"
+            " ORDER BY m.generated_at DESC LIMIT 1"
+        ),
+    ).fetchone()
+    if row is None:
+        return "No research yet"
+    return f"Latest: confidence {row[0]} ({row[1] or '—'})"
+

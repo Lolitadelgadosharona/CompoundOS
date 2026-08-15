@@ -1,10 +1,13 @@
 """Research workflow API — Sprint 015 (async + progress)."""
 
-from uuid import uuid4
+from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
+from apps.api.database import get_session
+from apps.api.services.dashboard_research import DashboardResearchService
 from apps.api.services.pipeline_async import (
     PipelineProgressTracker,
     execute_pipeline,
@@ -19,19 +22,29 @@ class StartResearchRequest(BaseModel):
 
 @router.post("/start")
 def start_research(body: StartResearchRequest,
-                   background_tasks: BackgroundTasks):
-    """Create research request and start async pipeline execution."""
+                   background_tasks: BackgroundTasks,
+                   session: Session = Depends(get_session)):
+    """Create the research FK chain and start async REAL pipeline execution."""
     if not body.symbol or not body.symbol.strip():
         raise HTTPException(status_code=400, detail="Symbol is required")
 
     symbol = body.symbol.strip().upper()
-    run_id = uuid4()
+
+    from apps.api.repositories.decisions import get_household_id
+
+    household_id = get_household_id(session)
+    if household_id is None:
+        raise HTTPException(status_code=404, detail="Household profile not found")
+
+    # Create idea → review → request → run chain (real records)
+    result = DashboardResearchService.create_request(session, symbol, household_id)
+    run_id = UUID(result["run_id"])
 
     # Create progress tracker entry
     progress = PipelineProgressTracker.create(run_id)
 
-    # Start pipeline in background
-    background_tasks.add_task(execute_pipeline, run_id, symbol)
+    # Start the REAL pipeline in a background task (fresh DB session inside)
+    background_tasks.add_task(execute_pipeline, run_id, symbol, household_id)
 
     return {
         "run_id": str(run_id),
@@ -45,6 +58,7 @@ def start_research(body: StartResearchRequest,
 def get_status(run_id: str):
     """Return current pipeline progress."""
     from uuid import UUID
+
     progress = PipelineProgressTracker.get(UUID(run_id))
     if progress is None:
         return {"status": "not_found"}

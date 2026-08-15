@@ -214,6 +214,34 @@ def confirm(
         raise _translate(exc) from exc
 
 
+@router.post("/{decision_id}/approve")
+def approve(decision_id: UUID, session: DatabaseSession) -> dict:
+    """Owner approves a pending decision draft (journal confirm + learning).
+
+    Owner-only: enforced by the global X-API-Key auth middleware.
+    """
+    from apps.api.services.decision_lifecycle import OwnerDecisionService
+
+    try:
+        return OwnerDecisionService.confirm_decision(session, decision_id)
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.post("/{decision_id}/reject")
+def reject(decision_id: UUID, session: DatabaseSession) -> dict:
+    """Owner rejects a pending decision draft (journal discard).
+
+    Owner-only: enforced by the global X-API-Key auth middleware.
+    """
+    from apps.api.services.decision_lifecycle import OwnerDecisionService
+
+    try:
+        return OwnerDecisionService.reject_decision(session, decision_id)
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
 @router.get("/{decision_id}", response_model=DecisionDetailResponse)
 def get_decision(
     decision_id: UUID, session: DatabaseSession

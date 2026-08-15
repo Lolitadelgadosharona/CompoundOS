@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from uuid import UUID, uuid4
+from uuid import UUID
 
 
 class PipelineState(str, Enum):
@@ -105,50 +105,84 @@ class PipelineProgressTracker:
             })
 
 
-async def execute_pipeline(run_id: UUID, symbol: str) -> None:
-    """Simulated pipeline execution with progress tracking.
+async def execute_pipeline(run_id: UUID, symbol: str,
+                           household_id: UUID) -> None:
+    """Run the REAL ResearchIntelligencePipeline in a background task.
 
-    In production, this calls ResearchIntelligencePipeline.execute().
-    For Sprint 015, it simulates the 7-state progression with realistic
-    timing.
-
-    This function is designed to be passed to FastAPI BackgroundTasks.
+    Opens a fresh DB session — never holds the request session across
+    async work. On success it wires the full M5-004 lifecycle:
+    Research → Committee → Decision Draft (pending Owner approval).
     """
-    import asyncio
+    import json
+
+    from sqlalchemy import text
+
+    from apps.api.database import SessionLocal
+    from apps.api.services.decision_lifecycle import (
+        CommitteeIntegrationService,
+        DecisionBridgeService,
+        _symbol_for_run,
+    )
+    from apps.api.services.research_pipeline_factory import (
+        build_research_pipeline,
+    )
 
     tracker = PipelineProgressTracker
-
-    # 1. Collecting evidence
     tracker.update(run_id, PipelineState.COLLECTING)
-    tracker.add_step(run_id, "Fetching market data")
-    await asyncio.sleep(1)  # Simulate network call
+    tracker.add_step(run_id, "Collecting evidence")
 
-    # 2. Running 6 perspectives
-    tracker.update(run_id, PipelineState.RUNNING, perspective_count=0)
-    for i, p in enumerate(
-        ["value", "growth", "risk", "macro", "policy", "portfolio_fit"]
-    ):
-        tracker.add_step(run_id, f"Analyzing {p} perspective...")
-        await asyncio.sleep(0.5)  # Simulate LLM call
-        tracker.update(
-            run_id, PipelineState.RUNNING,
-            perspective_count=i + 1,
+    session = SessionLocal()
+    try:
+        pipeline = build_research_pipeline()
+        tracker.update(run_id, PipelineState.RUNNING, perspective_count=0)
+        tracker.add_step(run_id, "Running 6 perspectives")
+        output = pipeline.execute(session, run_id, household_id, symbol)
+
+        tracker.update(run_id, PipelineState.GENERATING)
+        tracker.add_step(run_id, "Synthesizing memo")
+        tracker.update(run_id, PipelineState.SCORING)
+        tracker.add_step(run_id, "Calibrating confidence score")
+
+        if output.memo is None:
+            tracker.update(run_id, PipelineState.FAILED,
+                           error="Memo generation failed")
+            return
+
+        # Research → Committee (M5-004)
+        bridge = CommitteeIntegrationService.complete_research(
+            session, run_id, household_id,
+        )
+        memo_id = bridge["memo_id"]
+
+        # Committee → Decision Draft (pending Owner approval)
+        memo_row = session.execute(
+            text(
+                "SELECT memo, recommendation FROM investment_memos"
+                " WHERE id = :id"
+            ),
+            {"id": UUID(bridge["memo_id"])},
+        ).fetchone()
+        memo_json = (memo_row[0] if isinstance(memo_row[0], dict)
+                     else json.loads(memo_row[0]))
+        recommendation = memo_row[1] or "HOLD"
+        decision, _draft = DecisionBridgeService.create_decision_draft(
+            session, run_id, _symbol_for_run(session, run_id),
+            recommendation, memo_json.get("thesis", ""),
+            memo_json.get("risks", []),
         )
 
-    # 3. Generating memo
-    tracker.update(run_id, PipelineState.GENERATING)
-    tracker.add_step(run_id, "Synthesizing investment memo")
-    await asyncio.sleep(0.5)
+        tracker.update(
+            run_id, PipelineState.COMPLETE,
+            memo_id=str(memo_id),
+            confidence=(output.confidence.score
+                        if output.confidence else None),
+        )
+        tracker.add_step(run_id, f"Memo ready: /memo/{memo_id}")
+        tracker.add_step(
+            run_id, f"Pending decision: {decision.id}",
+        )
+    except Exception as exc:  # noqa: BLE001 — background worker boundary
+        tracker.update(run_id, PipelineState.FAILED, error=str(exc))
+    finally:
+        session.close()
 
-    # 4. Calculating confidence
-    tracker.update(run_id, PipelineState.SCORING)
-    tracker.add_step(run_id, "Calibrating confidence score")
-    await asyncio.sleep(0.3)
-
-    # 5. Complete
-    memo_id = uuid4()
-    tracker.update(
-        run_id, PipelineState.COMPLETE,
-        memo_id=str(memo_id), confidence=72,
-    )
-    tracker.add_step(run_id, f"Memo ready: /memo/{memo_id}")
