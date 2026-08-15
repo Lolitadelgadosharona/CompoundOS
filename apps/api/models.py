@@ -370,7 +370,7 @@ class Decision(Base):
     __tablename__ = "decisions"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('draft', 'confirmed', 'archived')",
+            "status IN ('draft', 'confirmed', 'archived', 'proposed')",
             name="ck_decisions_status_values",
         ),
         CheckConstraint(
