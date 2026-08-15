@@ -33,4 +33,15 @@
     <h3>Latest Research</h3>
     <p>{{ last_research }}</p>
 </article>
+
+<article>
+    <h3>AI Runtime Health</h3>
+    <p><strong>Providers:</strong>
+        Anthropic {{ providers.details.anthropic }},
+        OpenAI {{ providers.details.openai }},
+        AlphaVantage {{ providers.details.alpha_vantage }}</p>
+    <p><strong>AI execution:</strong> {{ ai_health.status }}
+        ({{ ai_health.details.calls_24h }} calls /
+         {{ ai_health.details.failures_24h }} failures in 24h)</p>
+</article>
 {% endblock %}
