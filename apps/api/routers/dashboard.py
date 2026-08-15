@@ -27,11 +27,29 @@ def _household(session: Session) -> UUID:
     return hid
 
 
+def _runtime_health(session: Session):
+    """Lightweight runtime health (provider presence + AI execution).
+
+    Deliberately does NOT run the full check suite (no backup/worker/
+    launchd/etc.) — only the cheap, dashboard-relevant checks.
+    """
+    from datetime import datetime, timezone
+
+    from apps.api.services.health_service import (
+        check_ai_execution,
+        check_providers,
+    )
+
+    now = datetime.now(timezone.utc)
+    return check_providers(now), check_ai_execution(session, now)
+
+
 @router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request,
                     session: Session = Depends(get_session)):
     hid = _household(session)
     snap = dashboard_service.build_dashboard(session, hid)
+    providers, ai_health = _runtime_health(session)
     return templates.TemplateResponse(request, "dashboard.html", {
         "net_worth": f"${snap.net_worth.total_value}",
         "pending_decisions": len(snap.pending_decisions),
@@ -40,6 +58,8 @@ async def dashboard(request: Request,
             v.description for v in snap.policy_compliance.rule_violations
         ],
         "last_research": dashboard_service.last_research(session),
+        "providers": providers,
+        "ai_health": ai_health,
     })
 
 
@@ -80,3 +100,18 @@ async def learning(request: Request,
     return templates.TemplateResponse(
         request, "learning.html", dashboard_service.learning_metrics(session),
     )
+
+
+@router.get("/observability", response_class=HTMLResponse)
+async def observability(request: Request,
+                        session: Session = Depends(get_session)):
+    from apps.api.services import observability_service
+
+    providers, ai_health = _runtime_health(session)
+    return templates.TemplateResponse(request, "observability.html", {
+        "summary": observability_service.execution_summary(session),
+        "cost": observability_service.cost_breakdown(session),
+        "executions": observability_service.list_executions(session, 50),
+        "providers": providers,
+        "ai_health": ai_health,
+    })
