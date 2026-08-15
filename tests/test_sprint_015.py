@@ -50,7 +50,10 @@ class TestDashboardData:
         assert r.status_code == 200
         data = r.json()
         assert "accuracy" in data
-        assert len(data["perspectives"]) == 6
+        # perspectives + outcomes are real (derived from recorded outcomes;
+        # empty when none exist), not a hardcoded six-entry list.
+        assert isinstance(data.get("perspectives"), list)
+        assert isinstance(data.get("outcomes"), list)
 
     def test_empty_state_all_endpoints_200(self):
         for path in [

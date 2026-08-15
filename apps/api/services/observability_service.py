@@ -138,3 +138,95 @@ def cost_breakdown(session: Session, run_limit: int = 20) -> dict:
         "by_perspective": cost_by_perspective(session),
         "by_run": cost_by_run(session, run_limit),
     }
+
+
+def execution_reliability(session: Session) -> dict:
+    """Reliability metrics: success/failure/retry rates, latency, and
+    failure breakdowns. Read-only SQL aggregation."""
+    row = session.execute(
+        text(
+            "SELECT COUNT(*),"
+            " COALESCE(SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END), 0),"
+            " COALESCE(SUM(CASE WHEN status IN ('failure','timeout',"
+            "  'rate_limited') THEN 1 ELSE 0 END), 0),"
+            " COALESCE(SUM(CASE WHEN retry_count > 0 THEN 1 ELSE 0 END), 0),"
+            " COALESCE(AVG(duration_ms), 0),"
+            " COALESCE(percentile_cont(0.95) WITHIN GROUP"
+            "  (ORDER BY duration_ms), 0)"
+            " FROM llm_execution_log"
+        ),
+    ).fetchone()
+    total = int(row[0] or 0)
+    success = int(row[1] or 0)
+    failure = int(row[2] or 0)
+    retried = int(row[3] or 0)
+
+    by_status = session.execute(
+        text("SELECT status, COUNT(*) FROM llm_execution_log"
+             " GROUP BY status ORDER BY COUNT(*) DESC"),
+    ).fetchall()
+    failure_by_perspective = session.execute(
+        text("SELECT COALESCE(perspective, 'unknown'), COUNT(*)"
+             " FROM llm_execution_log"
+             " WHERE status IN ('failure','timeout','rate_limited')"
+             " GROUP BY perspective ORDER BY COUNT(*) DESC"),
+    ).fetchall()
+    failure_by_model = session.execute(
+        text("SELECT COALESCE(model, 'unknown'), COUNT(*)"
+             " FROM llm_execution_log"
+             " WHERE status IN ('failure','timeout','rate_limited')"
+             " GROUP BY model ORDER BY COUNT(*) DESC"),
+    ).fetchall()
+    recent_errors = session.execute(
+        text("SELECT perspective, model, error_message, created_at"
+             " FROM llm_execution_log WHERE error_message IS NOT NULL"
+             " ORDER BY created_at DESC LIMIT 10"),
+    ).fetchall()
+
+    return {
+        "total_calls": total,
+        "success_rate": round(success / total, 3) if total else 0.0,
+        "failure_rate": round(failure / total, 3) if total else 0.0,
+        "retry_rate": round(retried / total, 3) if total else 0.0,
+        "avg_latency_ms": round(_f(row[4]), 1),
+        "p95_latency_ms": round(_f(row[5]), 1),
+        "by_status": [
+            {"status": r[0], "count": int(r[1] or 0)} for r in by_status
+        ],
+        "failure_by_perspective": [
+            {"perspective": r[0], "failures": int(r[1] or 0)}
+            for r in failure_by_perspective
+        ],
+        "failure_by_model": [
+            {"model": r[0], "failures": int(r[1] or 0)}
+            for r in failure_by_model
+        ],
+        "recent_errors": [
+            {"perspective": r[0], "model": r[1], "error_message": r[2],
+             "created_at": str(r[3]) if r[3] else None}
+            for r in recent_errors
+        ],
+    }
+
+
+def cost_trend(session: Session, days: int = 14) -> dict:
+    """Estimated cost per day over a window + per-run cost trend."""
+    rows = session.execute(
+        text(
+            "SELECT DATE(created_at)::text AS day, COUNT(*) AS calls,"
+            " COALESCE(SUM(cost_estimate), 0) AS cost"
+            " FROM llm_execution_log"
+            " WHERE created_at > NOW() - make_interval(days => :days)"
+            " GROUP BY DATE(created_at) ORDER BY day"
+        ),
+        {"days": max(1, days)},
+    ).fetchall()
+    return {
+        "days": days,
+        "daily": [
+            {"day": r[0], "calls": int(r[1] or 0),
+             "cost": round(_f(r[2]), 6)}
+            for r in rows
+        ],
+        "by_run": cost_by_run(session, 20),
+    }

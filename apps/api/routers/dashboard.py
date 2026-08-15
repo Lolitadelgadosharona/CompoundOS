@@ -111,6 +111,8 @@ async def observability(request: Request,
     return templates.TemplateResponse(request, "observability.html", {
         "summary": observability_service.execution_summary(session),
         "cost": observability_service.cost_breakdown(session),
+        "reliability": observability_service.execution_reliability(session),
+        "trend": observability_service.cost_trend(session),
         "executions": observability_service.list_executions(session, 50),
         "providers": providers,
         "ai_health": ai_health,

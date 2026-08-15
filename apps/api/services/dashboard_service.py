@@ -640,6 +640,105 @@ def list_decision_history(session: Session, household_id: UUID) -> list[dict]:
     return result
 
 
+def _parse_json(value):
+    """Parse a JSON/text column into a dict, tolerating dict input."""
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value
+    try:
+        return json.loads(value)
+    except (ValueError, TypeError):
+        return None
+
+
+def _overall_accuracy(session: Session) -> float:
+    """Overall prediction accuracy from stored prediction_accuracy rows."""
+    rows = session.execute(
+        text(
+            "SELECT prediction_accuracy FROM investment_knowledge_memory"
+            " WHERE prediction_accuracy IS NOT NULL"
+        ),
+    ).fetchall()
+    errors = []
+    for r in rows:
+        data = _parse_json(r[0])
+        if not data:
+            continue
+        try:
+            errors.append(abs(float(data.get("error", 0))))
+        except (ValueError, TypeError):
+            continue
+    if not errors:
+        return 0.0
+    avg_err = sum(errors) / len(errors)
+    return max(0.0, min(1.0, 1.0 - avg_err / 100.0))
+
+
+def _perspective_accuracy(session: Session) -> list[dict]:
+    """Real per-perspective accuracy from stored outcome perspective
+    scores (0.0 when no data — real, not hardcoded)."""
+    rows = session.execute(
+        text(
+            "SELECT past_outcomes FROM investment_knowledge_memory"
+            " WHERE past_outcomes IS NOT NULL"
+        ),
+    ).fetchall()
+    accum: dict[str, tuple[float, int]] = {}
+    for r in rows:
+        data = _parse_json(r[0])
+        if not data:
+            continue
+        scores = data.get("perspective_scores") or {}
+        if not isinstance(scores, dict):
+            continue
+        for name, score in scores.items():
+            try:
+                s = float(score)
+            except (ValueError, TypeError):
+                continue
+            s = max(0.0, min(1.0, s))
+            total, count = accum.get(name, (0.0, 0))
+            accum[name] = (total + s, count + 1)
+
+    label = {
+        "value": "Value", "growth": "Growth", "risk": "Risk",
+        "macro": "Macro", "policy": "Policy",
+        "portfolio_fit": "Portfolio Fit",
+    }
+    return [
+        {
+            "name": label.get(key, key.title()),
+            "accuracy": round(total / count, 3) if count else 0.0,
+            "samples": count,
+        }
+        for key, (total, count) in sorted(accum.items())
+    ]
+
+
+def _outcome_history(session: Session, limit: int = 20) -> list[dict]:
+    """Recent recorded outcomes (symbol, return, timestamp)."""
+    rows = session.execute(
+        text(
+            "SELECT entity_key, past_outcomes FROM investment_knowledge_memory"
+            " WHERE past_outcomes IS NOT NULL"
+            " ORDER BY updated_at DESC LIMIT :limit"
+        ),
+        {"limit": max(1, min(limit, 100))},
+    ).fetchall()
+    outcomes = []
+    for r in rows:
+        data = _parse_json(r[1])
+        if not data:
+            continue
+        outcomes.append({
+            "symbol": r[0],
+            "return_pct": data.get("return_pct"),
+            "recorded_at": data.get("recorded_at"),
+        })
+    return outcomes
+
+
 def learning_metrics(session: Session) -> dict:
     """Learning page metrics from decision_reviews + knowledge memory."""
     review_count = session.execute(
@@ -650,35 +749,12 @@ def learning_metrics(session: Session) -> dict:
              " WHERE completed_at IS NOT NULL"),
     ).scalar() or 0
 
-    # Best-effort prediction accuracy from knowledge memory.
-    rows = session.execute(
-        text(
-            "SELECT prediction_accuracy FROM investment_knowledge_memory"
-            " WHERE prediction_accuracy IS NOT NULL"
-        ),
-    ).fetchall()
-    errors = []
-    for r in rows:
-        try:
-            data = r[0] if isinstance(r[0], dict) else json.loads(r[0])
-            if data and "error" in data:
-                errors.append(abs(float(data["error"])))
-        except (ValueError, TypeError):
-            continue
-    accuracy = 0.0
-    if errors:
-        avg_err = sum(errors) / len(errors)
-        accuracy = max(0.0, min(1.0, 1.0 - avg_err / 100.0))
-
-    perspectives = [
-        {"name": n, "accuracy": 0.0}
-        for n in ("Value", "Growth", "Risk", "Macro", "Policy", "Portfolio Fit")
-    ]
     return {
-        "accuracy": round(accuracy, 2),
+        "accuracy": round(_overall_accuracy(session), 2),
         "review_count": review_count,
         "completed_reviews": completed,
-        "perspectives": perspectives,
+        "perspectives": _perspective_accuracy(session),
+        "outcomes": _outcome_history(session),
     }
 
 
