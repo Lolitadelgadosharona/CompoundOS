@@ -384,6 +384,7 @@ class LearningLoopService:
     def record_outcome(session: Session, entity_key: str,
                        decision_id: UUID, return_pct: float,
                        perspective_scores: Optional[dict] = None,
+                       predicted_confidence: Optional[int] = None,
                        ) -> None:
         outcome = json.dumps({
             "decision_id": str(decision_id),
@@ -401,6 +402,12 @@ class LearningLoopService:
             ),
             {"id": uuid4(), "ek": entity_key, "o": outcome},
         )
+        # Close the loop: update prediction accuracy from the same outcome
+        # (Owner-controlled — only when a predicted confidence is given).
+        if predicted_confidence is not None:
+            LearningLoopService.update_prediction_accuracy(
+                session, entity_key, predicted_confidence, return_pct,
+            )
 
     @staticmethod
     def update_prediction_accuracy(session: Session, entity_key: str,
@@ -412,13 +419,12 @@ class LearningLoopService:
             "error": predicted - int(actual * 10) if actual else 0,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         })
-        # Upsert: update existing or insert new
+        # Upsert against the (entity_type, entity_key) unique constraint:
+        # update the existing row (which may hold past_outcomes) or insert.
         existing = session.execute(
             text(
                 "SELECT id FROM investment_knowledge_memory"
-                " WHERE entity_key = :ek"
-                " AND memory_type = 'company_profile'"
-                " AND prediction_accuracy IS NOT NULL"
+                " WHERE entity_type = 'company' AND entity_key = :ek"
                 " ORDER BY updated_at DESC LIMIT 1"
             ),
             {"ek": entity_key},

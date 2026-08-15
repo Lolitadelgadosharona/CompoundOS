@@ -5,20 +5,23 @@
 <article>
     <h3>Overall Prediction Accuracy</h3>
     <h2>{{ "%.0f"|format(accuracy * 100) }}%</h2>
-    <p>Based on {{ review_count }} outcome reviews</p>
+    <p>Based on {{ review_count }} outcome reviews
+       ({{ completed_reviews }} completed)</p>
     <progress value="{{ accuracy }}" max="1"></progress>
 </article>
 
 <h3>Perspective Performance</h3>
+{% if perspectives %}
 <table>
     <thead>
-        <tr><th>Perspective</th><th>Accuracy</th><th>Rating</th></tr>
+        <tr><th>Perspective</th><th>Accuracy</th><th>Samples</th><th>Rating</th></tr>
     </thead>
     <tbody>
     {% for p in perspectives %}
     <tr>
         <td>{{ p.name }}</td>
         <td>{{ "%.0f"|format(p.accuracy * 100) }}%</td>
+        <td>{{ p.samples }}</td>
         <td>
             <progress value="{{ p.accuracy }}" max="1"></progress>
         </td>
@@ -26,4 +29,29 @@
     {% endfor %}
     </tbody>
 </table>
+{% else %}
+<p>No perspective outcomes recorded yet.</p>
+{% endif %}
+
+<article>
+    <h3>Outcome History</h3>
+    {% if outcomes %}
+    <table>
+        <thead>
+            <tr><th>Symbol</th><th>Return</th><th>Recorded</th></tr>
+        </thead>
+        <tbody>
+        {% for o in outcomes %}
+            <tr>
+                <td>{{ o.symbol }}</td>
+                <td>{{ o.return_pct }}%</td>
+                <td>{{ o.recorded_at }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>No outcomes recorded yet.</p>
+    {% endif %}
+</article>
 {% endblock %}

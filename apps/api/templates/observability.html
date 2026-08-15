@@ -86,6 +86,74 @@
 </article>
 
 <article>
+    <h3>Reliability</h3>
+    <div class="grid">
+        <article>
+            <h6>Success Rate</h6>
+            <h2>{{ "%.1f"|format(reliability.success_rate * 100) }}%</h2>
+        </article>
+        <article>
+            <h6>Failure Rate</h6>
+            <h2>{{ "%.1f"|format(reliability.failure_rate * 100) }}%</h2>
+        </article>
+        <article>
+            <h6>Retry Rate</h6>
+            <h2>{{ "%.1f"|format(reliability.retry_rate * 100) }}%</h2>
+        </article>
+        <article>
+            <h6>Avg Latency</h6>
+            <h2>{{ reliability.avg_latency_ms }} ms</h2>
+        </article>
+        <article>
+            <h6>p95 Latency</h6>
+            <h2>{{ reliability.p95_latency_ms }} ms</h2>
+        </article>
+    </div>
+
+    {% if reliability.failure_by_perspective %}
+    <h4>Failures by Perspective</h4>
+    <table>
+        <thead><tr><th>Perspective</th><th>Failures</th></tr></thead>
+        <tbody>
+        {% for f in reliability.failure_by_perspective %}
+            <tr><td>{{ f.perspective }}</td><td>{{ f.failures }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+
+    {% if reliability.recent_errors %}
+    <h4>Recent Errors</h4>
+    <table>
+        <thead><tr><th>Perspective</th><th>Model</th><th>Error</th></tr></thead>
+        <tbody>
+        {% for e in reliability.recent_errors %}
+            <tr><td>{{ e.perspective }}</td><td>{{ e.model }}</td>
+                <td>{{ e.error_message }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</article>
+
+<article>
+    <h3>Cost Trend <small>(estimated)</small></h3>
+    {% if trend.daily %}
+    <table>
+        <thead><tr><th>Day</th><th>Calls</th><th>Estimated Cost</th></tr></thead>
+        <tbody>
+        {% for d in trend.daily %}
+            <tr><td>{{ d.day }}</td><td>{{ d.calls }}</td>
+                <td>${{ "%.4f"|format(d.cost) }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>No cost data in the last {{ trend.days }} days.</p>
+    {% endif %}
+</article>
+
+<article>
     <h3>Recent Executions</h3>
     {% if executions %}
     <table>
