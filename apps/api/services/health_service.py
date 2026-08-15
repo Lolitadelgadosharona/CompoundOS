@@ -281,10 +281,72 @@ def check_notification(session: Session, now: datetime) -> ComponentHealth:
                                "Check error", now)
 
 
+def check_providers(now: datetime) -> ComponentHealth:
+    """Provider credential presence (no live/paid API call)."""
+    try:
+        from apps.api.services.llm_provider_runtime import (
+            AnthropicAdapter,
+            OpenAIAdapter,
+        )
+        from apps.api.services.research_evidence import AlphaVantageProvider
+
+        details: dict[str, str] = {}
+        missing: list[str] = []
+        for name, cls in (("anthropic", AnthropicAdapter),
+                          ("openai", OpenAIAdapter),
+                          ("alpha_vantage", AlphaVantageProvider)):
+            try:
+                cls()
+                details[name] = "configured"
+            except Exception:
+                details[name] = "missing"
+                missing.append(name)
+        if missing:
+            return ComponentHealth(
+                "providers", DEGRADED,
+                f"Missing credentials: {', '.join(missing)}", now, details,
+            )
+        return ComponentHealth("providers", HEALTHY,
+                               "All providers configured", now, details)
+    except Exception as e:
+        return ComponentHealth("providers", UNKNOWN, _safe(str(e)), now)
+
+
+def check_ai_execution(session: Session, now: datetime) -> ComponentHealth:
+    """Recent AI execution health from llm_execution_log (24h window)."""
+    try:
+        row = session.execute(
+            text(
+                "SELECT COUNT(*),"
+                " COALESCE(SUM(CASE WHEN status IN ('failure','timeout',"
+                "  'rate_limited') THEN 1 ELSE 0 END), 0)"
+                " FROM llm_execution_log"
+                " WHERE created_at > NOW() - INTERVAL '24 hours'"
+            ),
+        ).fetchone()
+        total = int(row[0] or 0)
+        failures = int(row[1] or 0)
+        details = {"calls_24h": total, "failures_24h": failures}
+        if total == 0:
+            return ComponentHealth("ai_execution", UNKNOWN,
+                                   "No executions in last 24h", now, details)
+        if failures == 0:
+            return ComponentHealth("ai_execution", HEALTHY,
+                                   f"{total} calls, 0 failures", now, details)
+        if failures / total >= 0.5:
+            return ComponentHealth("ai_execution", DEGRADED,
+                                   f"{failures}/{total} failed", now, details)
+        return ComponentHealth("ai_execution", HEALTHY,
+                               f"{failures}/{total} failed (transient)",
+                               now, details)
+    except Exception as e:
+        return ComponentHealth("ai_execution", UNKNOWN, _safe(str(e)), now)
+
+
 CRITICAL = {"database", "migration"}
 DEGRADING = {
     "backup", "leases", "worker", "credential", "guardian",
-    "restore_verification", "notification",
+    "restore_verification", "notification", "providers", "ai_execution",
 }
 
 
@@ -330,6 +392,8 @@ def run_all_checks(
         lambda: check_credential(now),
         lambda: check_launchd(now),
         lambda: check_notification(session, now),
+        lambda: check_providers(now),
+        lambda: check_ai_execution(session, now),
     ]
 
     components: list[ComponentHealth] = []
