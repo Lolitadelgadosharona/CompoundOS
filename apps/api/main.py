@@ -31,6 +31,7 @@ from apps.api.routers.real_ops import router as real_ops_router
 from apps.api.routers.research import router as research_router
 from apps.api.routers.research_workflow import router as research_workflow_router
 from apps.api.routers.scale import router as scale_router
+from apps.api.routers.setup import router as setup_router
 
 app = FastAPI(title="CompoundOS API", version="0.1.0")
 
@@ -184,6 +185,7 @@ app.include_router(production_router)
 app.include_router(prompts_router)
 app.include_router(real_ops_router)
 app.include_router(scale_router)
+app.include_router(setup_router)
 app.include_router(household_router)
 app.include_router(auth_router)
 app.include_router(observability_router)

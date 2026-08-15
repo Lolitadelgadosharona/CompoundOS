@@ -118,3 +118,11 @@ async def observability(request: Request,
         "providers": providers,
         "ai_health": ai_health,
     })
+
+
+@router.get("/setup", response_class=HTMLResponse)
+async def setup(request: Request, session: Session = Depends(get_session)):
+    from apps.api.services.readiness_service import readiness_status
+
+    return templates.TemplateResponse(request, "setup.html",
+                                      readiness_status(session))

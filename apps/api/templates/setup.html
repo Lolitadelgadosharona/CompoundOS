@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>System Readiness</h1>
+
+<article>
+    <h3>Overall Status: {{ "READY" if overall == "ready" else "PENDING" }}</h3>
+    {% if overall == "ready" %}
+    <p>The system is fully configured and ready to operate.</p>
+    {% else %}
+    <p>{{ remaining_steps|length }} step(s) remaining before the system is ready.</p>
+    {% endif %}
+</article>
+
+<article>
+    <h3>Infrastructure</h3>
+    <p>Database schema at head:
+        {{ "✓ Ready" if checks.schema_at_head else "✗ Migrations required" }}</p>
+</article>
+
+<article>
+    <h3>Owner</h3>
+    <p>Owner API key:
+        {{ "✓ Present" if checks.owner_key_present else "✗ Missing" }}</p>
+</article>
+
+<article>
+    <h3>Household</h3>
+    <p>Household profile:
+        {{ "✓ Created" if checks.household_created else "✗ Missing" }}</p>
+</article>
+
+<article>
+    <h3>AI Governance</h3>
+    <p>Governance layer (PermissionGate + PromptGovernor):
+        {{ "✓ Available" if checks.governance_ready else "✗ Unavailable" }}</p>
+    <p>Prompt approval:
+        {{ "✓ Approved" if checks.prompts_approved else "✗ Approval pending" }}
+        ({{ details.active_prompts }} active /
+         {{ details.draft_prompts }} draft)</p>
+</article>
+
+<article>
+    <h3>Providers</h3>
+    <table>
+        <thead><tr><th>Provider</th><th>Status</th></tr></thead>
+        <tbody>
+        {% for name, status in details.providers.items() %}
+            <tr><td>{{ name }}</td><td>{{ status }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</article>
+
+<article>
+    <h3>Remaining Actions</h3>
+    {% if remaining_steps %}
+    <ul>
+        {% for step in remaining_steps %}
+        <li>{{ step }}</li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p>No remaining actions — the system is ready.</p>
+    {% endif %}
+</article>
+{% endblock %}
