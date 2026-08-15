@@ -99,19 +99,20 @@ class PromptGovernor:
         )
 
     def seed_defaults(self, session: Session) -> int:
-        """Idempotently insert the default active prompt templates.
+        """Idempotently insert the default prompt templates as DRAFT.
 
-        Skips any perspective that already has an active prompt. Returns
-        the number of rows inserted.
+        The governed lifecycle requires Owner approval (draft → active)
+        before any prompt can be used. Skips any perspective that already
+        has a prompt. Returns the number of rows inserted.
         """
         inserted = 0
         for perspective, (model, sys_prompt, user_tmpl) in \
                 DEFAULT_PROMPTS.items():
-            # Skip if an active prompt already exists for this perspective.
+            # Skip if any prompt already exists for this perspective.
             existing = session.execute(
                 text(
                     "SELECT 1 FROM prompt_templates"
-                    " WHERE perspective = :p AND status = 'active' LIMIT 1"
+                    " WHERE perspective = :p LIMIT 1"
                 ),
                 {"p": perspective},
             ).fetchone()
@@ -122,9 +123,9 @@ class PromptGovernor:
                     "INSERT INTO prompt_templates"
                     " (id, perspective, version, status, purpose,"
                     "  default_model, system_prompt, user_prompt_template,"
-                    "  active_at, created_at)"
-                    " VALUES (:id, :p, 1, 'active', :purpose, :model,"
-                    "  :sys, :tmpl, NOW(), NOW())"
+                    "  created_at)"
+                    " VALUES (:id, :p, 1, 'draft', :purpose, :model,"
+                    "  :sys, :tmpl, NOW())"
                     " ON CONFLICT (perspective, version) DO NOTHING"
                 ),
                 {
@@ -136,3 +137,66 @@ class PromptGovernor:
             if result.rowcount:
                 inserted += result.rowcount
         return inserted
+
+    def approve(self, session: Session, prompt_id: UUID) -> dict:
+        """Owner approval: promote a draft prompt to active.
+
+        Deprecates the current active version for the same perspective
+        (active → deprecated) so exactly one active version remains.
+        Raises for missing or deprecated prompts.
+        """
+        row = session.execute(
+            text(
+                "SELECT perspective, version, status FROM prompt_templates"
+                " WHERE id = :id"
+            ),
+            {"id": prompt_id},
+        ).fetchone()
+        if row is None:
+            raise ValueError("Prompt template not found")
+        perspective, version, status = row
+        if status == "active":
+            return {"id": str(prompt_id), "perspective": perspective,
+                    "version": version, "status": "active",
+                    "already_active": True}
+        if status == "deprecated":
+            raise ValueError("Deprecated prompts cannot be re-activated")
+        # draft → active: deprecate any current active for this
+        # perspective, then activate this draft.
+        session.execute(
+            text(
+                "UPDATE prompt_templates SET status = 'deprecated',"
+                " deprecated_at = NOW()"
+                " WHERE perspective = :p AND status = 'active'"
+            ),
+            {"p": perspective},
+        )
+        session.execute(
+            text(
+                "UPDATE prompt_templates SET status = 'active',"
+                " active_at = NOW() WHERE id = :id"
+            ),
+            {"id": prompt_id},
+        )
+        return {"id": str(prompt_id), "perspective": perspective,
+                "version": version, "status": "active"}
+
+    def list_prompts(self, session: Session) -> list[dict]:
+        """All prompt templates (for approval/listing UI)."""
+        rows = session.execute(
+            text(
+                "SELECT id, perspective, version, status, default_model,"
+                " created_at, active_at, deprecated_at"
+                " FROM prompt_templates ORDER BY perspective, version"
+            ),
+        ).fetchall()
+        return [
+            {
+                "id": str(r[0]), "perspective": r[1], "version": r[2],
+                "status": r[3], "default_model": r[4],
+                "created_at": str(r[5]) if r[5] else None,
+                "active_at": str(r[6]) if r[6] else None,
+                "deprecated_at": str(r[7]) if r[7] else None,
+            }
+            for r in rows
+        ]

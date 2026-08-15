@@ -65,12 +65,15 @@ def _build_real_executor() -> Any:
         )
     router = ProviderRouter(providers)
     from apps.api.services.cost_tracker import CostTracker
+    from apps.api.services.permission_gate import PermissionGate
     from apps.api.services.prompt_governor import PromptGovernor
 
-    # Wire the governance layer: prompt resolution (fail-closed) + cost
-    # tracking (fail-open). This also activates llm_execution_log.
+    # Wire the governance chain: permission gate (fail-closed) →
+    # prompt resolution (fail-closed) → cost tracking (fail-open).
+    # This also activates llm_execution_log.
     return GovernedLLMExecutor(
         router,
+        permission_gate=PermissionGate(),
         prompt_governor=PromptGovernor(),
         cost_tracker=CostTracker(),
     )
