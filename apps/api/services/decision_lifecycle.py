@@ -32,7 +32,13 @@ def _symbol_for_run(session: Session, run_id: UUID) -> str:
         ),
         {"rid": run_id},
     ).fetchone()
-    return row[0] if row else "unknown"
+    title = row[0] if row else "unknown"
+    # Strip common title prefixes so the derived symbol is clean
+    # (e.g. "Research: AAPL" → "AAPL").
+    for prefix in ("Research: ", "research: "):
+        if title.startswith(prefix):
+            return title[len(prefix):].strip()
+    return title
 
 # ═══════════════════════════════════════════════════════════════════════════
 # CommitteeIntegrationService

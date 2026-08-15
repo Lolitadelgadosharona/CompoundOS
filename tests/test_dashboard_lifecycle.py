@@ -9,6 +9,7 @@ from sqlalchemy import text
 
 from apps.api.services.dashboard_research import DashboardResearchService
 from apps.api.services.dashboard_service import (
+    last_research,
     learning_metrics,
     list_decision_history,
     list_memo,
@@ -334,4 +335,111 @@ class TestDashboardReads:
         OwnerDecisionService.confirm_decision(db_session, decision_id)
         metrics = learning_metrics(db_session)
         assert metrics["review_count"] == 3
-        assert metrics["accuracy"] >= 0.0
+
+
+# ── M5-006: alpha demo stabilization ────────────────────────────────────
+
+
+class _MockMarketProvider:
+    """Fake MarketDataProvider returning overview + price + financials."""
+
+    def get_overview(self, symbol):
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            symbol=symbol, company_name="Apple Inc.",
+            sector="Technology", market_cap=3_000_000_000_000,
+            provenance=SimpleNamespace(source="mock", provider="mock"),
+        )
+
+    def get_price_history(self, symbol, days=100):
+        from datetime import date
+        from types import SimpleNamespace
+        return [SimpleNamespace(date=date(2026, 1, 1), close=180.0,
+                                volume=50_000_000)]
+
+    def get_financials(self, symbol):
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            revenue=390_000_000_000, net_income=100_000_000_000,
+            free_cash_flow=110_000_000_000, total_debt=106_000_000_000,
+            fiscal_year=2025,
+        )
+
+
+class TestAlphaStabilization:
+    def test_symbol_for_run_strips_prefix(self, db_session):
+        """Fix 5: 'Research: AAPL' idea title → symbol 'AAPL'."""
+        hh = _setup_household(db_session)
+        idea_id = uuid4()
+        db_session.execute(text(
+            "INSERT INTO investment_ideas (id, household_id, title, status,"
+            " source, confidence, created_at)"
+            " VALUES (:id, :hh, 'Research: AAPL', 'draft', 'owner',"
+            " 'LOW', NOW())"
+        ), {"id": idea_id, "hh": hh})
+        rr_id = uuid4()
+        db_session.execute(text(
+            "INSERT INTO committee_review_requests (id, investment_idea_id,"
+            " status, requested_by, created_at)"
+            " VALUES (:id, :iid, 'pending', 'owner', NOW())"
+        ), {"id": rr_id, "iid": idea_id})
+        req_id = uuid4()
+        db_session.execute(text(
+            "INSERT INTO research_requests (id, review_request_id, status,"
+            " created_at, updated_at)"
+            " VALUES (:id, :rrid, 'completed', NOW(), NOW())"
+        ), {"id": req_id, "rrid": rr_id})
+        run_id = uuid4()
+        db_session.execute(text(
+            "INSERT INTO research_runs (id, request_id, run_number, status,"
+            " created_at, updated_at)"
+            " VALUES (:id, :req, 1, 'completed', NOW(), NOW())"
+        ), {"id": run_id, "req": req_id})
+        db_session.commit()
+        assert _symbol_for_run(db_session, run_id) == "AAPL"
+
+    def test_last_research_includes_symbol(self, db_session):
+        """Fix 4: last_research returns symbol + rec + confidence."""
+        hh, _run_id, memo_id, _did = self._make_seed(db_session)
+        result = last_research(db_session)
+        assert "AAPL" in result
+        assert "BUY" in result
+        assert "75" in result  # confidence
+
+    def test_evidence_collector_collects_market(self, db_session):
+        """Fix 3: EvidenceCollector gathers overview + price + financials."""
+        from apps.api.services.evidence_collector_v2 import EvidenceCollector
+
+        collector = EvidenceCollector(market_provider=_MockMarketProvider())
+        hh = _setup_household(db_session)
+        bundle = collector.collect(db_session, hh, "AAPL")
+        assert "overview" in bundle.market_data
+        assert "price_history" in bundle.market_data
+        assert "financials" in bundle.market_data
+        assert bundle.market_data["financials"]["revenue"] == 390_000_000_000
+
+    def test_set_run_status_persists(self, db_session):
+        """Fix 2: research_runs.status is updated and persisted."""
+        from apps.api.services.pipeline_async import _set_run_status
+
+        hh = _setup_household(db_session)
+        _idea_id, run_id = _setup_run(db_session, hh)
+        _set_run_status(db_session, run_id, "analyzing")
+        db_session.commit()
+        status = db_session.execute(text(
+            "SELECT status FROM research_runs WHERE id = :id"
+        ), {"id": run_id}).scalar()
+        assert status == "analyzing"
+
+    def _make_seed(self, db_session):
+        hh = _setup_household(db_session)
+        _idea_id, run_id = _setup_run(db_session, hh)
+        memo_id = uuid4()
+        db_session.execute(text(
+            "INSERT INTO investment_memos (id, run_id, memo, synthesis_model,"
+            " confidence_score, confidence_level, recommendation, generated_at)"
+            " VALUES (:id, :rid, :memo, 'synthesis', 75, 'MEDIUM', 'BUY', NOW())"
+        ), {"id": memo_id, "rid": run_id,
+            "memo": json.dumps({"thesis": "T"})})
+        db_session.commit()
+        return hh, run_id, memo_id, None

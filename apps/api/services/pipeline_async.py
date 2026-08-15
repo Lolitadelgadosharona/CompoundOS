@@ -105,13 +105,28 @@ class PipelineProgressTracker:
             })
 
 
+def _set_run_status(session, run_id: UUID, status: str) -> None:
+    """Update research_runs.status (DB statuses only — no 'running')."""
+    from sqlalchemy import text
+
+    session.execute(
+        text(
+            "UPDATE research_runs SET status = :st, updated_at = NOW()"
+            " WHERE id = :rid"
+        ),
+        {"st": status, "rid": run_id},
+    )
+
+
 async def execute_pipeline(run_id: UUID, symbol: str,
                            household_id: UUID) -> None:
     """Run the REAL ResearchIntelligencePipeline in a background task.
 
     Opens a fresh DB session — never holds the request session across
     async work. On success it wires the full M5-004 lifecycle:
-    Research → Committee → Decision Draft (pending Owner approval).
+    Research → Committee → Decision Draft (pending Owner approval), and
+    persists the run status (collecting_evidence → analyzing →
+    generating_memo → completed/failed) on every transition.
     """
     import json
 
@@ -128,22 +143,31 @@ async def execute_pipeline(run_id: UUID, symbol: str,
     )
 
     tracker = PipelineProgressTracker
-    tracker.update(run_id, PipelineState.COLLECTING)
-    tracker.add_step(run_id, "Collecting evidence")
-
     session = SessionLocal()
     try:
+        _set_run_status(session, run_id, "collecting_evidence")
+        session.commit()
+        tracker.update(run_id, PipelineState.COLLECTING)
+        tracker.add_step(run_id, "Collecting evidence")
+
         pipeline = build_research_pipeline()
+
+        _set_run_status(session, run_id, "analyzing")
+        session.commit()
         tracker.update(run_id, PipelineState.RUNNING, perspective_count=0)
         tracker.add_step(run_id, "Running 6 perspectives")
         output = pipeline.execute(session, run_id, household_id, symbol)
 
+        _set_run_status(session, run_id, "generating_memo")
+        session.commit()
         tracker.update(run_id, PipelineState.GENERATING)
         tracker.add_step(run_id, "Synthesizing memo")
         tracker.update(run_id, PipelineState.SCORING)
         tracker.add_step(run_id, "Calibrating confidence score")
 
         if output.memo is None:
+            _set_run_status(session, run_id, "failed")
+            session.commit()
             tracker.update(run_id, PipelineState.FAILED,
                            error="Memo generation failed")
             return
@@ -170,6 +194,11 @@ async def execute_pipeline(run_id: UUID, symbol: str,
             recommendation, memo_json.get("thesis", ""),
             memo_json.get("risks", []),
         )
+        # Persist committee session/evidence + decision draft + run status.
+        # The journal services do NOT commit — the worker owns its own
+        # session boundary.
+        _set_run_status(session, run_id, "completed")
+        session.commit()
 
         tracker.update(
             run_id, PipelineState.COMPLETE,
@@ -182,6 +211,11 @@ async def execute_pipeline(run_id: UUID, symbol: str,
             run_id, f"Pending decision: {decision.id}",
         )
     except Exception as exc:  # noqa: BLE001 — background worker boundary
+        try:
+            _set_run_status(session, run_id, "failed")
+            session.commit()
+        except Exception:
+            session.rollback()
         tracker.update(run_id, PipelineState.FAILED, error=str(exc))
     finally:
         session.close()
