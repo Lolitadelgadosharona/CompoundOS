@@ -777,6 +777,25 @@ def allocation_context(allocation) -> dict:
     return result
 
 
+def cash_position(session: Session, household_id: UUID) -> Optional[str]:
+    """Total cash balance across accounts (base currency). Read-only.
+
+    Returns a formatted string, or None when no cash balances exist — the
+    UI renders "Not configured" for None (never fabricates a figure).
+    """
+    cash = _load_latest_cash_balances(session, household_id)
+    if not cash:
+        return None
+    base = _get_base_currency(session, household_id) or "USD"
+    total = Decimal("0")
+    for cb in cash:
+        amt = cb.get("amount") or Decimal("0")
+        ccy = cb.get("currency") or base
+        rate = _get_fx_rate(session, ccy, base) or Decimal("1")
+        total += amt * rate
+    return f"${total.quantize(Decimal('0.01'))}"
+
+
 def last_research(session: Session) -> str:
     """Latest research headline (symbol + rec + confidence + timestamp)."""
     row = session.execute(

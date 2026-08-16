@@ -1,47 +1,142 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>Dashboard</h1>
 
-<div class="grid">
-    <article>
-        <h3>Net Worth</h3>
-        <h2>{{ net_worth }}</h2>
-    </article>
-    <article>
-        <h3>Pending Decisions</h3>
-        <h2>{{ pending_decisions }}</h2>
-    </article>
-    <article>
-        <h3>Allocation</h3>
-        <p>Equities: {{ allocation.equities }}%</p>
-        <p>Bonds: {{ allocation.bonds }}%</p>
-        <p>Cash: {{ allocation.cash }}%</p>
-        <progress value="{{ allocation.equities }}" max="100"></progress>
-    </article>
-</div>
+<header class="home-header">
+    <div>
+        <h1>Richard AI Family Office</h1>
+        <p class="muted" id="today-line"></p>
+    </div>
+    <a href="/research" role="button" class="ask-cio">Ask CIO</a>
+</header>
 
-{% if guardian_alerts %}
-<article>
-    <h3>Guardian Alerts</h3>
-    {% for alert in guardian_alerts %}
-    <p>{{ alert }}</p>
+<!-- Wealth Overview -->
+<section>
+    <h2 class="section-title">Wealth Overview</h2>
+    <div class="card-grid">
+        <div class="card">
+            <h3>Net Worth</h3>
+            <div class="card-value">{{ net_worth }}</div>
+        </div>
+        <div class="card">
+            <h3>Cash Position</h3>
+            <div class="card-value">{{ cash_position or "Not configured" }}</div>
+        </div>
+        <div class="card">
+            <h3>Asset Allocation</h3>
+            <canvas id="allocation-chart" height="110"></canvas>
+        </div>
+    </div>
+</section>
+
+<!-- AI Daily Brief -->
+<section>
+    <h2 class="section-title">AI Daily Brief</h2>
+    <div class="card">
+        <p class="muted">Daily Brief will be available in PE-002</p>
+    </div>
+</section>
+
+<!-- Pending Decisions -->
+<section>
+    <h2 class="section-title">Pending Decisions</h2>
+    {% if pending_decisions %}
+    <div class="card-grid">
+    {% for d in pending_decisions %}
+        <div class="card">
+            <h3>{{ d.symbol }}</h3>
+            <p>Recommendation: <strong>{{ d.recommendation }}</strong></p>
+            <p>Confidence: {{ d.confidence }}%</p>
+            <div class="row">
+                <a href="/memo/{{ d.memo_id }}" role="button"
+                   class="secondary">Memo</a>
+                <a href="#" role="button"
+                   hx-post="/api/decisions/{{ d.decision_id }}/approve"
+                   hx-swap="none">Approve</a>
+            </div>
+        </div>
     {% endfor %}
-</article>
-{% endif %}
+    </div>
+    {% else %}
+    <div class="card"><p class="muted">No pending decisions.</p></div>
+    {% endif %}
+</section>
 
-<article>
-    <h3>Latest Research</h3>
-    <p>{{ last_research }}</p>
-</article>
+<!-- Guardian Alerts -->
+<section>
+    <h2 class="section-title">Guardian Alerts</h2>
+    {% if guardian_alerts %}
+    <div class="card">
+        {% for alert in guardian_alerts %}
+        <p>⚠️ {{ alert }}</p>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="card"><p class="muted">No active alerts</p></div>
+    {% endif %}
+</section>
 
-<article>
-    <h3>AI Runtime Health</h3>
-    <p><strong>Providers:</strong>
-        Anthropic {{ providers.details.anthropic }},
-        OpenAI {{ providers.details.openai }},
-        AlphaVantage {{ providers.details.alpha_vantage }}</p>
-    <p><strong>AI execution:</strong> {{ ai_health.status }}
-        ({{ ai_health.details.calls_24h }} calls /
-         {{ ai_health.details.failures_24h }} failures in 24h)</p>
-</article>
+<!-- Learning Performance -->
+<section>
+    <h2 class="section-title">Learning Performance</h2>
+    <div class="card-grid">
+        <div class="card">
+            <h3>Prediction Accuracy</h3>
+            <div class="card-value">
+                {{ "%.0f"|format(learning.accuracy * 100) }}%
+            </div>
+        </div>
+        <div class="card">
+            <h3>Perspectives</h3>
+            {% for p in learning.perspectives %}
+            <div class="mini-bar">
+                <span>{{ p.name }}</span>
+                <span>{{ "%.0f"|format(p.accuracy * 100) }}%</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+
+<!-- Recent Research -->
+<section>
+    <h2 class="section-title">Recent Research</h2>
+    <div class="card"><p>{{ last_research }}</p></div>
+</section>
+
+<!-- System Status (small) -->
+<section>
+    <div class="card small status-card">
+        <span class="status-dot
+            {% if ai_health.status == 'healthy' %}ok{% else %}warn{% endif %}">
+        </span>
+        AI System {{ ai_health.status | title }}
+    </div>
+</section>
+
+<script>
+(function () {
+    var el = document.getElementById('today-line');
+    if (el) { el.textContent = new Date().toDateString(); }
+
+    var ctx = document.getElementById('allocation-chart');
+    if (ctx && window.Chart) {
+        var a = {{ allocation | tojson }};
+        new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Equities', 'Bonds', 'Cash'],
+                datasets: [{
+                    data: [a.equities, a.bonds, a.cash],
+                    backgroundColor: ['#3b82f6', '#10b981', '#f59e0b'],
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                plugins: { legend: { position: 'bottom', labels: { boxWidth: 10 } } },
+                cutout: '62%'
+            }
+        });
+    }
+})();
+</script>
 {% endblock %}

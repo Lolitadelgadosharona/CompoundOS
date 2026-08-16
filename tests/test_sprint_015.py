@@ -17,6 +17,30 @@ from apps.api.services.validation_service import (
 client = TestClient(app)
 
 
+def _seed_household():
+    """Seed the singleton household so /api/research/start resolves.
+
+    The module-level client uses the real get_session, so the /api/research/
+    endpoints (which require a household) fail with 404 without this seed.
+    """
+    from sqlalchemy import text
+
+    from apps.api.database import SessionLocal
+
+    s = SessionLocal()
+    try:
+        s.execute(text(
+            "INSERT INTO household_profiles (id, singleton_key,"
+            " household_name, base_currency, investment_horizon,"
+            " liquidity_needs, risk_statement, notes, created_at, updated_at)"
+            " VALUES (:id, TRUE, 't', 'USD', 'lt', 'l', 'm', '', NOW(), NOW())"
+            " ON CONFLICT (singleton_key) DO NOTHING"
+        ), {"id": uuid4()})
+        s.commit()
+    finally:
+        s.close()
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # Slice B — Dashboard Data Integration
 # ═══════════════════════════════════════════════════════════════════════
@@ -127,6 +151,7 @@ class TestPipelineProgress:
         assert PipelineProgressTracker.get(uuid4()) is None
 
     def test_start_endpoint(self):
+        _seed_household()
         r = client.post("/api/research/start",
                         json={"symbol": "AAPL"})
         assert r.status_code == 200
@@ -194,6 +219,7 @@ class TestValidation:
 
 class TestNoTrading:
     def test_research_start_returns_no_trade(self):
+        _seed_household()
         r = client.post("/api/research/start",
                         json={"symbol": "AAPL"})
         data = r.json()
@@ -202,6 +228,7 @@ class TestNoTrading:
         assert "broker" not in str(data).lower()
 
     def test_status_returns_no_trade(self):
+        _seed_household()
         r = client.post("/api/research/start",
                         json={"symbol": "AAPL"})
         rid = r.json()["run_id"]

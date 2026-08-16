@@ -52,15 +52,24 @@ async def dashboard(request: Request,
     providers, ai_health = _runtime_health(session)
     return templates.TemplateResponse(request, "dashboard.html", {
         "net_worth": f"${snap.net_worth.total_value}",
-        "pending_decisions": len(snap.pending_decisions),
+        "cash_position": dashboard_service.cash_position(session, hid),
         "allocation": dashboard_service.allocation_context(snap.allocation),
+        "pending_decisions": dashboard_service.list_pending_decisions_detail(
+            session, hid),
         "guardian_alerts": [
             v.description for v in snap.policy_compliance.rule_violations
         ],
+        "learning": dashboard_service.learning_metrics(session),
         "last_research": dashboard_service.last_research(session),
         "providers": providers,
         "ai_health": ai_health,
     })
+
+
+@router.get("/settings", response_class=HTMLResponse)
+async def settings(request: Request,
+                   session: Session = Depends(get_session)):
+    return templates.TemplateResponse(request, "settings.html", {})
 
 
 @router.get("/research", response_class=HTMLResponse)

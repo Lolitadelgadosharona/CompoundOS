@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Settings</h1>
+
+<section>
+    <h2 class="section-title">System</h2>
+    <div class="card-grid">
+        <div class="card">
+            <h3>Observability</h3>
+            <p class="muted">AI execution, cost, reliability, prompt versions.</p>
+            <a href="/observability" role="button" class="secondary">Open</a>
+        </div>
+        <div class="card">
+            <h3>System Readiness</h3>
+            <p class="muted">Bootstrap &amp; setup status.</p>
+            <a href="/setup" role="button" class="secondary">Open</a>
+        </div>
+    </div>
+</section>
+{% endblock %}
