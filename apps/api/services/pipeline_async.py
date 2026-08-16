@@ -30,6 +30,7 @@ class PipelineProgress:
     completed_at: str | None = None
     error: str | None = None
     memo_id: str | None = None
+    decision_id: str | None = None
     confidence: int | None = None
     perspective_count: int = 0
     total_perspectives: int = 6
@@ -210,6 +211,7 @@ async def execute_pipeline(run_id: UUID, symbol: str,
         tracker.update(
             run_id, PipelineState.COMPLETE,
             memo_id=str(memo_id),
+            decision_id=str(decision.id),
             confidence=(output.confidence.score
                         if output.confidence else None),
         )

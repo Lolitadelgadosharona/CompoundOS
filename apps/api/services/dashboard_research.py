@@ -6,6 +6,7 @@ Thin integration layer — delegates to existing services.
 
 from __future__ import annotations
 
+import json
 from uuid import UUID, uuid4
 
 from sqlalchemy import text
@@ -23,13 +24,20 @@ class DashboardResearchService:
     @staticmethod
     def create_request(
         session: Session, symbol: str, household_id: UUID,
+        title: str | None = None,
     ) -> dict:
         """Create a research request and initial run.
 
         The actual pipeline execution is async — this creates
         the request record and returns immediately. The dashboard
         polls for completion via get_status().
+
+        ``title`` (optional) is the user's original question; when absent
+        the idea title falls back to "Research: {symbol}". The raw question
+        is also stored in research_requests.parameters (JSONB) for
+        provenance — no schema change.
         """
+        idea_title = title or f"Research: {symbol}"
         # Find or create investment idea
         idea_id = uuid4()
         session.execute(
@@ -39,7 +47,7 @@ class DashboardResearchService:
                 " VALUES (:id, :hh, :t, 'draft', 'owner', 'LOW', NOW())"
                 " ON CONFLICT DO NOTHING"
             ),
-            {"id": idea_id, "hh": household_id, "t": f"Research: {symbol}"},
+            {"id": idea_id, "hh": household_id, "t": idea_title},
         )
 
         # Create review request
@@ -53,15 +61,19 @@ class DashboardResearchService:
             {"id": rr_id, "iid": idea_id},
         )
 
-        # Create research request
+        # Create research request (parameters stores the raw question)
         req_id = uuid4()
+        params_json = (json.dumps({"question": title, "symbol": symbol})
+                       if title else None)
         session.execute(
             text(
                 "INSERT INTO research_requests"
-                " (id, review_request_id, status, created_at, updated_at)"
-                " VALUES (:id, :rrid, 'pending', NOW(), NOW())"
+                " (id, review_request_id, status, parameters, created_at,"
+                " updated_at)"
+                " VALUES (:id, :rrid, 'pending', CAST(:params AS jsonb),"
+                " NOW(), NOW())"
             ),
-            {"id": req_id, "rrid": rr_id},
+            {"id": req_id, "rrid": rr_id, "params": params_json},
         )
 
         # Create research run

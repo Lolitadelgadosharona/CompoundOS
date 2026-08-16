@@ -40,7 +40,7 @@ class TestDashboardResearchIntegration:
     def test_research_page_shows_symbol_input(self, api_client):
         r = api_client.get("/research")
         assert r.status_code == 200
-        assert "Start Research" in r.text
+        assert "Ask CIO" in r.text
 
     def test_memo_missing_returns_404(self, api_client):
         r = api_client.get(f"/memo/{uuid4()}")
