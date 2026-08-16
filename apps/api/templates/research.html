@@ -44,17 +44,41 @@
     var input = document.getElementById('cio-question');
     var statusEl = document.getElementById('cio-status');
 
+    var ACTIVITY = {
+        'pending': 'Waiting for AI analysts...',
+        'collecting_evidence': 'Collecting evidence...',
+        'running_perspectives': 'Running AI analysts...',
+        'generating_memo': 'Running synthesis...',
+        'calculating_confidence': 'Calculating confidence...',
+        'complete': 'Complete',
+        'failed': 'Failed'
+    };
+
     function esc(s) {
         var d = document.createElement('div');
         d.textContent = s == null ? '' : String(s);
         return d.innerHTML;
     }
 
+    function renderStarted(question, symbol) {
+        statusEl.innerHTML =
+            '<p><strong>Research started</strong></p>'
+            + '<p><strong>Question:</strong> ' + esc(question) + '</p>'
+            + '<p><strong>Symbol:</strong> ' + esc(symbol) + '</p>'
+            + '<p><strong>Status:</strong> Pending</p>'
+            + '<progress value="0" max="100"></progress> <span>0%</span>'
+            + '<p class="muted">Waiting for AI analysts...</p>';
+    }
+
     async function pollCio(runId, question, symbol) {
         function render(p) {
             var steps = (p.steps || []).map(function (s) {
-                return '<li>' + esc(s.step) + '</li>';
+                return '<li>✓ ' + esc(s.step) + '</li>';
             }).join('');
+            var statusLabel = p.is_complete ? 'Complete'
+                : p.is_failed ? 'Failed'
+                : (p.status === 'pending' ? 'Pending' : 'Analyzing');
+            var activity = ACTIVITY[p.status] || 'Working...';
             var actions = '';
             if (p.is_complete) {
                 var memoBtn = p.memo_id
@@ -77,9 +101,11 @@
             statusEl.innerHTML =
                 '<p><strong>Question:</strong> ' + esc(question) + '</p>'
                 + '<p><strong>Symbol:</strong> ' + esc(symbol) + '</p>'
+                + '<p><strong>Status:</strong> ' + statusLabel + '</p>'
                 + '<progress value="' + p.progress_pct + '" max="100"></progress> '
                 + '<span>' + p.progress_pct + '%</span>'
                 + (steps ? '<ul>' + steps + '</ul>' : '')
+                + '<p class="muted">' + esc(activity) + '</p>'
                 + actions;
         }
         while (true) {
@@ -99,7 +125,7 @@
         e.preventDefault();
         var question = input.value.trim();
         if (!question) { return; }
-        statusEl.innerHTML = '<p class="muted">Starting research…</p>';
+        statusEl.innerHTML = '<p class="muted">Submitting…</p>';
         try {
             var res = await fetch('/api/cio/ask', {
                 method: 'POST',
@@ -112,6 +138,7 @@
                     + esc(data.detail || 'Could not start research') + '</p>';
                 return;
             }
+            renderStarted(question, data.symbol);
             pollCio(data.run_id, question, data.symbol);
         } catch (err) {
             statusEl.innerHTML = '<p class="confidence-low">'

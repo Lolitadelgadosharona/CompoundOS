@@ -119,9 +119,14 @@ def _set_run_status(session, run_id: UUID, status: str) -> None:
     )
 
 
-async def execute_pipeline(run_id: UUID, symbol: str,
-                           household_id: UUID) -> None:
-    """Run the REAL ResearchIntelligencePipeline in a background task.
+def execute_pipeline(run_id: UUID, symbol: str,
+                     household_id: UUID) -> None:
+    """Run the REAL ResearchIntelligencePipeline as a background task.
+
+    This is deliberately a SYNC function: BackgroundTasks runs sync
+    callables in a threadpool, so the blocking AI provider calls here do
+    NOT block the event loop — the HTTP response returns immediately and
+    the pipeline progresses in a worker thread.
 
     Opens a fresh DB session — never holds the request session across
     async work. On success it wires the full M5-004 lifecycle:

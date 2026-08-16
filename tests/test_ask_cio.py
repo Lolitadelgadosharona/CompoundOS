@@ -127,12 +127,79 @@ class TestDecisionIdInStatus:
         assert data["is_complete"] is True
 
 
+class TestAskCioAsync:
+    def test_ask_returns_immediately(self, api_client, db_session, monkeypatch):
+        """POST /api/cio/ask returns 'pending' — it never awaits the pipeline."""
+        _setup_household(db_session)
+        from apps.api.routers import cio
+
+        calls = []
+
+        def slow_pipeline(*args, **kwargs):
+            calls.append(args)
+
+        monkeypatch.setattr(cio, "execute_pipeline", slow_pipeline)
+        r = api_client.post("/api/cio/ask",
+                            json={"question": "Should I buy Nvidia?"})
+        assert r.status_code == 200
+        body = r.json()
+        # "pending" (not "completed") proves the endpoint returned before
+        # the pipeline ran — the pipeline is scheduled in the background.
+        assert body["status"] == "pending"
+        assert body["symbol"] == "NVDA"
+        assert len(calls) == 1
+
+    def test_execute_pipeline_is_sync_not_async(self):
+        """The pipeline must be a sync callable so BackgroundTasks runs it
+        in a threadpool (never blocking the event loop)."""
+        import inspect
+
+        from apps.api.services.pipeline_async import execute_pipeline
+
+        assert not inspect.iscoroutinefunction(execute_pipeline)
+
+    def test_background_execution_updates_tracker(
+        self, api_client, db_session, monkeypatch,
+    ):
+        """The background task drives the tracker to completion."""
+        _setup_household(db_session)
+        from apps.api.routers import cio
+        from apps.api.services.pipeline_async import (
+            PipelineProgressTracker,
+            PipelineState,
+        )
+
+        def fake_pipeline(run_id, symbol, household_id):
+            PipelineProgressTracker.update(
+                run_id, PipelineState.COMPLETE,
+                memo_id="memo-x", decision_id="decision-y",
+            )
+
+        monkeypatch.setattr(cio, "execute_pipeline", fake_pipeline)
+        r = api_client.post("/api/cio/ask",
+                            json={"question": "Should I buy Nvidia?"})
+        run_id = r.json()["run_id"]
+        s = api_client.get(f"/api/research/{run_id}/status")
+        data = s.json()
+        assert data["is_complete"] is True
+        assert data["memo_id"] == "memo-x"
+        assert data["decision_id"] == "decision-y"
+
+
 class TestResearchPage:
     def test_ask_cio_ui_renders(self, api_client):
         r = api_client.get("/research")
         assert r.status_code == 200
         assert "Ask CIO" in r.text
         assert "cio-question" in r.text
+
+    def test_research_page_has_polling_js(self, api_client):
+        """The page polls the status endpoint (async job, no blocking)."""
+        r = api_client.get("/research")
+        assert r.status_code == 200
+        assert "pollCio" in r.text
+        assert "fetch('/api/research/'" in r.text
+        assert "setTimeout(r, 2000)" in r.text
 
     def test_no_ai_calls(self, api_client, db_session):
         _setup_household(db_session)
