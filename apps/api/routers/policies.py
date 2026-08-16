@@ -12,6 +12,7 @@ from apps.api.policy_schemas import (
     CreatePolicyDraftRequest,
     EmptyPolicyCreateRequest,
     ExpectedRevisionRequest,
+    PersonalPolicySetupRequest,
     PolicyAuditEventResponse,
     PolicyCreateResponse,
     PolicyDraftResponse,
@@ -44,6 +45,7 @@ from apps.api.services.policies import (
     read_version,
     read_version_history,
     replace_allocations,
+    setup_personal_policy,
     update_draft_text,
 )
 
@@ -240,5 +242,21 @@ def get_audit_events(
             PolicyAuditEventResponse.model_validate(event)
             for event in read_policy_audit_events(session, limit)
         ]
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.post("/setup", status_code=status.HTTP_201_CREATED)
+def setup_personal(
+    payload: PersonalPolicySetupRequest, session: DatabaseSession,
+) -> dict:
+    """One-shot Personal Edition policy setup → published version (PE-003)."""
+    try:
+        version = setup_personal_policy(session, payload)
+        return {
+            "policy_id": str(version.policy_id),
+            "version_number": version.version_number,
+            "status": version.status,
+        }
     except Exception as exc:
         raise _translate(exc) from exc

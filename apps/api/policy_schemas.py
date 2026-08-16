@@ -215,3 +215,20 @@ class PolicyAuditEventResponse(BaseModel):
     occurred_at: datetime
     sequence_number: int
     metadata: dict[str, Any] = Field(validation_alias="event_metadata")
+
+
+class PersonalPolicySetupRequest(BaseModel):
+    """PE-003 — one-shot Personal Edition policy setup payload.
+
+    Maps the simple setup fields onto the existing policy text fields and
+    a default equities/cash allocation derived from min_cash_pct.
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    investment_goal: str = Field(min_length=1, max_length=4_000)
+    risk_preference: Literal["Conservative", "Moderate", "Growth"]
+    investment_horizon: str = Field(min_length=1, max_length=2_000)
+    max_single_position_pct: int = Field(default=15, ge=1, le=100)
+    min_cash_pct: int = Field(default=10, ge=0, le=99)
+    principles: str = Field(min_length=1, max_length=4_000)

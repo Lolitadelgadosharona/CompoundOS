@@ -44,6 +44,23 @@ def _runtime_health(session: Session):
     return check_providers(now), check_ai_execution(session, now)
 
 
+def _policy_published(session: Session) -> bool:
+    """True when a published investment policy version exists (PE-003)."""
+    from apps.api.repositories.households import get_current_household
+    from apps.api.repositories.policies import (
+        get_current_published,
+        get_policy,
+    )
+
+    household = get_current_household(session)
+    if household is None:
+        return False
+    policy = get_policy(session, household.id)
+    if policy is None:
+        return False
+    return get_current_published(session, policy.id) is not None
+
+
 @router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request,
                     session: Session = Depends(get_session)):
@@ -70,6 +87,37 @@ async def dashboard(request: Request,
 async def settings(request: Request,
                    session: Session = Depends(get_session)):
     return templates.TemplateResponse(request, "settings.html", {})
+
+
+@router.get("/settings/investment-policy", response_class=HTMLResponse)
+async def investment_policy(request: Request,
+                            session: Session = Depends(get_session)):
+    from apps.api.services.policies import (
+        PolicyNotFoundError,
+        PublishedVersionNotFoundError,
+        read_current_policy,
+        read_current_published,
+    )
+    policy_status = "none"
+    version_number = None
+    published_at = None
+    try:
+        read_current_policy(session)
+        policy_status = "draft"
+        try:
+            version, _ = read_current_published(session)
+            policy_status = "published"
+            version_number = version.version_number
+            published_at = version.published_at
+        except PublishedVersionNotFoundError:
+            pass
+    except PolicyNotFoundError:
+        pass
+    return templates.TemplateResponse(request, "investment_policy.html", {
+        "policy_status": policy_status,
+        "version_number": version_number,
+        "published_at": published_at,
+    })
 
 
 @router.get("/research", response_class=HTMLResponse)
@@ -100,6 +148,7 @@ async def decisions(request: Request,
     return templates.TemplateResponse(request, "decisions.html", {
         "pending": dashboard_service.list_pending_decisions_detail(session, hid),
         "history": dashboard_service.list_decision_history(session, hid),
+        "policy_published": _policy_published(session),
     })
 
 

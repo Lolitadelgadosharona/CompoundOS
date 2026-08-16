@@ -48,6 +48,20 @@ def _configure_providers(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
 
 
+def _seed_published_policy(db_session):
+    from apps.api.policy_schemas import PersonalPolicySetupRequest
+    from apps.api.services.policies import setup_personal_policy
+
+    setup_personal_policy(db_session, PersonalPolicySetupRequest(
+        investment_goal="Long term wealth compounding",
+        risk_preference="Growth",
+        investment_horizon="10+ years",
+        max_single_position_pct=15,
+        min_cash_pct=10,
+        principles="Focus on quality businesses",
+    ))
+
+
 class TestReadinessService:
     def test_empty_database_pending(self, db_session):
         r = readiness_service.readiness_status(db_session)
@@ -58,11 +72,13 @@ class TestReadinessService:
         assert r["checks"]["household_created"] is False
         assert r["checks"]["prompts_approved"] is False
         assert r["checks"]["providers_configured"] is False
+        assert r["checks"]["policy_published"] is False
 
     def test_all_ready(self, db_session, monkeypatch):
         _seed_household(db_session)
         _seed_owner_key(db_session)
         _seed_and_approve_prompts(db_session)
+        _seed_published_policy(db_session)
         _configure_providers(monkeypatch)
         r = readiness_service.readiness_status(db_session)
         assert r["overall"] == "ready"
@@ -84,14 +100,21 @@ class TestReadinessService:
         r = readiness_service.readiness_status(db_session)
         assert r["checks"]["prompts_approved"] is True
 
+    def test_policy_published_flips(self, db_session):
+        _seed_household(db_session)
+        _seed_published_policy(db_session)
+        r = readiness_service.readiness_status(db_session)
+        assert r["checks"]["policy_published"] is True
+
     def test_remaining_steps_ordering(self, db_session):
         r = readiness_service.readiness_status(db_session)
         steps = r["remaining_steps"]
-        # owner key → household → prompts → providers (schema/governance ok)
+        # owner key → household → policy → prompts → providers
         assert "Owner API key" in steps[0]
         assert "household" in steps[1]
-        assert "prompt" in steps[2]
-        assert "provider" in steps[3]
+        assert "Investment Policy" in steps[2]
+        assert "prompt" in steps[3]
+        assert "provider" in steps[4]
 
 
 class TestSetupAPI:
