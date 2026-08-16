@@ -66,7 +66,7 @@ class TestDashboardRoutes:
         _seed_household(db_session)
         r = api_client.get("/dashboard")
         assert r.status_code == 200
-        assert "Dashboard" in r.text
+        assert "Richard AI Family Office" in r.text
 
     def test_research_loads(self, api_client):
         r = api_client.get("/research")
@@ -114,7 +114,7 @@ class TestDashboardStructure:
         _seed_household(db_session)
         for path in ["/dashboard", "/research", "/decisions", "/learning"]:
             r = api_client.get(path)
-            assert "CompoundOS" in r.text
+            assert "Richard AI Family Office" in r.text
 
     def test_no_trading_interface(self, api_client, db_session):
         _seed_household(db_session)

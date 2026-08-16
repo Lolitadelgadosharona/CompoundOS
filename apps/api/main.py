@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from apps.api.mutation_gate import mutation_gate
 from apps.api.routers.auth import router as auth_router
@@ -34,6 +35,8 @@ from apps.api.routers.scale import router as scale_router
 from apps.api.routers.setup import router as setup_router
 
 app = FastAPI(title="CompoundOS API", version="0.1.0")
+
+app.mount("/static", StaticFiles(directory="apps/api/static"), name="static")
 
 app.middleware("http")(mutation_gate)
 

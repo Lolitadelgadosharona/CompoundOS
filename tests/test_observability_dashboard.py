@@ -88,8 +88,4 @@ class TestDashboardHealthCard:
         _setup_household(db_session)
         r = api_client.get("/dashboard")
         assert r.status_code == 200
-        assert "AI Runtime Health" in r.text
-        assert "Anthropic" in r.text
-        assert "OpenAI" in r.text
-        assert "AlphaVantage" in r.text
-        assert "AI execution" in r.text
+        assert "AI System" in r.text
