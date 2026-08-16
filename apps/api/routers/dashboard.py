@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.database import get_session
 from apps.api.repositories.decisions import get_household_id
-from apps.api.services import dashboard_service
+from apps.api.services import dashboard_service, portfolio_reality
 from apps.api.services.dashboard_research import DashboardResearchService
 
 router = APIRouter(prefix="", tags=["dashboard"])
@@ -117,6 +117,18 @@ async def investment_policy(request: Request,
         "policy_status": policy_status,
         "version_number": version_number,
         "published_at": published_at,
+    })
+
+
+@router.get("/portfolio", response_class=HTMLResponse)
+async def portfolio(request: Request,
+                    session: Session = Depends(get_session)):
+    hid = _household(session)
+    return templates.TemplateResponse(request, "portfolio.html", {
+        "summary": portfolio_reality.wealth_summary(session, hid),
+        "accounts": portfolio_reality.list_accounts(session, hid),
+        "holdings": portfolio_reality.list_holdings(session, hid),
+        "cash": portfolio_reality.list_cash(session, hid),
     })
 
 

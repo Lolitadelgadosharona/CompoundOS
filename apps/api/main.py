@@ -25,6 +25,7 @@ from apps.api.routers.investment_os import router as investment_os_router
 from apps.api.routers.notifications import router as notifications_router
 from apps.api.routers.observability import router as observability_router
 from apps.api.routers.policies import router as policies_router
+from apps.api.routers.portfolio_reality import router as portfolio_reality_router
 from apps.api.routers.portfolio_upgrade import router as portfolio_upgrade_router
 from apps.api.routers.portfolios import router as portfolios_router
 from apps.api.routers.production import router as production_router
@@ -184,6 +185,7 @@ app.include_router(research_workflow_router)
 app.include_router(dashboard_data_router)
 app.include_router(daily_ops_router)
 app.include_router(intelligence_router)
+app.include_router(portfolio_reality_router)
 app.include_router(portfolio_upgrade_router)
 app.include_router(investment_os_router)
 app.include_router(production_router)

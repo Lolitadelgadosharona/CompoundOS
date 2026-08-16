@@ -1,0 +1,282 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Portfolio</h1>
+
+<!-- Section 1: Wealth Summary -->
+<section>
+    <h2 class="section-title">Wealth Summary</h2>
+    <div class="card-grid">
+        <div class="card">
+            <h3>Net Worth</h3>
+            <div class="card-value">${{ summary.net_worth or "Not configured" }}</div>
+        </div>
+        <div class="card">
+            <h3>Stocks</h3>
+            <div class="card-value">${{ summary.stocks or "—" }}</div>
+        </div>
+        <div class="card">
+            <h3>ETF</h3>
+            <div class="card-value">${{ summary.etf or "—" }}</div>
+        </div>
+        <div class="card">
+            <h3>Cash</h3>
+            <div class="card-value">${{ summary.cash or "—" }}</div>
+        </div>
+        <div class="card">
+            <h3>Other</h3>
+            <div class="card-value">${{ summary.other or "—" }}</div>
+        </div>
+    </div>
+    {% if summary.capital_bucket_summary %}
+    <div class="card" style="margin-top: 0.75rem;">
+        <h3>Capital Buckets</h3>
+        {% for b in summary.capital_bucket_summary %}
+        <div class="mini-bar">
+            <span>{{ b.bucket }}</span>
+            <span>${{ b.value }}</span>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</section>
+
+<!-- Section 2: Accounts -->
+<section>
+    <h2 class="section-title">Accounts</h2>
+    {% if accounts %}
+    <table>
+        <thead>
+            <tr><th>Name</th><th>Type</th><th>Provider</th><th>Currency</th>
+                <th>Capital Bucket</th><th>Source</th></tr>
+        </thead>
+        <tbody>
+        {% for a in accounts %}
+        <tr>
+            <td>{{ a.name }}</td>
+            <td>{{ a.account_type }}</td>
+            <td>{{ a.provider or '—' }}</td>
+            <td>{{ a.currency }}</td>
+            <td>{{ a.capital_bucket }}</td>
+            <td>{{ a.source }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No accounts yet.</p>
+    {% endif %}
+
+    <div class="card" style="margin-top: 0.75rem;">
+        <h3>Add Account</h3>
+        <form id="account-form">
+            <div class="card-grid">
+                <label>Name
+                    <input type="text" name="name" required placeholder="Fidelity Brokerage">
+                </label>
+                <label>Type
+                    <select name="account_type">
+                        <option>brokerage</option>
+                        <option>bank</option>
+                        <option>retirement</option>
+                        <option>other</option>
+                    </select>
+                </label>
+                <label>Capital Bucket
+                    <select name="capital_bucket">
+                        <option>CORE</option>
+                        <option>EXPLORATION</option>
+                        <option>CASH_RESERVE</option>
+                        <option>RETIREMENT</option>
+                        <option>OTHER</option>
+                    </select>
+                </label>
+                <label>Currency
+                    <select name="currency">
+                        <option>USD</option>
+                        <option>CNY</option>
+                    </select>
+                </label>
+            </div>
+            <div class="row"><button type="submit">Add Account</button></div>
+        </form>
+        <div id="account-result"></div>
+    </div>
+</section>
+
+<!-- Section 3: Holdings -->
+<section>
+    <h2 class="section-title">Holdings</h2>
+    {% if holdings %}
+    <table>
+        <thead>
+            <tr><th>Symbol</th><th>Asset Type</th><th>Quantity</th>
+                <th>Average Cost</th><th>Market Value</th><th>Source</th></tr>
+        </thead>
+        <tbody>
+        {% for h in holdings %}
+        <tr>
+            <td>{{ h.symbol }}</td>
+            <td>{{ h.asset_type }}</td>
+            <td>{{ h.quantity }}</td>
+            <td>{{ h.avg_cost }}</td>
+            <td>{{ h.market_value }}</td>
+            <td>{{ h.source }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No holdings yet.</p>
+    {% endif %}
+
+    <div class="card" style="margin-top: 0.75rem;">
+        <h3>Add Holding</h3>
+        <form id="holding-form">
+            <div class="card-grid">
+                <label>Account
+                    <select name="account_id" required>
+                        {% for a in accounts %}
+                        <option value="{{ a.id }}">{{ a.name }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>Symbol
+                    <input type="text" name="symbol" required placeholder="NVDA">
+                </label>
+                <label>Asset Type
+                    <select name="asset_type">
+                        <option>STOCK</option>
+                        <option>ETF</option>
+                        <option>BOND</option>
+                        <option>FUND</option>
+                        <option>OTHER</option>
+                    </select>
+                </label>
+                <label>Quantity
+                    <input type="text" name="quantity" required placeholder="100">
+                </label>
+                <label>Average Cost
+                    <input type="text" name="avg_cost" required placeholder="120.50">
+                </label>
+            </div>
+            <div class="row"><button type="submit">Add Holding</button></div>
+        </form>
+        <div id="holding-result"></div>
+    </div>
+</section>
+
+<!-- Section 4: Cash -->
+<section>
+    <h2 class="section-title">Cash</h2>
+    {% if cash %}
+    <table>
+        <thead>
+            <tr><th>Account</th><th>Currency</th><th>Amount</th><th>Source</th></tr>
+        </thead>
+        <tbody>
+        {% for c in cash %}
+        <tr>
+            <td>{{ c.account_name }}</td>
+            <td>{{ c.currency }}</td>
+            <td>{{ c.amount }}</td>
+            <td>{{ c.source }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No cash balances yet.</p>
+    {% endif %}
+
+    <div class="card" style="margin-top: 0.75rem;">
+        <h3>Add Cash</h3>
+        <form id="cash-form">
+            <div class="card-grid">
+                <label>Account
+                    <select name="account_id" required>
+                        {% for a in accounts %}
+                        <option value="{{ a.id }}">{{ a.name }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>Currency
+                    <select name="currency">
+                        <option>USD</option>
+                        <option>CNY</option>
+                    </select>
+                </label>
+                <label>Amount
+                    <input type="text" name="amount" required placeholder="50000">
+                </label>
+            </div>
+            <div class="row"><button type="submit">Add Cash</button></div>
+        </form>
+        <div id="cash-result"></div>
+    </div>
+</section>
+
+<script>
+(function () {
+    function esc(s) {
+        var d = document.createElement('div');
+        d.textContent = s == null ? '' : String(s);
+        return d.innerHTML;
+    }
+
+    function bindForm(formId, resultId, url, builder) {
+        var form = document.getElementById(formId);
+        var resultEl = document.getElementById(resultId);
+        form.addEventListener('submit', async function (e) {
+            e.preventDefault();
+            var payload = builder(new FormData(form));
+            resultEl.innerHTML = '<p class="muted">Saving…</p>';
+            try {
+                var res = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                var data = await res.json();
+                if (!res.ok) {
+                    resultEl.innerHTML = '<p class="confidence-low">'
+                        + esc(data.detail || 'Could not save') + '</p>';
+                    return;
+                }
+                resultEl.innerHTML = '<p class="confidence-high">✓ Saved</p>';
+                setTimeout(function () { location.reload(); }, 700);
+            } catch (err) {
+                resultEl.innerHTML = '<p class="confidence-low">'
+                    + esc(err && err.message ? err.message : err) + '</p>';
+            }
+        });
+    }
+
+    bindForm('account-form', 'account-result', '/api/portfolio/accounts', function (fd) {
+        return {
+            name: fd.get('name'),
+            account_type: fd.get('account_type'),
+            capital_bucket: fd.get('capital_bucket'),
+            currency: fd.get('currency')
+        };
+    });
+
+    bindForm('holding-form', 'holding-result', '/api/portfolio/holdings', function (fd) {
+        return {
+            account_id: fd.get('account_id'),
+            symbol: fd.get('symbol').toUpperCase(),
+            asset_type: fd.get('asset_type'),
+            quantity: fd.get('quantity'),
+            avg_cost: fd.get('avg_cost')
+        };
+    });
+
+    bindForm('cash-form', 'cash-result', '/api/portfolio/cash', function (fd) {
+        return {
+            account_id: fd.get('account_id'),
+            currency: fd.get('currency'),
+            amount: fd.get('amount')
+        };
+    });
+})();
+</script>
+{% endblock %}
