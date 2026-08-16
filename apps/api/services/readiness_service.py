@@ -63,6 +63,23 @@ def _governance_ready() -> bool:
         return False
 
 
+def _policy_published(session: Session) -> bool:
+    """A published Investment Policy version exists (PE-003)."""
+    from apps.api.repositories.households import get_current_household
+    from apps.api.repositories.policies import (
+        get_current_published,
+        get_policy,
+    )
+
+    household = get_current_household(session)
+    if household is None:
+        return False
+    policy = get_policy(session, household.id)
+    if policy is None:
+        return False
+    return get_current_published(session, policy.id) is not None
+
+
 def readiness_status(session: Session) -> dict:
     """Compute bootstrap readiness. Read-only, no side effects."""
     now = datetime.now(timezone.utc)
@@ -75,6 +92,7 @@ def readiness_status(session: Session) -> dict:
     providers = check_providers(now)
     providers_ok = providers.status == HEALTHY
     gov_ok = _governance_ready()
+    policy_ok = _policy_published(session)
 
     checks = {
         "schema_at_head": schema_ok,
@@ -83,6 +101,7 @@ def readiness_status(session: Session) -> dict:
         "prompts_approved": prompts_ok,
         "providers_configured": providers_ok,
         "governance_ready": gov_ok,
+        "policy_published": policy_ok,
     }
 
     steps: list[str] = []
@@ -97,6 +116,11 @@ def readiness_status(session: Session) -> dict:
         )
     if not household_ok:
         steps.append("Create the household profile (POST /api/household)")
+    if not policy_ok:
+        steps.append(
+            "Create and publish an Investment Policy "
+            "(/settings/investment-policy)",
+        )
     if not prompts_ok:
         if draft > 0:
             steps.append(

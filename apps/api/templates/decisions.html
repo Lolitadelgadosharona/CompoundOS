@@ -2,6 +2,15 @@
 {% block content %}
 <h1>Committee Decisions</h1>
 
+{% if not policy_published %}
+<article class="card">
+    <p class="confidence-low"><strong>Investment Policy required before approval.</strong></p>
+    <p class="muted">Create and publish your Investment Policy first, then
+        approve decisions.</p>
+    <a href="/settings/investment-policy" role="button">Go to Investment Policy Setup</a>
+</article>
+{% endif %}
+
 <h2>Pending</h2>
 {% if pending %}
 <table>

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
@@ -21,6 +22,7 @@ from apps.api.policy_schemas import (
     AllocationReplaceRequest,
     AllocationResponse,
     CreatePolicyDraftRequest,
+    PersonalPolicySetupRequest,
     PolicyDraftResponse,
     PolicyDraftUpdate,
     PublishPolicyDraftRequest,
@@ -482,3 +484,104 @@ def read_policy_audit_events(session: Session, limit: int) -> list[AuditEvent]:
         policy_id=policy.id,
         limit=limit,
     )
+
+
+def setup_personal_policy(
+    session: Session, payload: PersonalPolicySetupRequest
+) -> InvestmentPolicyVersion:
+    """One-shot Personal Edition policy setup (PE-003).
+
+    Runs in a single transaction: ensure policy + draft exist → fill the
+    simple setup fields → default equities/cash allocation → publish.
+    Uses the repository primitives directly (no governance bypass, no
+    silent auto-approval).
+    """
+    now = datetime.now(timezone.utc)
+    with session.begin():
+        household = _require_household(session)
+
+        policy = get_policy(session, household.id)
+        if policy is None:
+            policy = add_policy(session, household.id)
+            add_policy_audit_event(
+                session,
+                household_id=household.id,
+                policy_id=policy.id,
+                action="policy.created",
+                metadata={},
+            )
+            draft = add_draft(session, policy.id)
+        else:
+            draft = get_draft(session, policy.id)
+            if draft is None:
+                draft = add_draft(session, policy.id)
+
+        # Fill the simple setup fields onto the draft text columns.
+        notes = json.dumps({
+            "risk_preference": payload.risk_preference,
+            "max_single_position_pct": payload.max_single_position_pct,
+            "min_cash_pct": payload.min_cash_pct,
+        })
+        draft.objectives = payload.investment_goal
+        draft.time_horizon = payload.investment_horizon
+        draft.decision_process = payload.principles
+        draft.notes = notes
+        draft.revision += 1
+        draft.updated_at = now
+        policy.updated_at = now
+        session.flush()
+
+        # Default allocation: equities + cash derived from min_cash_pct.
+        allocation_items = [{
+            "asset_class_name": "Equities",
+            "normalized_asset_class_name": "equities",
+            "target_percentage": Decimal(100 - payload.min_cash_pct),
+            "sort_order": 0,
+        }]
+        if payload.min_cash_pct > 0:
+            allocation_items.append({
+                "asset_class_name": "Cash",
+                "normalized_asset_class_name": "cash",
+                "target_percentage": Decimal(payload.min_cash_pct),
+                "sort_order": 1,
+            })
+        replace_draft_allocations(session, draft.id, allocation_items)
+
+        # Publish: supersede current → create version → seal → delete draft.
+        version_number = next_version_number(session, policy.id)
+        current = get_current_published(session, policy.id)
+        if current is not None:
+            current.status = "superseded"
+            current.superseded_at = now
+        version = InvestmentPolicyVersion(
+            policy_id=policy.id,
+            version_number=version_number,
+            status="published",
+            published_at=now,
+            **{name: getattr(draft, name) for name in POLICY_TEXT_FIELDS},
+        )
+        session.add(version)
+        session.flush()
+        draft_allocations = list_draft_allocations(session, draft.id)
+        session.add_all([
+            InvestmentPolicyVersionAllocation(
+                version_id=version.id,
+                asset_class_name=item.asset_class_name,
+                normalized_asset_class_name=item.normalized_asset_class_name,
+                target_percentage=item.target_percentage,
+                sort_order=item.sort_order,
+            )
+            for item in draft_allocations
+        ])
+        session.flush()
+        version.sealed_at = now
+        session.flush()
+        session.delete(draft)
+        add_policy_audit_event(
+            session,
+            household_id=household.id,
+            policy_id=policy.id,
+            action="policy.published",
+            metadata={"version_number": version.version_number},
+        )
+    return version

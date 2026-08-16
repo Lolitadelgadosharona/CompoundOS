@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Investment Policy</h1>
+
+<section class="card">
+    <h2 class="section-title">Current Policy Status</h2>
+    {% if policy_status == "published" %}
+    <p class="confidence-high">✓ Published — version {{ version_number }}
+        ({{ published_at.strftime('%Y-%m-%d') if published_at else '' }})</p>
+    {% elif policy_status == "draft" %}
+    <p>Draft exists — not yet published.</p>
+    {% else %}
+    <p class="confidence-low">❌ No published investment policy.</p>
+    <p class="muted">A published Investment Policy is required before you can
+        approve investment decisions.</p>
+    {% endif %}
+</section>
+
+<section class="card">
+    <h2 class="section-title">Personal Investment Policy</h2>
+    <form id="policy-form">
+        <label>Investment Goal
+            <input type="text" name="investment_goal" required
+                   placeholder="Long term wealth compounding">
+        </label>
+        <label>Risk Preference
+            <select name="risk_preference">
+                <option>Conservative</option>
+                <option>Moderate</option>
+                <option selected>Growth</option>
+            </select>
+        </label>
+        <label>Investment Horizon
+            <select name="investment_horizon">
+                <option>5+ years</option>
+                <option selected>10+ years</option>
+                <option>20+ years</option>
+            </select>
+        </label>
+        <div class="card-grid">
+            <label>Maximum single position (%)
+                <input type="number" name="max_single_position_pct"
+                       value="15" min="1" max="100">
+            </label>
+            <label>Minimum cash allocation (%)
+                <input type="number" name="min_cash_pct"
+                       value="10" min="0" max="99">
+            </label>
+        </div>
+        <label>Investment Principles
+            <textarea name="principles" required rows="4">Focus on high quality businesses, long-term compounding, avoid speculation, avoid excessive concentration.</textarea>
+        </label>
+        <div class="row">
+            <button type="submit">Publish Policy</button>
+        </div>
+    </form>
+    <div id="policy-result"></div>
+</section>
+
+<script>
+(function () {
+    var form = document.getElementById('policy-form');
+    var resultEl = document.getElementById('policy-result');
+
+    function esc(s) {
+        var d = document.createElement('div');
+        d.textContent = s == null ? '' : String(s);
+        return d.innerHTML;
+    }
+
+    form.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        var fd = new FormData(form);
+        var payload = {
+            investment_goal: fd.get('investment_goal'),
+            risk_preference: fd.get('risk_preference'),
+            investment_horizon: fd.get('investment_horizon'),
+            max_single_position_pct: parseInt(fd.get('max_single_position_pct'), 10),
+            min_cash_pct: parseInt(fd.get('min_cash_pct'), 10),
+            principles: fd.get('principles')
+        };
+        resultEl.innerHTML = '<p class="muted">Publishing policy…</p>';
+        try {
+            var res = await fetch('/api/policies/setup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            var data = await res.json();
+            if (!res.ok) {
+                resultEl.innerHTML = '<p class="confidence-low">'
+                    + esc(data.detail || 'Could not publish policy') + '</p>';
+                return;
+            }
+            resultEl.innerHTML = '<p class="confidence-high">✓ Policy published '
+                + '(version ' + esc(data.version_number) + ')</p>';
+        } catch (err) {
+            resultEl.innerHTML = '<p class="confidence-low">'
+                + esc(err && err.message ? err.message : err) + '</p>';
+        }
+    });
+})();
+</script>
+{% endblock %}
