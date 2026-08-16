@@ -2,35 +2,122 @@
 {% block content %}
 <h1>Research</h1>
 
-<form hx-post="/api/research/start" hx-target="#research-status" hx-swap="innerHTML"
-      hx-vals='js:{symbol: document.querySelector("input[name=symbol]").value}'
-      hx-headers='{"Content-Type": "application/json"}'>
-    <fieldset role="group">
-        <input type="text" name="symbol" placeholder="Symbol (e.g., AAPL)" required>
-        <button type="submit">Start Research</button>
-    </fieldset>
-</form>
+<section class="card">
+    <h2 class="section-title">Ask CIO</h2>
+    <form id="ask-cio-form">
+        <fieldset role="group">
+            <input type="text" id="cio-question" name="question"
+                   placeholder="Should I increase Nvidia position?" required>
+            <button type="submit">Ask CIO</button>
+        </fieldset>
+    </form>
+    <div id="cio-status"></div>
+</section>
 
-<div id="research-status"></div>
+<section>
+    <h2 class="section-title">Recent Research</h2>
+    {% if requests %}
+    <table>
+        <thead>
+            <tr><th>Symbol</th><th>Status</th><th>Confidence</th><th>Date</th><th>Action</th></tr>
+        </thead>
+        <tbody>
+        {% for r in requests %}
+        <tr>
+            <td>{{ r.symbol }}</td>
+            <td class="status-{{ r.status }}">{{ r.status }}</td>
+            <td>{{ r.confidence or '-' }}</td>
+            <td>{{ r.date }}</td>
+            <td>{% if r.memo_id %}<a href="/memo/{{ r.memo_id }}">View</a>{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No research yet. Ask the CIO a question above to begin.</p>
+    {% endif %}
+</section>
 
-{% if requests %}
-<table>
-    <thead>
-        <tr><th>Symbol</th><th>Status</th><th>Confidence</th><th>Date</th><th>Action</th></tr>
-    </thead>
-    <tbody>
-    {% for r in requests %}
-    <tr>
-        <td>{{ r.symbol }}</td>
-        <td class="status-{{ r.status }}">{{ r.status }}</td>
-        <td>{{ r.confidence or '-' }}</td>
-        <td>{{ r.date }}</td>
-        <td>{% if r.memo_id %}<a href="/memo/{{ r.memo_id }}">View</a>{% endif %}</td>
-    </tr>
-    {% endfor %}
-    </tbody>
-</table>
-{% else %}
-<p>No research yet. Enter a symbol above to begin.</p>
-{% endif %}
+<script>
+(function () {
+    var form = document.getElementById('ask-cio-form');
+    var input = document.getElementById('cio-question');
+    var statusEl = document.getElementById('cio-status');
+
+    function esc(s) {
+        var d = document.createElement('div');
+        d.textContent = s == null ? '' : String(s);
+        return d.innerHTML;
+    }
+
+    async function pollCio(runId, question, symbol) {
+        function render(p) {
+            var steps = (p.steps || []).map(function (s) {
+                return '<li>' + esc(s.step) + '</li>';
+            }).join('');
+            var actions = '';
+            if (p.is_complete) {
+                var memoBtn = p.memo_id
+                    ? '<a href="/memo/' + esc(p.memo_id) + '" role="button">View Memo</a>'
+                    : '';
+                var approveBtn = p.decision_id
+                    ? '<a href="#" role="button" class="contrast"'
+                      + ' hx-post="/api/decisions/' + esc(p.decision_id) + '/approve"'
+                      + ' hx-swap="none">Approve</a>'
+                    : '';
+                var viewBtn = '<a href="/decisions" role="button"'
+                    + ' class="secondary">View Decision</a>';
+                actions = '<div class="row">' + memoBtn + approveBtn + viewBtn
+                    + '</div>';
+            }
+            if (p.is_failed) {
+                actions = '<p class="confidence-low">Research failed: '
+                    + esc(p.error) + '</p>';
+            }
+            statusEl.innerHTML =
+                '<p><strong>Question:</strong> ' + esc(question) + '</p>'
+                + '<p><strong>Symbol:</strong> ' + esc(symbol) + '</p>'
+                + '<progress value="' + p.progress_pct + '" max="100"></progress> '
+                + '<span>' + p.progress_pct + '%</span>'
+                + (steps ? '<ul>' + steps + '</ul>' : '')
+                + actions;
+        }
+        while (true) {
+            try {
+                var res = await fetch('/api/research/' + runId + '/status');
+                var p = await res.json();
+                render(p);
+                if (p.is_complete || p.is_failed || p.status === 'not_found') break;
+            } catch (e) {
+                break;
+            }
+            await new Promise(function (r) { setTimeout(r, 2000); });
+        }
+    }
+
+    form.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        var question = input.value.trim();
+        if (!question) { return; }
+        statusEl.innerHTML = '<p class="muted">Starting research…</p>';
+        try {
+            var res = await fetch('/api/cio/ask', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ question: question })
+            });
+            var data = await res.json();
+            if (!res.ok) {
+                statusEl.innerHTML = '<p class="confidence-low">'
+                    + esc(data.detail || 'Could not start research') + '</p>';
+                return;
+            }
+            pollCio(data.run_id, question, data.symbol);
+        } catch (err) {
+            statusEl.innerHTML = '<p class="confidence-low">'
+                + esc(err && err.message ? err.message : err) + '</p>';
+        }
+    });
+})();
+</script>
 {% endblock %}

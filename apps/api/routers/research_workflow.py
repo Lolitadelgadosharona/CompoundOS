@@ -69,6 +69,7 @@ def get_status(run_id: str):
         "progress_pct": progress.progress_pct,
         "perspectives": f"{progress.perspective_count}/{progress.total_perspectives}",
         "memo_id": progress.memo_id,
+        "decision_id": progress.decision_id,
         "confidence": progress.confidence,
         "error": progress.error,
         "is_complete": progress.is_complete,
