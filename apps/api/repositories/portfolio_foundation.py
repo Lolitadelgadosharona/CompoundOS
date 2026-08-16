@@ -40,7 +40,7 @@ def find_asset_by_isin(session: Session, isin: str) -> Optional[Asset]:
 
 
 def find_asset_by_identity(
-    session: Session, symbol: str, exchange: str, currency: str,
+    session: Session, symbol: str, exchange: Optional[str], currency: str,
 ) -> Optional[Asset]:
     return session.scalar(
         select(Asset).where(
@@ -77,6 +77,24 @@ def get_account(
     if for_update:
         statement = statement.with_for_update()
     return session.scalar(statement)
+
+
+def create_account(session: Session, **kwargs) -> Account:
+    """Create an account (manual / provider-agnostic). No credentials."""
+    account = Account(id=uuid4(), **kwargs)
+    session.add(account)
+    session.flush()
+    return account
+
+
+def list_accounts(session: Session, portfolio_id: UUID) -> list[Account]:
+    return list(
+        session.scalars(
+            select(Account)
+            .where(Account.portfolio_id == portfolio_id)
+            .order_by(Account.sort_order, Account.name)
+        )
+    )
 
 
 def update_account_fields(session: Session, account_id: UUID, **fields) -> Optional[Account]:
