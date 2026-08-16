@@ -1,14 +1,17 @@
-"""Bootstrap CLI — create first Owner API key.
+"""Bootstrap CLI — create the FIRST Owner API key.
 
 Sprint 010 Slice D — SECURITY HARDENING (H3).
+M7-002 — production-safe one-off bootstrap.
 
-Usage: python -m apps.api.bootstrap_key [--label "Owner Key 2026"]
+Usage: docker compose run --rm api python -m apps.api.bootstrap_key
 
 Generates a cryptographically random API key, stores its SHA-256 hash
 in the database, and prints the plaintext key exactly once.
 
-This is a local CLI tool — no HTTP endpoint for unauthenticated key creation.
-Requires ENVIRONMENT=development or ENVIRONMENT=test to run.
+This is a local CLI tool — no HTTP endpoint for unauthenticated key
+creation. It only works when NO owner key exists yet (first-key guard),
+so it cannot be used to mint extra keys out-of-band. Additional keys are
+created via the authenticated POST /api/auth/keys endpoint.
 """
 
 from __future__ import annotations
@@ -28,22 +31,26 @@ def _hash_key(api_key: str) -> str:
 
 
 def main() -> None:
-    env = os.getenv("ENVIRONMENT", "").strip().lower()
-    if env not in ("development", "test"):
-        print(
-            "ERROR: First-key bootstrap requires ENVIRONMENT=development or "
-            "ENVIRONMENT=test.\n"
-            "In production, create API keys via authenticated "
-            "POST /api/auth/keys."
-        )
-        sys.exit(1)
-
     label = sys.argv[1] if len(sys.argv) > 1 else "Owner Bootstrap Key"
-    api_key = os.urandom(32).hex()
-    key_hash = _hash_key(api_key)
 
     session = SessionLocal()
     try:
+        # First-key guard: refuse if any key already exists so this CLI
+        # cannot be used to mint extra keys out-of-band. Extra keys are
+        # created via the authenticated POST /api/auth/keys endpoint.
+        existing = session.execute(
+            text("SELECT COUNT(*) FROM owner_api_keys")
+        ).scalar() or 0
+        if existing > 0:
+            print(
+                "ERROR: an Owner API key already exists — refusing to "
+                "bootstrap another. Create additional keys via the "
+                "authenticated POST /api/auth/keys endpoint."
+            )
+            sys.exit(1)
+
+        api_key = os.urandom(32).hex()
+        key_hash = _hash_key(api_key)
         # Audit: key creation
         from datetime import datetime, timezone
         audit_id = uuid4()
