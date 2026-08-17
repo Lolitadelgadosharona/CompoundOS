@@ -223,8 +223,11 @@ def approve(decision_id: UUID, session: DatabaseSession) -> dict:
     from apps.api.services.decision_lifecycle import OwnerDecisionService
 
     try:
-        return OwnerDecisionService.confirm_decision(session, decision_id)
+        result = OwnerDecisionService.confirm_decision(session, decision_id)
+        session.commit()
+        return result
     except Exception as exc:
+        session.rollback()
         raise _translate(exc) from exc
 
 
@@ -237,8 +240,11 @@ def reject(decision_id: UUID, session: DatabaseSession) -> dict:
     from apps.api.services.decision_lifecycle import OwnerDecisionService
 
     try:
-        return OwnerDecisionService.reject_decision(session, decision_id)
+        result = OwnerDecisionService.reject_decision(session, decision_id)
+        session.commit()
+        return result
     except Exception as exc:
+        session.rollback()
         raise _translate(exc) from exc
 
 
