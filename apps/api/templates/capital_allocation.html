@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Capital Allocation</h1>
+
+{% if data.policy_status == "none" %}
+<section>
+    <div class="card">
+        <p class="confidence-low">❌ No published Investment Policy.</p>
+        <p class="muted">Publish an Investment Policy first to define capital
+            allocation buckets.</p>
+        <a href="/settings/investment-policy" role="button">Go to Investment Policy Setup</a>
+    </div>
+</section>
+{% else %}
+
+<section>
+    <h2 class="section-title">Capital Bucket Overview</h2>
+    {% if data.buckets %}
+    <table>
+        <thead>
+            <tr><th>Bucket</th><th>Target %</th><th>Current %</th>
+                <th>Drift</th><th>Min %</th><th>Max %</th></tr>
+        </thead>
+        <tbody>
+        {% for b in data.buckets %}
+        <tr>
+            <td>{{ b.name }}</td>
+            <td>{{ b.target_pct }}</td>
+            <td>{{ b.current_pct }}</td>
+            <td>
+                {% if b.drift_pct > 0 %}
+                <span class="confidence-medium">+{{ b.drift_pct }}</span>
+                {% elif b.drift_pct < 0 %}
+                <span class="confidence-low">{{ b.drift_pct }}</span>
+                {% else %}
+                <span>0.0</span>
+                {% endif %}
+            </td>
+            <td>{{ b.min_pct if b.min_pct is not none else '—' }}</td>
+            <td>{{ b.max_pct if b.max_pct is not none else '—' }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    <p class="muted">Total portfolio value: ${{ data.total_value or "0.00" }}</p>
+    {% else %}
+    <p class="muted">No capital buckets defined in the published policy.</p>
+    {% endif %}
+</section>
+
+<section>
+    <h2 class="section-title">Policy Summary</h2>
+    {% if summary %}
+    <div class="card">
+        <p><strong>Version:</strong> {{ summary.version_number }}</p>
+        <p><strong>Objectives:</strong> {{ summary.objectives }}</p>
+        <p><strong>Time Horizon:</strong> {{ summary.time_horizon }}</p>
+        <p><strong>Decision Process:</strong> {{ summary.decision_process }}</p>
+        <a href="/settings/investment-policy" role="button" class="secondary">Edit Policy</a>
+    </div>
+    {% else %}
+    <p class="muted">No published policy summary.</p>
+    {% endif %}
+</section>
+
+{% endif %}
+{% endblock %}

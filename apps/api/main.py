@@ -8,6 +8,7 @@ from apps.api.mutation_gate import mutation_gate
 from apps.api.routers.auth import router as auth_router
 from apps.api.routers.automation import router as automation_router
 from apps.api.routers.backup import router as backup_router
+from apps.api.routers.capital_allocation import router as capital_allocation_router
 from apps.api.routers.cio import router as cio_router
 from apps.api.routers.committee import router as committee_router
 from apps.api.routers.committee_bridge import router as committee_bridge_router
@@ -174,6 +175,7 @@ app.include_router(portfolios_router)
 app.include_router(guardian_router)
 app.include_router(committee_router)
 app.include_router(backup_router)
+app.include_router(capital_allocation_router)
 app.include_router(cio_router)
 app.include_router(health_router)
 app.include_router(notifications_router)
