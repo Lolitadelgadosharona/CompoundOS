@@ -7,7 +7,7 @@
     <form id="ask-cio-form">
         <fieldset role="group">
             <input type="text" id="cio-question" name="question"
-                   placeholder="Should I increase Nvidia position?" required>
+                   placeholder="Ask the CIO anything — a stock, an ETF, a theme, or your portfolio" required>
             <button type="submit">Ask CIO</button>
         </fieldset>
     </form>
@@ -136,6 +136,17 @@
             if (!res.ok) {
                 statusEl.innerHTML = '<p class="confidence-low">'
                     + esc(data.detail || 'Could not start research') + '</p>';
+                return;
+            }
+            if (data.route === 'portfolio') {
+                statusEl.innerHTML = '<p><strong>' + esc(data.message)
+                    + '</strong></p>'
+                    + '<a href="/portfolio" role="button">Go to Portfolio</a>';
+                return;
+            }
+            if (data.route === 'theme' || data.route === 'macro') {
+                statusEl.innerHTML = '<p class="muted">' + esc(data.message)
+                    + '</p>';
                 return;
             }
             renderStarted(question, data.symbol);

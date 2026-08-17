@@ -36,6 +36,16 @@ def build_research_pipeline(
     )
 
 
+def build_governed_executor() -> Any:
+    """Build a real GovernedLLMExecutor (governance chain wired).
+
+    Used by the CIO query-understanding layer to classify intent through
+    the governed executor — PermissionGate → PromptGovernor → router →
+    provider → validator → cost tracker → logger. No bypass.
+    """
+    return _build_real_executor()
+
+
 def _build_real_executor() -> Any:
     """Construct a GovernedLLMExecutor over available provider adapters."""
     from apps.api.services.llm_provider_runtime import (
