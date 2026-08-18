@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Decision</h1>
+
+<!-- Decision Summary Card -->
+<section>
+    <h2 class="section-title">Decision Summary</h2>
+    <div class="card">
+        <h3>{{ ws.title or 'Untitled' }}</h3>
+        <div class="card-grid">
+            <div class="card">
+                <h3>Recommendation</h3>
+                <div class="card-value">{{ ws.recommendation or '—' }}</div>
+            </div>
+            <div class="card">
+                <h3>Confidence</h3>
+                <div class="card-value">{{ ws.confidence if ws.confidence is not none else '—' }}%</div>
+            </div>
+            <div class="card">
+                <h3>Status</h3>
+                <div class="card-value">{{ ws.status }}</div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Committee View -->
+<section>
+    <h2 class="section-title">Investment Committee</h2>
+    {% if ws.perspectives %}
+    <div class="card-grid">
+        {% for p in ws.perspectives %}
+        <div class="card">
+            <h3>{{ p.perspective | title }} Analyst</h3>
+            <p><strong>Confidence:</strong> {{ p.conviction_score }}/10</p>
+            {% if p.thesis %}
+            <p><strong>Thesis:</strong> {{ p.thesis }}</p>
+            {% endif %}
+            {% if p.evidence %}
+            <p><strong>Evidence:</strong> {{ p.evidence }}</p>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="muted">No committee perspectives available.</p>
+    {% endif %}
+</section>
+
+<!-- Memo Summary -->
+<section>
+    <h2 class="section-title">Memo Summary</h2>
+    {% if ws.memo %}
+    <div class="card">
+        {% if ws.memo.bull_case %}
+        <p><strong>Bull Case:</strong> {{ ws.memo.bull_case }}</p>
+        {% endif %}
+        {% if ws.memo.bear_case %}
+        <p><strong>Bear Case:</strong> {{ ws.memo.bear_case }}</p>
+        {% endif %}
+        {% if ws.memo.valuation %}
+        <p><strong>Valuation:</strong> {{ ws.memo.valuation }}</p>
+        {% endif %}
+        {% if ws.memo.risks %}
+        <p><strong>Risks:</strong></p>
+        <ul>
+            {% for r in ws.memo.risks %}
+            <li>{{ r }}</li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+    </div>
+    {% else %}
+    <p class="muted">No memo available.</p>
+    {% endif %}
+</section>
+
+<!-- Decision Action -->
+{% if ws.status == 'draft' %}
+<section>
+    <h2 class="section-title">Decision Action</h2>
+    <div class="card">
+        <div class="row">
+            <a href="#" id="approve-btn" role="button" class="contrast">Approve</a>
+            <a href="#" id="reject-btn" role="button" class="secondary">Reject</a>
+        </div>
+        <div id="decision-result"></div>
+    </div>
+</section>
+{% endif %}
+
+<script>
+(function () {
+    var decisionId = '{{ ws.decision_id }}';
+    var resultEl = document.getElementById('decision-result');
+
+    function esc(s) {
+        var d = document.createElement('div');
+        d.textContent = s == null ? '' : String(s);
+        return d.innerHTML;
+    }
+
+    async function act(action) {
+        resultEl.innerHTML = '<p class="muted">Submitting…</p>';
+        try {
+            var res = await fetch('/api/decisions/' + decisionId + '/' + action, {
+                method: 'POST'
+            });
+            var data = await res.json();
+            if (!res.ok) {
+                resultEl.innerHTML = '<p class="confidence-low">'
+                    + esc(data.detail || 'Could not complete decision') + '</p>';
+                return;
+            }
+            resultEl.innerHTML = '<p class="confidence-high">✓ '
+                + esc(data.status) + '</p>';
+            setTimeout(function () { location.reload(); }, 800);
+        } catch (err) {
+            resultEl.innerHTML = '<p class="confidence-low">'
+                + esc(err && err.message ? err.message : err) + '</p>';
+        }
+    }
+
+    if (document.getElementById('approve-btn')) {
+        document.getElementById('approve-btn').addEventListener('click', function (e) {
+            e.preventDefault(); act('approve');
+        });
+        document.getElementById('reject-btn').addEventListener('click', function (e) {
+            e.preventDefault(); act('reject');
+        });
+    }
+})();
+</script>
+{% endblock %}
