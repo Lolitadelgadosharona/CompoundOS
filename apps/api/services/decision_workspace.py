@@ -32,6 +32,19 @@ def _narrative(value) -> str:
     return str(value)
 
 
+def _impact(value) -> str | None:
+    """Flatten a portfolio/guardian impact value, or None when empty.
+
+    Never fabricates: only surfaces data that is actually present.
+    """
+    if not value:
+        return None
+    if isinstance(value, dict) and set(value.keys()) == {"compliant"}:
+        return f"Policy compliant: {value['compliant']}"
+    text = _narrative(value)
+    return text or None
+
+
 def _extract_run_id(evidence: str | None) -> UUID | None:
     if not evidence:
         return None
@@ -71,12 +84,17 @@ def decision_workspace(session: Session, decision_id: UUID) -> dict:
                          else json.loads(memo_row[0] or "{}"))
             recommendation = memo_row[1]
             confidence = memo_row[2]
+            committee = memo_json.get("committee") or {}
             memo = {
                 "thesis": _narrative(memo_json.get("thesis")),
                 "bull_case": _narrative(memo_json.get("bull_case")),
                 "bear_case": _narrative(memo_json.get("bear_case")),
                 "risks": memo_json.get("risks") or [],
                 "valuation": _narrative(memo_json.get("valuation")),
+                "consensus": committee.get("consensus"),
+                "disagreements": committee.get("disagreements") or [],
+                "portfolio_impact": _impact(memo_json.get("portfolio_impact")),
+                "guardian_impact": _impact(memo_json.get("guardian_impact")),
             }
 
         p_rows = session.execute(text(

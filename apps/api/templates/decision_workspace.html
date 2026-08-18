@@ -42,6 +42,20 @@
         </div>
         {% endfor %}
     </div>
+    {% if ws.memo and ws.memo.consensus %}
+    <div class="card" style="margin-top: 0.75rem;">
+        <h3>Committee Consensus: <strong>{{ ws.memo.consensus }}</strong></h3>
+    </div>
+    {% endif %}
+    {% if ws.memo and ws.memo.disagreements %}
+    <div class="card" style="margin-top: 0.75rem;">
+        <h3>Disagreement</h3>
+        {% for d in ws.memo.disagreements %}
+        <p>⚠️ {{ d.perspective | title }} analyst diverges
+            (conviction {{ d.conviction }})</p>
+        {% endfor %}
+    </div>
+    {% endif %}
     {% else %}
     <p class="muted">No committee perspectives available.</p>
     {% endif %}
@@ -72,6 +86,23 @@
     </div>
     {% else %}
     <p class="muted">No memo available.</p>
+    {% endif %}
+</section>
+
+<!-- Portfolio / Guardian Impact -->
+<section>
+    <h2 class="section-title">Portfolio &amp; Guardian Impact</h2>
+    {% if ws.memo and (ws.memo.portfolio_impact or ws.memo.guardian_impact) %}
+    <div class="card">
+        {% if ws.memo.portfolio_impact %}
+        <p><strong>Portfolio Impact:</strong> {{ ws.memo.portfolio_impact }}</p>
+        {% endif %}
+        {% if ws.memo.guardian_impact %}
+        <p><strong>Guardian Impact:</strong> {{ ws.memo.guardian_impact }}</p>
+        {% endif %}
+    </div>
+    {% else %}
+    <p class="muted">Portfolio / Guardian impact data unavailable.</p>
     {% endif %}
 </section>
 

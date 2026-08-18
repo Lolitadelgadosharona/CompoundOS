@@ -57,6 +57,15 @@ def _seed_workspace(db_session, household_id):
         "bear_case": {"narrative": "Valuation risk"},
         "risks": ["Valuation", "Competition"],
         "valuation": {"method": "DCF"},
+        "committee": {
+            "consensus": "BUY",
+            "disagreements": [
+                {"perspective": "risk", "conviction": 4, "deviation": -2.0},
+            ],
+            "perspectives": {},
+        },
+        "portfolio_impact": {"allocation": "5% position"},
+        "guardian_impact": {"compliant": True},
     })
     db_session.execute(text(
         "INSERT INTO investment_memos (id, run_id, memo, synthesis_model,"
@@ -109,6 +118,10 @@ class TestDecisionWorkspaceAPI:
         assert data["memo"]["bull_case"] == "AI growth tailwind"
         assert data["memo"]["bear_case"] == "Valuation risk"
         assert "Valuation" in data["memo"]["risks"]
+        assert data["memo"]["consensus"] == "BUY"
+        assert data["memo"]["disagreements"][0]["perspective"] == "risk"
+        assert data["memo"]["guardian_impact"] == "Policy compliant: True"
+        assert data["memo"]["portfolio_impact"] is not None
 
 
 class TestDecisionWorkspacePage:
@@ -138,3 +151,32 @@ class TestDecisionWorkspacePage:
         assert r.status_code == 200
         assert "approve-btn" in r.text
         assert "reject-btn" in r.text
+
+    def test_page_shows_disagreement(self, api_client, db_session):
+        hh = _setup_household(db_session)
+        decision_id = _seed_workspace(db_session, hh)
+        r = api_client.get(f"/decision/{decision_id}")
+        assert r.status_code == 200
+        assert "Disagreement" in r.text
+        assert "Committee Consensus" in r.text
+
+    def test_page_shows_impact(self, api_client, db_session):
+        hh = _setup_household(db_session)
+        decision_id = _seed_workspace(db_session, hh)
+        r = api_client.get(f"/decision/{decision_id}")
+        assert r.status_code == 200
+        assert "Portfolio &amp; Guardian Impact" in r.text
+        assert "Policy compliant: True" in r.text
+
+
+class TestDecisionsListUX:
+    def test_decisions_page_has_visible_feedback(self, api_client, db_session):
+        hh = _setup_household(db_session)
+        _seed_workspace(db_session, hh)
+        r = api_client.get("/decisions")
+        assert r.status_code == 200
+        # Review link to the workspace + JS-based decision buttons
+        assert "/decision/" in r.text
+        assert "decision-btn" in r.text
+        # no more invisible hx-swap="none" on the approve/reject buttons
+        assert "hx-swap=\"none\"" not in r.text
