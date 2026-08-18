@@ -11,11 +11,13 @@
 </article>
 {% endif %}
 
+<div id="decision-feedback"></div>
+
 <h2>Pending</h2>
 {% if pending %}
 <table>
     <thead>
-        <tr><th>Symbol</th><th>Recommendation</th><th>Confidence</th><th>Memo</th><th>Action</th></tr>
+        <tr><th>Symbol</th><th>Recommendation</th><th>Confidence</th><th>Action</th></tr>
     </thead>
     <tbody>
     {% for d in pending %}
@@ -23,14 +25,12 @@
         <td>{{ d.symbol }}</td>
         <td>{{ d.recommendation }}</td>
         <td>{{ d.confidence }}%</td>
-        <td><a href="/memo/{{ d.memo_id }}">View Memo</a></td>
         <td>
-            <a href="#" role="button" class="contrast" style="background:#2ecc71"
-               hx-post="/api/decisions/{{ d.decision_id }}/approve"
-               hx-swap="none">APPROVE</a>
-            <a href="#" role="button" class="secondary" style="background:#e74c3c"
-               hx-post="/api/decisions/{{ d.decision_id }}/reject"
-               hx-swap="none">REJECT</a>
+            <a href="/decision/{{ d.decision_id }}" role="button" class="secondary">Review</a>
+            <a href="#" role="button" class="contrast decision-btn"
+               data-id="{{ d.decision_id }}" data-action="approve">Approve</a>
+            <a href="#" role="button" class="secondary decision-btn"
+               data-id="{{ d.decision_id }}" data-action="reject">Reject</a>
         </td>
     </tr>
     {% endfor %}
@@ -60,4 +60,44 @@
 {% else %}
 <p>No past decisions.</p>
 {% endif %}
+
+<script>
+(function () {
+    var feedback = document.getElementById('decision-feedback');
+
+    function esc(s) {
+        var d = document.createElement('div');
+        d.textContent = s == null ? '' : String(s);
+        return d.innerHTML;
+    }
+
+    async function act(id, action) {
+        feedback.innerHTML = '<p class="muted">Submitting…</p>';
+        try {
+            var res = await fetch('/api/decisions/' + id + '/' + action, {
+                method: 'POST'
+            });
+            var data = await res.json();
+            if (!res.ok) {
+                feedback.innerHTML = '<p class="confidence-low">'
+                    + esc(data.detail || 'Could not complete decision') + '</p>';
+                return;
+            }
+            feedback.innerHTML = '<p class="confidence-high">✓ '
+                + esc(data.status) + '</p>';
+            setTimeout(function () { location.reload(); }, 800);
+        } catch (err) {
+            feedback.innerHTML = '<p class="confidence-low">'
+                + esc(err && err.message ? err.message : err) + '</p>';
+        }
+    }
+
+    document.querySelectorAll('.decision-btn').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+            e.preventDefault();
+            act(btn.getAttribute('data-id'), btn.getAttribute('data-action'));
+        });
+    });
+})();
+</script>
 {% endblock %}

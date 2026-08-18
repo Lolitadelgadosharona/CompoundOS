@@ -132,6 +132,25 @@ async def portfolio(request: Request,
     })
 
 
+@router.get("/decision/{decision_id}", response_class=HTMLResponse)
+async def decision_workspace(request: Request, decision_id: str,
+                             session: Session = Depends(get_session)):
+    try:
+        did = UUID(decision_id)
+    except ValueError:
+        raise HTTPException(400, "Invalid decision id")
+    from apps.api.services.decision_workspace import (
+        DecisionWorkspaceNotFoundError,
+        decision_workspace,
+    )
+    try:
+        data = decision_workspace(session, did)
+    except DecisionWorkspaceNotFoundError:
+        raise HTTPException(404, "Decision not found")
+    return templates.TemplateResponse(request, "decision_workspace.html",
+                                      {"ws": data})
+
+
 @router.get("/research", response_class=HTMLResponse)
 async def research(request: Request,
                    session: Session = Depends(get_session)):

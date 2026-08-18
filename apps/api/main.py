@@ -14,6 +14,7 @@ from apps.api.routers.committee_bridge import router as committee_bridge_router
 from apps.api.routers.daily_ops import router as daily_ops_router
 from apps.api.routers.dashboard import router as dashboard_router
 from apps.api.routers.dashboard_data import router as dashboard_data_router
+from apps.api.routers.decision_workspace import router as decision_workspace_router
 from apps.api.routers.decisions import router as decisions_router
 from apps.api.routers.guardian import router as guardian_router
 from apps.api.routers.health import router as health_router
@@ -169,6 +170,7 @@ def api_health() -> dict[str, str]:
 app.include_router(automation_router)
 app.include_router(households_router)
 app.include_router(policies_router)
+app.include_router(decision_workspace_router)
 app.include_router(decisions_router)
 app.include_router(portfolios_router)
 app.include_router(guardian_router)
