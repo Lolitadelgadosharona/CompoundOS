@@ -61,6 +61,49 @@
     {% endif %}
 </section>
 
+<!-- Evidence Coverage -->
+<section>
+    <h2 class="section-title">Evidence Coverage</h2>
+    <div class="card">
+        <p><strong>{{ ws.evidence_coverage.with_evidence }}</strong> of
+            {{ ws.evidence_coverage.total }} perspectives provided evidence.</p>
+    </div>
+</section>
+
+<!-- Missing Evidence -->
+<section>
+    <h2 class="section-title">Missing Evidence</h2>
+    {% if ws.missing_evidence %}
+    <div class="card">
+        <ul>
+            {% for m in ws.missing_evidence %}
+            <li>{{ m }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% else %}
+    <p class="muted">Missing-evidence data unavailable.</p>
+    {% endif %}
+</section>
+
+<!-- Confidence Explanation -->
+<section>
+    <h2 class="section-title">Confidence Explanation</h2>
+    <div class="card">
+        {% if ws.confidence_explanation.contributors %}
+        <p><strong>Contributors:</strong>
+            {{ ws.confidence_explanation.contributors | join(', ') }}</p>
+        {% endif %}
+        {% if ws.confidence_explanation.reducers %}
+        <p><strong>Reducers:</strong>
+            {{ ws.confidence_explanation.reducers | join(', ') }}</p>
+        {% endif %}
+        {% if not ws.confidence_explanation.contributors and not ws.confidence_explanation.reducers %}
+        <p class="muted">Confidence contributors / reducers data unavailable.</p>
+        {% endif %}
+    </div>
+</section>
+
 <!-- Memo Summary -->
 <section>
     <h2 class="section-title">Memo Summary</h2>

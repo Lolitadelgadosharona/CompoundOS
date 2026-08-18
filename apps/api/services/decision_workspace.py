@@ -45,6 +45,15 @@ def _impact(value) -> str | None:
     return text or None
 
 
+def _extract_missing_sources(evidence) -> list[str] | None:
+    """Return the missing-source list from the memo's evidence, or None."""
+    if isinstance(evidence, dict):
+        sources = evidence.get("sources")
+        if isinstance(sources, list) and sources:
+            return [str(s) for s in sources]
+    return None
+
+
 def _extract_run_id(evidence: str | None) -> UUID | None:
     if not evidence:
         return None
@@ -72,6 +81,7 @@ def decision_workspace(session: Session, decision_id: UUID) -> dict:
     recommendation = None
     confidence = None
     memo = None
+    memo_json = None
     perspectives: list[dict] = []
 
     if run_id is not None:
@@ -112,6 +122,24 @@ def decision_workspace(session: Session, decision_id: UUID) -> dict:
             for r in p_rows
         ]
 
+    # Evidence coverage + confidence explanation (derived, read-only).
+    evidence_coverage = {
+        "total": len(perspectives),
+        "with_evidence": sum(1 for p in perspectives if p.get("evidence")),
+    }
+    contributors = [
+        p["perspective"] for p in perspectives
+        if p.get("conviction_score") is not None and p["conviction_score"] >= 6
+    ]
+    reducers = [
+        p["perspective"] for p in perspectives
+        if p.get("conviction_score") is not None and p["conviction_score"] < 4
+    ]
+    missing_evidence = (
+        _extract_missing_sources(memo_json.get("evidence"))
+        if memo_json is not None else None
+    )
+
     return {
         "decision_id": str(decision_id),
         "status": status,
@@ -120,4 +148,10 @@ def decision_workspace(session: Session, decision_id: UUID) -> dict:
         "confidence": confidence,
         "perspectives": perspectives,
         "memo": memo,
+        "evidence_coverage": evidence_coverage,
+        "missing_evidence": missing_evidence,
+        "confidence_explanation": {
+            "contributors": contributors,
+            "reducers": reducers,
+        },
     }

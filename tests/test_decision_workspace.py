@@ -66,6 +66,7 @@ def _seed_workspace(db_session, household_id):
         },
         "portfolio_impact": {"allocation": "5% position"},
         "guardian_impact": {"compliant": True},
+        "evidence": {"sources": ["Analyst coverage", "Insider transactions"]},
     })
     db_session.execute(text(
         "INSERT INTO investment_memos (id, run_id, memo, synthesis_model,"
@@ -122,6 +123,11 @@ class TestDecisionWorkspaceAPI:
         assert data["memo"]["disagreements"][0]["perspective"] == "risk"
         assert data["memo"]["guardian_impact"] == "Policy compliant: True"
         assert data["memo"]["portfolio_impact"] is not None
+        # PE-004C: evidence coverage + missing evidence + confidence
+        assert data["evidence_coverage"]["total"] == 6
+        assert data["evidence_coverage"]["with_evidence"] == 6
+        assert "Analyst coverage" in data["missing_evidence"]
+        assert "value" in data["confidence_explanation"]["contributors"]
 
 
 class TestDecisionWorkspacePage:
@@ -167,6 +173,16 @@ class TestDecisionWorkspacePage:
         assert r.status_code == 200
         assert "Portfolio &amp; Guardian Impact" in r.text
         assert "Policy compliant: True" in r.text
+
+    def test_page_shows_evidence_sections(self, api_client, db_session):
+        hh = _setup_household(db_session)
+        decision_id = _seed_workspace(db_session, hh)
+        r = api_client.get(f"/decision/{decision_id}")
+        assert r.status_code == 200
+        assert "Evidence Coverage" in r.text
+        assert "Missing Evidence" in r.text
+        assert "Confidence Explanation" in r.text
+        assert "Analyst coverage" in r.text
 
 
 class TestDecisionsListUX:
