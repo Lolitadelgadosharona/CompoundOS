@@ -132,6 +132,33 @@ async def portfolio(request: Request,
     })
 
 
+@router.get("/capital-allocation", response_class=HTMLResponse)
+async def capital_allocation(request: Request,
+                             session: Session = Depends(get_session)):
+    from apps.api.services import capital_allocation as ca_service
+    from apps.api.services.policies import (
+        PolicyNotFoundError,
+        PublishedVersionNotFoundError,
+        read_current_published,
+    )
+    data = ca_service.capital_allocation(session)
+    summary = None
+    try:
+        version, _ = read_current_published(session)
+        summary = {
+            "objectives": version.objectives,
+            "time_horizon": version.time_horizon,
+            "decision_process": version.decision_process,
+            "version_number": version.version_number,
+        }
+    except (PolicyNotFoundError, PublishedVersionNotFoundError):
+        pass
+    return templates.TemplateResponse(request, "capital_allocation.html", {
+        "data": data,
+        "summary": summary,
+    })
+
+
 @router.get("/research", response_class=HTMLResponse)
 async def research(request: Request,
                    session: Session = Depends(get_session)):
