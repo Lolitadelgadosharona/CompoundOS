@@ -96,7 +96,7 @@ def test_published_core_zero_blocks_same_audit_candidate(db_session, setup):
     )
     db_session.execute(text("ALTER TABLE policy_capital_buckets ENABLE TRIGGER USER"))
     db_session.commit()
-    result = svc.evaluate(db_session, h, svc.configuration(db_session, h))
+    result = svc.evaluate(db_session, h, svc.configuration(db_session, h), funding="initial")
     assert not result["recommendation_ready"]
     assert any("Bucket CORE" in x for x in result["policy"]["findings"])
 

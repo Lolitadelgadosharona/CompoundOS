@@ -454,7 +454,7 @@ _VALID_OUTPUT = """{
     "opposing_arguments": ["Market conditions suggest reviewing exposures."],
     "risks": ["Elevated market uncertainty and interest rate sensitivity."],
     "policy_alignment": "The proposal is consistent with the investment policy.",
-    "minority_opinions": ["One perspective favors more conservative exposure levels."],
+    "minority_opinions": ["A perspective favors more conservative exposure levels."],
     "evidence_citations": [],
     "limitations": ["Analysis is limited to available data as of valuation date."],
     "recommended_direction": "insufficient_evidence",

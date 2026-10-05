@@ -335,7 +335,14 @@ def run_committee(
             return " ".join(inference_text(v) for v in value)
         return str(value)
 
-    if re.search(r"\d", inference_text(parsed)):
+    numeric_pattern = (
+        r"\d|[零〇一二三四五六七八九十百千万亿]|"
+        r"\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
+        r"thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|"
+        r"forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion|"
+        r"trillion|half|quarter|percent|percentage)(?:fold)?\b"
+    )
+    if re.search(numeric_pattern, inference_text(parsed), re.I):
         _fail_session(session, committee_session, "Unsupported quantitative model assertion")
         raise ValueError("Numerical financial facts belong exclusively to deterministic evidence")
 
@@ -353,7 +360,7 @@ def run_committee(
             return str(value)
 
         if re.search(
-            r"\d|\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|hundred|thousand|million|percent|percentage)\b",
+            numeric_pattern,
             model_text(parsed),
             re.I,
         ) or parsed.get("confidence") not in {
@@ -371,6 +378,9 @@ def run_committee(
             )
         parsed["classification"] = "INFERENCE"
         parsed["direction_classification"] = "RECOMMENDATION"
+
+    parsed["classification"] = "INFERENCE"
+    parsed["direction_classification"] = "RECOMMENDATION"
 
     # Persist immutable report
     report = _persist_report(

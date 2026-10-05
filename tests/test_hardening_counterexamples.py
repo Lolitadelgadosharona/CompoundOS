@@ -156,3 +156,24 @@ def test_exact_combined_provider_collision_from_owner_audit(db_session, setup, p
     with pytest.raises(InstrumentUnavailable, match="IDENTITY_MISMATCH"):
         canonical_asset(db_session, collision)
     assert canonical_asset(db_session, provider.identify("VTI")).id == assets[0].id
+
+
+@pytest.mark.parametrize("claim", ["Expected gain twentyfold", "Gain thirty", "收益百分之三十"])
+def test_spelled_quantitative_assertion_cannot_authorize(db_session, setup, claim):
+    hid, _, _, _ = setup
+    candidate = svc.make_candidate(db_session, hid)
+    preview = svc.preview_committee(db_session, hid, UUID(candidate["id"]))
+    cs = db_session.get(CommitteeSession, UUID(preview["committee_session_id"]))
+    cs.status = "queued"
+    db_session.commit()
+    report = _valid_report(cs)
+    report["confidence"] = "high"
+    report["policy_alignment"] = claim
+    with pytest.raises(ValueError, match="Numerical financial facts"):
+        run_committee(
+            db_session,
+            cs,
+            FakeProvider(response_text=json.dumps(report)),
+            prompt_version="contribution-v1.1",
+        )
+    assert cs.status == "failed" and cs.report is None
