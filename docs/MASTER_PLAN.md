@@ -745,3 +745,14 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   broker、交易、生产迁移、部署、push/PR/merge 未授权且未执行。
   Deployed SHA UNKNOWN。后续 CompoundOS 开发统一使用 Codex；Resolver 等
   下一阶段尚未实施。具体证据和兼容限制见 docs/folio-integration/PHASE1_*.md。
+
+
+## 2026-10-05 — Owner authorized V1 Launch Acceleration Sprint
+此次明确授权覆盖Phase1-only历史状态：隔离codex/compoundos-launch-v1、动态
+Resolver、market/FX、contribution-first、复用Policy/Guardian/Committee/Journal，
+manual Owner workspace与build metadata。逻辑commit/安全条件push/draft PR授权；
+merge/production migration/deploy/broker/trading仍未授权。原repo未提交文件与
+未合并PR117/118/119保持，main20ceca5为base。新增0035仅在新_test DB验证，
+历史原币账本/UUID/Policy/snapshot不改写。Backtest仅typed evidence boundary，
+MC/optimizer后置。DeepSeek与生产market使用/留存授权未确认，不得称已上线。
+结果见docs/launch-v1与COMPOUNDOS_V1_LAUNCH_REPORT.md，完成后停等Owner review。
