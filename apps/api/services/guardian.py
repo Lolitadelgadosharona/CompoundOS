@@ -996,6 +996,7 @@ def _evaluate_current_ledger(
                     "id": None,
                     "check_id": chk.check_id,
                     "check_type": chk.check_type,
+                    "severity": chk.severity,
                     "exceeded": True,
                     "persisted": False,
                     "drift_pp": str(result.drift_pp) if result.drift_pp is not None else None,

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
+<p><strong>AI research is unverified analysis; recording a review does not approve an execution plan.</strong> Use the <a href="/investment">Investment Workspace</a> for a governed manual plan.</p>
 
 <header class="home-header">
     <div>
@@ -55,7 +56,7 @@
                 {% if valuation.recommendation_ready %}
                 <a href="#" role="button"
                    hx-post="/api/decisions/{{ d.decision_id }}/approve"
-                   hx-swap="none">Approve</a>
+                   hx-swap="none">Record review</a>
                 {% else %}<p>Approval unavailable until valuation data is trustworthy.</p>{% endif %}
             </div>
         </div>

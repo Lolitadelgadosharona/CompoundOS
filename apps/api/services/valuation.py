@@ -70,6 +70,7 @@ class Valuation:
                         "price_as_of",
                         "unit_multiplier",
                         "quality_status",
+                        "quote_quality",
                         "fx_source",
                         "fx_as_of",
                         "fx_rate",
@@ -111,7 +112,9 @@ def value_rows(base_currency, positions, cash, rates, as_of=None):
                 result.cost_estimate = True
                 e["price_quality"] = "COST_ESTIMATE"
             else:
-                e["price_quality"] = "REPORTED_VALUE" if amount is not None else "REPORTED_PRICE"
+                e["price_quality"] = row.get("quote_quality") or (
+                    "REPORTED_VALUE" if amount is not None else "REPORTED_PRICE"
+                )
             ccy, multiplier = _currency(currency)
             if kind == "position" and amount is None and row.get("market_price") is not None:
                 amount = Decimal(str(row["quantity"])) * Decimal(str(row["market_price"]))
@@ -127,7 +130,7 @@ def value_rows(base_currency, positions, cash, rates, as_of=None):
             )
             e["price_unit_multiplier"] = str(_currency(row.get("market_price_currency"))[1])
             errors = []
-            if kind == "position" and row.get("market_value") is None:
+            if kind == "position":
                 price = row.get("market_price")
                 if price is not None:
                     price = Decimal(str(price))
@@ -165,8 +168,10 @@ def value_rows(base_currency, positions, cash, rates, as_of=None):
             if amount is not None:
                 native = Decimal(str(amount)) * multiplier
                 e["native_value"] = native
-                if not native.is_finite():
-                    errors.append("non-finite amount")
+                if not native.is_finite() or native < 0:
+                    errors.append(
+                        "non-finite or negative amount; liabilities require explicit modeling"
+                    )
                 elif rate is not None and not errors:
                     # Divide by the observed inverse rate directly; avoid
                     # rounding a reciprocal before multiplying a large amount.
@@ -211,7 +216,37 @@ def load_valuation(session, household_id, as_of=None):
         .mappings()
         .all()
     )
-    return value_rows(base, positions, cash, rates, as_of)
+    # Append-only quote projection: cost/quantity ledger and historical foreign keys unchanged.
+    observations = (
+        session.execute(
+            text("""SELECT DISTINCT ON (o.asset_id) o.*, m.metadata AS instrument_metadata
+        FROM market_observations o LEFT JOIN instrument_provider_mappings m
+        ON m.asset_id=o.asset_id AND m.provider=o.provider
+        WHERE o.as_of<=:t ORDER BY o.asset_id,o.as_of DESC,o.received_at DESC"""),
+            {"t": as_of or datetime.now(timezone.utc)},
+        )
+        .mappings()
+        .all()
+    )
+    quotes = {o["asset_id"]: o for o in observations}
+    projected = []
+    for original in positions:
+        row = dict(original)
+        q = quotes.get(row["asset_id"])
+        if q:
+            row.update(
+                market_value=None,
+                market_value_currency=None,
+                market_price=q["price"],
+                market_price_currency=q["currency"],
+                market_price_as_of=q["as_of"],
+                source=q["provider"],
+                quote_quality=q["quality"],
+                asset_type=(q.get("instrument_metadata") or {}).get("asset_type")
+                or row["asset_type"],
+            )
+        projected.append(row)
+    return value_rows(base, projected, cash, rates, as_of)
 
 
 class RecommendationUnavailable(ValueError):

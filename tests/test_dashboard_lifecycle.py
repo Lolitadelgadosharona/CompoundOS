@@ -37,7 +37,8 @@ def _now():
 class MockExecutionResult:
     def __init__(self, validated=None, provider="mock", model="gpt-4o"):
         self.validated = validated or {
-            "thesis": "Mock thesis", "conviction_score": 7,
+            "thesis": "Mock thesis",
+            "conviction_score": 7,
         }
         self.actual_provider = provider
         self.actual_model = model
@@ -51,15 +52,25 @@ class MockExecutor:
     def __init__(self):
         self.calls = []
 
-    def execute(self, session, run_id, perspective, system_prompt,
-                user_prompt, caller="ai", max_output_tokens=None,
-                requested_model=None):
+    def execute(
+        self,
+        session,
+        run_id,
+        perspective,
+        system_prompt,
+        user_prompt,
+        caller="ai",
+        max_output_tokens=None,
+        requested_model=None,
+    ):
         self.calls.append(perspective)
-        return MockExecutionResult(validated={
-            "thesis": f"Mock {perspective} thesis",
-            "conviction_score": 7,
-            "risks": ["Valuation risk", "Regulatory risk"],
-        })
+        return MockExecutionResult(
+            validated={
+                "thesis": f"Mock {perspective} thesis",
+                "conviction_score": 7,
+                "risks": ["Valuation risk", "Regulatory risk"],
+            }
+        )
 
 
 class MockEvidenceCollector:
@@ -76,67 +87,86 @@ class MockEvidenceCollector:
 
 def _setup_household(db_session):
     hh = uuid4()
-    db_session.execute(text(
-        "INSERT INTO household_profiles (id, singleton_key, household_name,"
-        " base_currency, investment_horizon, liquidity_needs, risk_statement,"
-        " notes, created_at, updated_at)"
-        " VALUES (:id, TRUE, 't', 'USD', 'lt', 'l', 'm', '', NOW(), NOW())"
-        " ON CONFLICT (singleton_key) DO NOTHING"
-    ), {"id": hh})
+    db_session.execute(
+        text(
+            "INSERT INTO household_profiles (id, singleton_key, household_name,"
+            " base_currency, investment_horizon, liquidity_needs, risk_statement,"
+            " notes, created_at, updated_at)"
+            " VALUES (:id, TRUE, 't', 'USD', 'lt', 'l', 'm', '', NOW(), NOW())"
+            " ON CONFLICT (singleton_key) DO NOTHING"
+        ),
+        {"id": hh},
+    )
     db_session.commit()
-    return db_session.execute(text(
-        "SELECT id FROM household_profiles WHERE singleton_key = TRUE"
-    )).fetchone()[0]
+    return db_session.execute(
+        text("SELECT id FROM household_profiles WHERE singleton_key = TRUE")
+    ).fetchone()[0]
 
 
 def _setup_run(db_session, household_id):
     """idea → review → request → run chain (no memo yet)."""
     idea_id = uuid4()
-    db_session.execute(text(
-        "INSERT INTO investment_ideas (id, household_id, title, status,"
-        " source, confidence, created_at)"
-        " VALUES (:id, :hh, 'AAPL', 'draft', 'owner', 'LOW', NOW())"
-    ), {"id": idea_id, "hh": household_id})
+    db_session.execute(
+        text(
+            "INSERT INTO investment_ideas (id, household_id, title, status,"
+            " source, confidence, created_at)"
+            " VALUES (:id, :hh, 'AAPL', 'draft', 'owner', 'LOW', NOW())"
+        ),
+        {"id": idea_id, "hh": household_id},
+    )
     rr_id = uuid4()
-    db_session.execute(text(
-        "INSERT INTO committee_review_requests (id, investment_idea_id,"
-        " status, requested_by, created_at)"
-        " VALUES (:id, :iid, 'pending', 'owner', NOW())"
-    ), {"id": rr_id, "iid": idea_id})
+    db_session.execute(
+        text(
+            "INSERT INTO committee_review_requests (id, investment_idea_id,"
+            " status, requested_by, created_at)"
+            " VALUES (:id, :iid, 'pending', 'owner', NOW())"
+        ),
+        {"id": rr_id, "iid": idea_id},
+    )
     req_id = uuid4()
-    db_session.execute(text(
-        "INSERT INTO research_requests (id, review_request_id, status,"
-        " created_at, updated_at)"
-        " VALUES (:id, :rrid, 'pending', NOW(), NOW())"
-    ), {"id": req_id, "rrid": rr_id})
+    db_session.execute(
+        text(
+            "INSERT INTO research_requests (id, review_request_id, status,"
+            " created_at, updated_at)"
+            " VALUES (:id, :rrid, 'pending', NOW(), NOW())"
+        ),
+        {"id": req_id, "rrid": rr_id},
+    )
     run_id = uuid4()
-    db_session.execute(text(
-        "INSERT INTO research_runs (id, request_id, run_number, status,"
-        " created_at, updated_at)"
-        " VALUES (:id, :req, 1, 'pending', NOW(), NOW())"
-    ), {"id": run_id, "req": req_id})
+    db_session.execute(
+        text(
+            "INSERT INTO research_runs (id, request_id, run_number, status,"
+            " created_at, updated_at)"
+            " VALUES (:id, :req, 1, 'pending', NOW(), NOW())"
+        ),
+        {"id": run_id, "req": req_id},
+    )
     db_session.commit()
     return idea_id, run_id
 
 
 def _seed_policy(db_session, household_id):
     policy_id = uuid4()
-    db_session.execute(text(
-        "INSERT INTO investment_policies (id, household_id) VALUES (:id, :hh)"
-    ), {"id": policy_id, "hh": household_id})
+    db_session.execute(
+        text("INSERT INTO investment_policies (id, household_id) VALUES (:id, :hh)"),
+        {"id": policy_id, "hh": household_id},
+    )
     vid = uuid4()
-    db_session.execute(text(
-        "INSERT INTO investment_policy_versions (id, policy_id,"
-        " version_number, status, published_at, objectives, time_horizon,"
-        " liquidity, diversification, contribution_policy,"
-        " rebalancing_policy, prohibited_assets, leverage_policy,"
-        " decision_process, notes)"
-        " VALUES (:id, :pid, 1, 'published', NOW(), 'obj', 'horizon',"
-        " '', '', '', '', '', '', 'decide', '')"
-    ), {"id": vid, "pid": policy_id})
-    db_session.execute(text(
-        "UPDATE investment_policy_versions SET sealed_at = NOW() WHERE id = :id"
-    ), {"id": vid})
+    db_session.execute(
+        text(
+            "INSERT INTO investment_policy_versions (id, policy_id,"
+            " version_number, status, published_at, objectives, time_horizon,"
+            " liquidity, diversification, contribution_policy,"
+            " rebalancing_policy, prohibited_assets, leverage_policy,"
+            " decision_process, notes)"
+            " VALUES (:id, :pid, 1, 'published', NOW(), 'obj', 'horizon',"
+            " '', '', '', '', '', '', 'decide', '')"
+        ),
+        {"id": vid, "pid": policy_id},
+    )
+    db_session.execute(
+        text("UPDATE investment_policy_versions SET sealed_at = NOW() WHERE id = :id"), {"id": vid}
+    )
     db_session.commit()
 
 
@@ -163,9 +193,9 @@ class TestPipelineFactory:
             perspective_executor=MockExecutor(),
         )
         pipeline.execute(db_session, run_id, hh, "AAPL")
-        memo_count = db_session.execute(text(
-            "SELECT COUNT(*) FROM investment_memos WHERE run_id = :rid"
-        ), {"rid": run_id}).scalar()
+        memo_count = db_session.execute(
+            text("SELECT COUNT(*) FROM investment_memos WHERE run_id = :rid"), {"rid": run_id}
+        ).scalar()
         assert memo_count == 1
 
 
@@ -176,13 +206,18 @@ class TestResearchToDecision:
     def test_create_request_creates_fk_chain(self, db_session):
         hh = _setup_household(db_session)
         result = DashboardResearchService.create_request(
-            db_session, "AAPL", hh,
+            db_session,
+            "AAPL",
+            hh,
         )
         run_id = UUID(result["run_id"])
-        req = db_session.execute(text(
-            "SELECT review_request_id FROM research_requests"
-            " WHERE id = (SELECT request_id FROM research_runs WHERE id = :rid)"
-        ), {"rid": run_id}).fetchone()
+        req = db_session.execute(
+            text(
+                "SELECT review_request_id FROM research_requests"
+                " WHERE id = (SELECT request_id FROM research_runs WHERE id = :rid)"
+            ),
+            {"rid": run_id},
+        ).fetchone()
         assert req is not None
         assert result["status"] == "pending"
 
@@ -206,38 +241,45 @@ class TestResearchToDecision:
 
         # Research → Committee
         bridge = CommitteeIntegrationService.complete_research(
-            db_session, run_id, hh,
+            db_session,
+            run_id,
+            hh,
         )
         assert bridge["recommendation"] is not None
 
         # Committee → Decision Draft
-        memo_row = db_session.execute(text(
-            "SELECT memo, recommendation FROM investment_memos WHERE id = :id"
-        ), {"id": UUID(bridge["memo_id"])}).fetchone()
-        memo_json = memo_row[0] if isinstance(memo_row[0], dict) \
-            else json.loads(memo_row[0])
+        memo_row = db_session.execute(
+            text("SELECT memo, recommendation FROM investment_memos WHERE id = :id"),
+            {"id": UUID(bridge["memo_id"])},
+        ).fetchone()
+        memo_json = memo_row[0] if isinstance(memo_row[0], dict) else json.loads(memo_row[0])
         decision, draft = DecisionBridgeService.create_decision_draft(
-            db_session, run_id, "AAPL", memo_row[1] or "HOLD",
-            memo_json.get("thesis", ""), memo_json.get("risks", []),
+            db_session,
+            run_id,
+            "AAPL",
+            memo_row[1] or "HOLD",
+            memo_json.get("thesis", ""),
+            memo_json.get("risks", []),
         )
         assert decision.status == "draft"
 
         # Owner approval (confirm_decision)
         result = OwnerDecisionService.confirm_decision(
-            db_session, decision.id,
+            db_session,
+            decision.id,
         )
         assert result["status"] == "approved"
         assert len(result["review_ids"]) == 3
 
         # Journal: confirmed + snapshot + no draft
-        status = db_session.execute(text(
-            "SELECT status FROM decisions WHERE id = :id"
-        ), {"id": decision.id}).scalar()
+        status = db_session.execute(
+            text("SELECT status FROM decisions WHERE id = :id"), {"id": decision.id}
+        ).scalar()
         assert status == "confirmed"
-        snap = db_session.execute(text(
-            "SELECT COUNT(*) FROM decision_confirmed_snapshots"
-            " WHERE decision_id = :id"
-        ), {"id": decision.id}).scalar()
+        snap = db_session.execute(
+            text("SELECT COUNT(*) FROM decision_confirmed_snapshots" " WHERE decision_id = :id"),
+            {"id": decision.id},
+        ).scalar()
         assert snap == 1
 
 
@@ -249,35 +291,53 @@ class TestOwnerActions:
         hh = _setup_household(db_session)
         _seed_policy(db_session, hh)
         _idea_id, run_id = _setup_run(db_session, hh)
-        db_session.execute(text(
-            "INSERT INTO investment_memos (id, run_id, memo, synthesis_model,"
-            " confidence_score, confidence_level, recommendation, generated_at)"
-            " VALUES (:id, :rid, :memo, 'synthesis', 75, 'MEDIUM', 'BUY', NOW())"
-        ), {"id": uuid4(), "rid": run_id,
-            "memo": json.dumps({"thesis": "T", "risks": ["R"]})})
+        db_session.execute(
+            text(
+                "INSERT INTO investment_memos (id, run_id, memo, synthesis_model,"
+                " confidence_score, confidence_level, recommendation, generated_at)"
+                " VALUES (:id, :rid, :memo, 'synthesis', 75, 'MEDIUM', 'BUY', NOW())"
+            ),
+            {"id": uuid4(), "rid": run_id, "memo": json.dumps({"thesis": "T", "risks": ["R"]})},
+        )
         db_session.commit()
         decision, _draft = DecisionBridgeService.create_decision_draft(
-            db_session, run_id, "AAPL", "BUY", "T", ["R"],
+            db_session,
+            run_id,
+            "AAPL",
+            "BUY",
+            "T",
+            ["R"],
         )
         return decision
 
-    def test_reject_removes_draft(self, db_session):
+    def test_reject_preserves_research_provenance(self, db_session):
         decision = self._make_draft(db_session)
         result = OwnerDecisionService.reject_decision(db_session, decision.id)
         assert result["status"] == "rejected"
         # decision discarded (journal)
-        row = db_session.execute(text(
-            "SELECT COUNT(*) FROM decisions WHERE id = :id"
-        ), {"id": decision.id}).scalar()
-        assert row == 0
+        row = db_session.execute(
+            text("SELECT COUNT(*) FROM decisions WHERE id = :id"), {"id": decision.id}
+        ).scalar()
+        assert row == 1
+        assert (
+            db_session.execute(
+                text("SELECT count(*) FROM audit_events WHERE action='decision.research.rejected'")
+            ).scalar()
+            == 1
+        )
+        from apps.api.services.valuation import RecommendationUnavailable
+
+        with pytest.raises(RecommendationUnavailable):
+            OwnerDecisionService.confirm_decision(db_session, decision.id)
 
     def test_confirm_creates_reviews(self, db_session):
         decision = self._make_draft(db_session)
         result = OwnerDecisionService.confirm_decision(db_session, decision.id)
         assert result["status"] == "approved"
-        reviews = db_session.execute(text(
-            "SELECT review_type FROM decision_reviews WHERE decision_id = :id"
-        ), {"id": decision.id}).fetchall()
+        reviews = db_session.execute(
+            text("SELECT review_type FROM decision_reviews WHERE decision_id = :id"),
+            {"id": decision.id},
+        ).fetchall()
         assert {r[0] for r in reviews} == {"30_day", "90_day", "1_year"}
 
 
@@ -290,20 +350,34 @@ class TestDashboardReads:
         _seed_policy(db_session, hh)
         _idea_id, run_id = _setup_run(db_session, hh)
         memo_id = uuid4()
-        db_session.execute(text(
-            "INSERT INTO investment_memos (id, run_id, memo, synthesis_model,"
-            " confidence_score, confidence_level, recommendation, generated_at)"
-            " VALUES (:id, :rid, :memo, 'synthesis', 75, 'MEDIUM', 'BUY', NOW())"
-        ), {"id": memo_id, "rid": run_id,
-            "memo": json.dumps({
-                "thesis": "Strong moat", "risks": ["Valuation"],
-                "bull_case": {"narrative": "AI growth"},
-                "bear_case": {"narrative": "Regulatory"},
-                "guardian_impact": {"compliant": True},
-            })})
+        db_session.execute(
+            text(
+                "INSERT INTO investment_memos (id, run_id, memo, synthesis_model,"
+                " confidence_score, confidence_level, recommendation, generated_at)"
+                " VALUES (:id, :rid, :memo, 'synthesis', 75, 'MEDIUM', 'BUY', NOW())"
+            ),
+            {
+                "id": memo_id,
+                "rid": run_id,
+                "memo": json.dumps(
+                    {
+                        "thesis": "Strong moat",
+                        "risks": ["Valuation"],
+                        "bull_case": {"narrative": "AI growth"},
+                        "bear_case": {"narrative": "Regulatory"},
+                        "guardian_impact": {"compliant": True},
+                    }
+                ),
+            },
+        )
         db_session.commit()
         decision, _draft = DecisionBridgeService.create_decision_draft(
-            db_session, run_id, "AAPL", "BUY", "Strong moat", ["Valuation"],
+            db_session,
+            run_id,
+            "AAPL",
+            "BUY",
+            "Strong moat",
+            ["Valuation"],
         )
         return hh, run_id, memo_id, decision.id
 
@@ -325,8 +399,7 @@ class TestDashboardReads:
         # confirm, then it appears in history
         OwnerDecisionService.confirm_decision(db_session, decision_id)
         pending_after = list_pending_decisions_detail(db_session, hh)
-        assert all(p["decision_id"] != str(decision_id)
-                   for p in pending_after)
+        assert all(p["decision_id"] != str(decision_id) for p in pending_after)
         history = list_decision_history(db_session, hh)
         assert any(h["symbol"] == "AAPL" for h in history)
 
@@ -345,23 +418,29 @@ class _MockMarketProvider:
 
     def get_overview(self, symbol):
         from types import SimpleNamespace
+
         return SimpleNamespace(
-            symbol=symbol, company_name="Apple Inc.",
-            sector="Technology", market_cap=3_000_000_000_000,
+            symbol=symbol,
+            company_name="Apple Inc.",
+            sector="Technology",
+            market_cap=3_000_000_000_000,
             provenance=SimpleNamespace(source="mock", provider="mock"),
         )
 
     def get_price_history(self, symbol, days=100):
         from datetime import date
         from types import SimpleNamespace
-        return [SimpleNamespace(date=date(2026, 1, 1), close=180.0,
-                                volume=50_000_000)]
+
+        return [SimpleNamespace(date=date(2026, 1, 1), close=180.0, volume=50_000_000)]
 
     def get_financials(self, symbol):
         from types import SimpleNamespace
+
         return SimpleNamespace(
-            revenue=390_000_000_000, net_income=100_000_000_000,
-            free_cash_flow=110_000_000_000, total_debt=106_000_000_000,
+            revenue=390_000_000_000,
+            net_income=100_000_000_000,
+            free_cash_flow=110_000_000_000,
+            total_debt=106_000_000_000,
             fiscal_year=2025,
         )
 
@@ -371,30 +450,42 @@ class TestAlphaStabilization:
         """Fix 5: 'Research: AAPL' idea title → symbol 'AAPL'."""
         hh = _setup_household(db_session)
         idea_id = uuid4()
-        db_session.execute(text(
-            "INSERT INTO investment_ideas (id, household_id, title, status,"
-            " source, confidence, created_at)"
-            " VALUES (:id, :hh, 'Research: AAPL', 'draft', 'owner',"
-            " 'LOW', NOW())"
-        ), {"id": idea_id, "hh": hh})
+        db_session.execute(
+            text(
+                "INSERT INTO investment_ideas (id, household_id, title, status,"
+                " source, confidence, created_at)"
+                " VALUES (:id, :hh, 'Research: AAPL', 'draft', 'owner',"
+                " 'LOW', NOW())"
+            ),
+            {"id": idea_id, "hh": hh},
+        )
         rr_id = uuid4()
-        db_session.execute(text(
-            "INSERT INTO committee_review_requests (id, investment_idea_id,"
-            " status, requested_by, created_at)"
-            " VALUES (:id, :iid, 'pending', 'owner', NOW())"
-        ), {"id": rr_id, "iid": idea_id})
+        db_session.execute(
+            text(
+                "INSERT INTO committee_review_requests (id, investment_idea_id,"
+                " status, requested_by, created_at)"
+                " VALUES (:id, :iid, 'pending', 'owner', NOW())"
+            ),
+            {"id": rr_id, "iid": idea_id},
+        )
         req_id = uuid4()
-        db_session.execute(text(
-            "INSERT INTO research_requests (id, review_request_id, status,"
-            " created_at, updated_at)"
-            " VALUES (:id, :rrid, 'completed', NOW(), NOW())"
-        ), {"id": req_id, "rrid": rr_id})
+        db_session.execute(
+            text(
+                "INSERT INTO research_requests (id, review_request_id, status,"
+                " created_at, updated_at)"
+                " VALUES (:id, :rrid, 'completed', NOW(), NOW())"
+            ),
+            {"id": req_id, "rrid": rr_id},
+        )
         run_id = uuid4()
-        db_session.execute(text(
-            "INSERT INTO research_runs (id, request_id, run_number, status,"
-            " created_at, updated_at)"
-            " VALUES (:id, :req, 1, 'completed', NOW(), NOW())"
-        ), {"id": run_id, "req": req_id})
+        db_session.execute(
+            text(
+                "INSERT INTO research_runs (id, request_id, run_number, status,"
+                " created_at, updated_at)"
+                " VALUES (:id, :req, 1, 'completed', NOW(), NOW())"
+            ),
+            {"id": run_id, "req": req_id},
+        )
         db_session.commit()
         assert _symbol_for_run(db_session, run_id) == "AAPL"
 
@@ -426,20 +517,52 @@ class TestAlphaStabilization:
         _idea_id, run_id = _setup_run(db_session, hh)
         _set_run_status(db_session, run_id, "analyzing")
         db_session.commit()
-        status = db_session.execute(text(
-            "SELECT status FROM research_runs WHERE id = :id"
-        ), {"id": run_id}).scalar()
+        status = db_session.execute(
+            text("SELECT status FROM research_runs WHERE id = :id"), {"id": run_id}
+        ).scalar()
         assert status == "analyzing"
 
     def _make_seed(self, db_session):
         hh = _setup_household(db_session)
         _idea_id, run_id = _setup_run(db_session, hh)
         memo_id = uuid4()
-        db_session.execute(text(
-            "INSERT INTO investment_memos (id, run_id, memo, synthesis_model,"
-            " confidence_score, confidence_level, recommendation, generated_at)"
-            " VALUES (:id, :rid, :memo, 'synthesis', 75, 'MEDIUM', 'BUY', NOW())"
-        ), {"id": memo_id, "rid": run_id,
-            "memo": json.dumps({"thesis": "T"})})
+        db_session.execute(
+            text(
+                "INSERT INTO investment_memos (id, run_id, memo, synthesis_model,"
+                " confidence_score, confidence_level, recommendation, generated_at)"
+                " VALUES (:id, :rid, :memo, 'synthesis', 75, 'MEDIUM', 'BUY', NOW())"
+            ),
+            {"id": memo_id, "rid": run_id, "memo": json.dumps({"thesis": "T"})},
+        )
         db_session.commit()
         return hh, run_id, memo_id, None
+
+
+@pytest.fixture(autouse=True)
+def observed_research_target(db_session):
+    """Synthetic provider evidence required for research Journal review; not executable approval."""
+    from datetime import datetime, timezone
+
+    from apps.api.models import Asset
+
+    asset = Asset(
+        id=uuid4(),
+        symbol="AAPL",
+        name="SYNTHETIC Apple",
+        exchange="TEST",
+        asset_type="STOCK",
+        currency="USD",
+    )
+    db_session.add(asset)
+    db_session.flush()
+    db_session.execute(
+        text(
+            (
+                'INSERT INTO '
+                'market_observations(id,asset_id,price,currency,as_of,provider,quality)'
+                " VALUES(:i,:a,100,'USD',:t,'synthetic','OBSERVED')"
+            )
+        ),
+        {"i": uuid4(), "a": asset.id, "t": datetime.now(timezone.utc)},
+    )
+    db_session.commit()

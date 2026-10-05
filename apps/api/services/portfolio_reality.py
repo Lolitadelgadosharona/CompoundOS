@@ -19,10 +19,8 @@ from apps.api.repositories.portfolio_foundation import (
     create_account as _create_account,
 )
 from apps.api.repositories.portfolio_foundation import (
-    create_asset,
     create_cash_balance,
     create_position,
-    find_asset_by_identity,
     supersede_latest_cash_balances,
     supersede_latest_positions,
 )
@@ -111,8 +109,11 @@ def list_accounts(session: Session, household_id: UUID) -> list[dict]:
         return []
     return [
         {
-            "id": str(a.id), "name": a.name, "account_type": a.account_type,
-            "provider": a.provider, "currency": a.currency,
+            "id": str(a.id),
+            "name": a.name,
+            "account_type": a.account_type,
+            "provider": a.provider,
+            "currency": a.currency,
             "capital_bucket": a.capital_bucket,
             "source": a.provider or MANUAL_SOURCE,
         }
@@ -125,18 +126,22 @@ def list_holdings(session: Session, household_id: UUID) -> list[dict]:
     portfolio = get_portfolio(session, household.id)
     if portfolio is None:
         return []
-    rows = session.execute(text(
-        "SELECT a.name, ast.symbol, ast.asset_type, p.quantity,"
-        " p.avg_cost, p.market_value, p.source"
-        " FROM positions p"
-        " JOIN accounts a ON p.account_id = a.id"
-        " JOIN assets ast ON p.asset_id = ast.id"
-        " WHERE a.portfolio_id = :pid AND p.is_latest = TRUE"
-        " ORDER BY ast.symbol"
-    ), {"pid": portfolio.id}).fetchall()
+    rows = session.execute(
+        text(
+            "SELECT a.name, ast.symbol, ast.asset_type, p.quantity,"
+            " p.avg_cost, p.market_value, p.source"
+            " FROM positions p"
+            " JOIN accounts a ON p.account_id = a.id"
+            " JOIN assets ast ON p.asset_id = ast.id"
+            " WHERE a.portfolio_id = :pid AND p.is_latest = TRUE"
+            " ORDER BY ast.symbol"
+        ),
+        {"pid": portfolio.id},
+    ).fetchall()
     return [
         {
-            "account_name": r[0], "symbol": r[1] or "?",
+            "account_name": r[0],
+            "symbol": r[1] or "?",
             "asset_type": r[2],
             "quantity": _money(r[3]) if r[3] is not None else None,
             "avg_cost": _money(r[4]) if r[4] is not None else None,
@@ -152,16 +157,20 @@ def list_cash(session: Session, household_id: UUID) -> list[dict]:
     portfolio = get_portfolio(session, household.id)
     if portfolio is None:
         return []
-    rows = session.execute(text(
-        "SELECT a.name, cb.currency, cb.amount, cb.source"
-        " FROM cash_balances cb"
-        " JOIN accounts a ON cb.account_id = a.id"
-        " WHERE a.portfolio_id = :pid AND cb.is_latest = TRUE"
-        " ORDER BY cb.currency"
-    ), {"pid": portfolio.id}).fetchall()
+    rows = session.execute(
+        text(
+            "SELECT a.name, cb.currency, cb.amount, cb.source"
+            " FROM cash_balances cb"
+            " JOIN accounts a ON cb.account_id = a.id"
+            " WHERE a.portfolio_id = :pid AND cb.is_latest = TRUE"
+            " ORDER BY cb.currency"
+        ),
+        {"pid": portfolio.id},
+    ).fetchall()
     return [
         {
-            "account_name": r[0], "currency": r[1],
+            "account_name": r[0],
+            "currency": r[1],
             "amount": _money(r[2]) if r[2] is not None else None,
             "source": r[3],
         }
@@ -173,8 +182,13 @@ def list_cash(session: Session, household_id: UUID) -> list[dict]:
 
 
 def add_account(
-    session: Session, *, name: str, account_type: str, capital_bucket: str,
-    currency: str, provider: str | None = None,
+    session: Session,
+    *,
+    name: str,
+    account_type: str,
+    capital_bucket: str,
+    currency: str,
+    provider: str | None = None,
 ) -> dict:
     portfolio = _ensure_portfolio(session)
     with session.begin():
@@ -188,7 +202,8 @@ def add_account(
             provider=provider,
         )
         return {
-            "id": str(account.id), "name": account.name,
+            "id": str(account.id),
+            "name": account.name,
             "account_type": account.account_type,
             "capital_bucket": account.capital_bucket,
             "currency": account.currency,
@@ -197,22 +212,32 @@ def add_account(
 
 
 def add_holding(
-    session: Session, *, account_id: UUID, symbol: str, asset_type: str,
-    quantity: Decimal, avg_cost: Decimal, currency: str = "USD",
+    session: Session,
+    *,
+    account_id: UUID,
+    symbol: str,
+    asset_type: str,
+    quantity: Decimal,
+    avg_cost: Decimal,
+    currency: str = "USD",
 ) -> dict:
     with session.begin():
         _household(session)
-        asset = find_asset_by_identity(session, symbol, None, currency)
-        if asset is None:
-            asset = create_asset(
-                session,
-                symbol=symbol, name=symbol, asset_type=asset_type,
-                currency=currency, exchange=None,
-            )
+        from apps.api.services.instrument_resolver import ledger_identity
+
+        asset = ledger_identity(session, symbol, currency=currency, asset_type=asset_type)
+        _require_owned_account(session, account_id)
         supersede_latest_positions(session, account_id, asset.id)
         now = datetime.now(timezone.utc)
         quantity_d = Decimal(str(quantity))
         avg_cost_d = Decimal(str(avg_cost))
+        if (
+            not quantity_d.is_finite()
+            or not avg_cost_d.is_finite()
+            or quantity_d < 0
+            or avg_cost_d < 0
+        ):
+            raise ValueError("Quantity/cost must be finite and nonnegative")
         position = create_position(
             session,
             account_id=account_id,
@@ -231,20 +256,30 @@ def add_holding(
             source=MANUAL_SOURCE,
         )
         return {
-            "id": str(position.id), "symbol": symbol, "asset_type": asset_type,
-            "quantity": _money(quantity_d), "avg_cost": _money(avg_cost_d),
+            "id": str(position.id),
+            "symbol": symbol,
+            "asset_type": asset_type,
+            "quantity": _money(quantity_d),
+            "avg_cost": _money(avg_cost_d),
             "source": MANUAL_SOURCE,
         }
 
 
 def add_cash(
-    session: Session, *, account_id: UUID, currency: str, amount: Decimal,
+    session: Session,
+    *,
+    account_id: UUID,
+    currency: str,
+    amount: Decimal,
 ) -> dict:
     with session.begin():
         _household(session)
+        _require_owned_account(session, account_id)
         supersede_latest_cash_balances(session, account_id, currency)
         now = datetime.now(timezone.utc)
         amount_d = Decimal(str(amount))
+        if not amount_d.is_finite() or amount_d < 0:
+            raise ValueError("Cash must be finite and nonnegative")
         balance = create_cash_balance(
             session,
             account_id=account_id,
@@ -254,6 +289,22 @@ def add_cash(
             source=MANUAL_SOURCE,
         )
         return {
-            "id": str(balance.id), "currency": currency,
-            "amount": _money(amount_d), "source": MANUAL_SOURCE,
+            "id": str(balance.id),
+            "currency": currency,
+            "amount": _money(amount_d),
+            "source": MANUAL_SOURCE,
         }
+
+
+def _require_owned_account(session, account_id):
+    hid = _household(session).id
+    from apps.api.services.launch_investment import lock_household
+
+    lock_household(session, hid)
+    owned = session.execute(
+        text("""SELECT a.id FROM accounts a JOIN portfolios p ON p.id=a.portfolio_id
+        WHERE a.id=:id AND p.household_id=:hid"""),
+        {"id": account_id, "hid": hid},
+    ).scalar()
+    if not owned:
+        raise ValueError("Account not found for household")

@@ -171,17 +171,36 @@ def run_committee(
     The caller must have already called build_privacy_preview and obtained
     explicit Owner confirmation before calling this function.
     """
+    from sqlalchemy import text
+
+    candidate_id = session.execute(
+        text("SELECT candidate_id FROM contribution_decisions WHERE committee_session_id=:s"),
+        {"s": committee_session.id},
+    ).scalar()
+    if candidate_id:
+        from apps.api.services.launch_investment import digest, validate_candidate
+
+        candidate = validate_candidate(session, committee_session.household_id, candidate_id)
+        evidence = committee_session.evidence_items
+        if (
+            prompt_version != "contribution-v1"
+            or len(evidence) != 1
+            or digest(evidence[0].structured_facts) != candidate["content_hash"]
+            or evidence[0].content_hash != candidate["content_hash"]
+        ):
+            raise ValueError(
+                "Linked contribution requires exact deterministic evidence and contribution prompt"
+            )
     if committee_session.status != "queued":
         raise ValueError("Session must be in 'queued' status to run")
 
     committee_session.status = "running"
     session.commit()
 
-    evidence_ids = {
-        str(e.id) for e in committee_session.evidence_items
-    }
+    evidence_ids = {str(e.id) for e in committee_session.evidence_items}
     payload = _build_provider_payload(
-        committee_session, committee_session.evidence_items,
+        committee_session,
+        committee_session.evidence_items,
     )
     token_estimate = len(json.dumps(payload)) // 4
 
@@ -210,17 +229,53 @@ def run_committee(
     # Validate
     validation = validate_provider_output(parsed, evidence_ids)
     if not validation.passed:
-        error_detail = "; ".join(
-            f"{e.field}: {e.message}" for e in validation.errors
-        )
+        error_detail = "; ".join(f"{e.field}: {e.message}" for e in validation.errors)
         _fail_session(session, committee_session, error_detail)
         raise ValueError(f"Output validation failed: {error_detail}")
 
+    if prompt_version == "contribution-v1":
+        import re
+
+        # Quantitative FACTs live exclusively in deterministic evidence. Model text is INFERENCE.
+        def model_text(value):
+            if isinstance(value, dict):
+                return " ".join(
+                    model_text(v)
+                    for k, v in value.items()
+                    if k not in {"evidence_id", "citation_ref"}
+                )
+            if isinstance(value, list):
+                return " ".join(model_text(v) for v in value)
+            return str(value)
+
+        if re.search(r"\d", model_text(parsed)) or parsed.get("confidence") not in {
+            "low",
+            "medium",
+            "high",
+        }:
+            _fail_session(
+                session,
+                committee_session,
+                "Untrusted numerical assertion or missing qualitative confidence",
+            )
+            raise ValueError(
+                "Contribution Committee must cite evidence without generating numerical facts"
+            )
+        parsed["classification"] = "INFERENCE"
+        parsed["direction_classification"] = "RECOMMENDATION"
+
     # Persist immutable report
     report = _persist_report(
-        session, committee_session, provider, parsed,
-        response, prompt_version, schema_version, temperature,
+        session,
+        committee_session,
+        provider,
+        parsed,
+        response,
+        prompt_version,
+        schema_version,
+        temperature,
     )
+    committee_session.report = report
     committee_session.status = "completed"
     session.commit()
 
@@ -307,9 +362,7 @@ def _call_with_retry(
         except ProviderError:
             raise  # non-retryable — re-raise immediately
 
-    raise RuntimeError(
-        f"Provider call failed after {max_retries + 1} attempts: {last_error}"
-    )
+    raise RuntimeError(f"Provider call failed after {max_retries + 1} attempts: {last_error}")
 
 
 def _persist_report(
@@ -363,15 +416,20 @@ def _dispatch_committee_notification(cs: CommitteeSession) -> None:
     the business transaction.
     """
     import logging
+
     logger = logging.getLogger(__name__)
     try:
         from apps.api.database import SessionLocal
         from apps.api.services.notification_service import dispatch_notification
+
         ns = SessionLocal()
         try:
             dispatch_notification(
-                ns, source="committee", event_type="session_complete",
-                severity="info", household_id=cs.household_id,
+                ns,
+                source="committee",
+                event_type="session_complete",
+                severity="info",
+                household_id=cs.household_id,
                 entity_id=str(cs.id),
                 context={"session_id": str(cs.id)},
             )

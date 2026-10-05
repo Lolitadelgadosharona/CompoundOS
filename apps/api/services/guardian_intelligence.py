@@ -58,18 +58,33 @@ class EvalResult:
 
 
 def _load_positions(
-    session: Session, household_id: UUID, valuation=None,
+    session: Session,
+    household_id: UUID,
+    valuation=None,
 ) -> list[PositionRow]:
     from apps.api.services.valuation import load_valuation
+
     v = valuation or load_valuation(session, household_id)
-    return [PositionRow(position_id=e["id"], account_id=e["account_id"], asset_id=e["asset_id"],
-        market_value=e["base_value"], quantity=e["quantity"], observed_at=e["observed_at"],
-        capital_bucket=e["capital_bucket"], sector=e.get("sector"), asset_type=e["asset_type"])
-        for e in v.entries if e["kind"] == "position"]
+    return [
+        PositionRow(
+            position_id=e["id"],
+            account_id=e["account_id"],
+            asset_id=e["asset_id"],
+            market_value=e["base_value"],
+            quantity=e["quantity"],
+            observed_at=e["observed_at"],
+            capital_bucket=e["capital_bucket"],
+            sector=e.get("sector"),
+            asset_type=e["asset_type"],
+        )
+        for e in v.entries
+        if e["kind"] == "position"
+    ]
 
 
 def _load_bucket_targets(
-    session, policy_version_id: str,
+    session,
+    policy_version_id: str,
 ) -> list[BucketTarget]:
     """Load capital bucket targets from active policy version."""
     rows = session.execute(
@@ -92,7 +107,9 @@ def _load_bucket_targets(
 
 
 def _load_policy_rule_threshold(
-    session, policy_version_id: str, rule_type: str,
+    session,
+    policy_version_id: str,
+    rule_type: str,
 ) -> Optional[Decimal]:
     """Load a numeric threshold from policy_rules."""
     row = session.execute(
@@ -123,18 +140,22 @@ def evaluate_capital_bucket_drift(
 ) -> list[EvalResult]:
     """Compare actual bucket allocations against policy targets."""
     from apps.api.services.valuation import load_valuation
+
     valuation = load_valuation(session, household_id)
     if not valuation.recommendation_ready:
-        return [EvalResult(exceeded=False, detail="Not evaluated: " + valuation.status,
-                          context={"evaluation_status": "UNAVAILABLE", **valuation.contract()})]
+        return [
+            EvalResult(
+                exceeded=False,
+                detail="Not evaluated: " + valuation.status,
+                context={"evaluation_status": "UNAVAILABLE", **valuation.contract()},
+            )
+        ]
     positions = _load_positions(session, household_id, valuation)
     targets = _load_bucket_targets(session, policy_version_id)
     if not targets:
         return []
 
-    total_value = sum(
-        (p.market_value or Decimal("0")) for p in positions
-    )
+    total_value = sum((p.market_value or Decimal("0")) for p in positions)
     if total_value == 0:
         return []
 
@@ -150,17 +171,23 @@ def evaluate_capital_bucket_drift(
         actual_pct = (actual / total_value * 100).quantize(Decimal("0.01"))
 
         if t.max_pct is not None and actual_pct > t.max_pct:
-            results.append(EvalResult(
-                exceeded=True,
-                detail=f"Bucket {t.bucket_name}: {actual_pct}% (max {t.max_pct}%)",
-                actual_value=actual_pct, threshold_value=t.max_pct,
-            ))
+            results.append(
+                EvalResult(
+                    exceeded=True,
+                    detail=f"Bucket {t.bucket_name}: {actual_pct}% (max {t.max_pct}%)",
+                    actual_value=actual_pct,
+                    threshold_value=t.max_pct,
+                )
+            )
         elif t.min_pct is not None and actual_pct < t.min_pct:
-            results.append(EvalResult(
-                exceeded=True,
-                detail=f"Bucket {t.bucket_name}: {actual_pct}% (min {t.min_pct}%)",
-                actual_value=actual_pct, threshold_value=t.min_pct,
-            ))
+            results.append(
+                EvalResult(
+                    exceeded=True,
+                    detail=f"Bucket {t.bucket_name}: {actual_pct}% (min {t.min_pct}%)",
+                    actual_value=actual_pct,
+                    threshold_value=t.min_pct,
+                )
+            )
 
     return results
 
@@ -169,39 +196,53 @@ def evaluate_single_position_concentration(
     session: Session,
     household_id: UUID,
     policy_version_id: str,
+    valuation=None,
 ) -> list[EvalResult]:
     """Detect positions exceeding max_single_position_pct."""
     from apps.api.services.valuation import load_valuation
-    valuation = load_valuation(session, household_id)
+
+    valuation = valuation or load_valuation(session, household_id)
     if not valuation.recommendation_ready:
-        return [EvalResult(exceeded=False, detail="Not evaluated: " + valuation.status,
-                          context={"evaluation_status": "UNAVAILABLE", **valuation.contract()})]
+        return [
+            EvalResult(
+                exceeded=False,
+                detail="Not evaluated: " + valuation.status,
+                context={"evaluation_status": "UNAVAILABLE", **valuation.contract()},
+            )
+        ]
     positions = _load_positions(session, household_id, valuation)
     if not positions:
         return []
 
-    total_value = sum(
-        (p.market_value or Decimal("0")) for p in positions
-    )
+    total_value = sum((p.market_value or Decimal("0")) for p in positions)
     if total_value == 0:
         return []
 
     threshold = _load_policy_rule_threshold(
-        session, policy_version_id, "max_single_position_pct",
+        session,
+        policy_version_id,
+        "max_single_position_pct",
     )
     if threshold is None:
         threshold = DEFAULT_MAX_SINGLE_POSITION_PCT
 
     results: list[EvalResult] = []
+    canonical_values = {}
     for p in positions:
-        mv = p.market_value or Decimal("0")
+        canonical_values[p.asset_id] = canonical_values.get(p.asset_id, Decimal(0)) + (
+            p.market_value or Decimal(0)
+        )
+    for asset_id, mv in canonical_values.items():
         pct = (mv / total_value * 100).quantize(Decimal("0.01"))
         if pct > threshold:
-            results.append(EvalResult(
-                exceeded=True,
-                detail=f"Position {p.position_id}: {pct}% (limit {threshold}%)",
-                actual_value=pct, threshold_value=threshold,
-            ))
+            results.append(
+                EvalResult(
+                    exceeded=True,
+                    detail=f"Asset {asset_id}: {pct}% (limit {threshold}%)",
+                    actual_value=pct,
+                    threshold_value=threshold,
+                )
+            )
 
     return results
 
@@ -210,25 +251,32 @@ def evaluate_sector_concentration(
     session: Session,
     household_id: UUID,
     policy_version_id: str,
+    valuation=None,
 ) -> list[EvalResult]:
     """Detect sectors exceeding max_sector_concentration_pct."""
     from apps.api.services.valuation import load_valuation
-    valuation = load_valuation(session, household_id)
+
+    valuation = valuation or load_valuation(session, household_id)
     if not valuation.recommendation_ready:
-        return [EvalResult(exceeded=False, detail="Not evaluated: " + valuation.status,
-                          context={"evaluation_status": "UNAVAILABLE", **valuation.contract()})]
+        return [
+            EvalResult(
+                exceeded=False,
+                detail="Not evaluated: " + valuation.status,
+                context={"evaluation_status": "UNAVAILABLE", **valuation.contract()},
+            )
+        ]
     positions = _load_positions(session, household_id, valuation)
     if not positions:
         return []
 
-    total_value = sum(
-        (p.market_value or Decimal("0")) for p in positions
-    )
+    total_value = sum((p.market_value or Decimal("0")) for p in positions)
     if total_value == 0:
         return []
 
     threshold = _load_policy_rule_threshold(
-        session, policy_version_id, "max_sector_concentration_pct",
+        session,
+        policy_version_id,
+        "max_sector_concentration_pct",
     )
     if threshold is None:
         threshold = DEFAULT_MAX_SECTOR_PCT
@@ -242,11 +290,14 @@ def evaluate_sector_concentration(
     for sector, value in sector_values.items():
         pct = (value / total_value * 100).quantize(Decimal("0.01"))
         if pct > threshold:
-            results.append(EvalResult(
-                exceeded=True,
-                detail=f"Sector {sector}: {pct}% (limit {threshold}%)",
-                actual_value=pct, threshold_value=threshold,
-            ))
+            results.append(
+                EvalResult(
+                    exceeded=True,
+                    detail=f"Sector {sector}: {pct}% (limit {threshold}%)",
+                    actual_value=pct,
+                    threshold_value=threshold,
+                )
+            )
 
     return results
 
@@ -255,41 +306,50 @@ def evaluate_exploration_capital_limit(
     session: Session,
     household_id: UUID,
     policy_version_id: str,
+    valuation=None,
 ) -> list[EvalResult]:
     """Check EXPLORATION bucket against capital limit."""
     from apps.api.services.valuation import load_valuation
-    valuation = load_valuation(session, household_id)
+
+    valuation = valuation or load_valuation(session, household_id)
     if not valuation.recommendation_ready:
-        return [EvalResult(exceeded=False, detail="Not evaluated: " + valuation.status,
-                          context={"evaluation_status": "UNAVAILABLE", **valuation.contract()})]
+        return [
+            EvalResult(
+                exceeded=False,
+                detail="Not evaluated: " + valuation.status,
+                context={"evaluation_status": "UNAVAILABLE", **valuation.contract()},
+            )
+        ]
     positions = _load_positions(session, household_id, valuation)
     if not positions:
         return []
 
-    total_value = sum(
-        (p.market_value or Decimal("0")) for p in positions
-    )
+    total_value = sum((p.market_value or Decimal("0")) for p in positions)
     if total_value == 0:
         return []
 
     exploration_value = sum(
-        (p.market_value or Decimal("0"))
-        for p in positions if p.capital_bucket == "EXPLORATION"
+        (p.market_value or Decimal("0")) for p in positions if p.capital_bucket == "EXPLORATION"
     )
 
     threshold = _load_policy_rule_threshold(
-        session, policy_version_id, "exploration_capital_limit",
+        session,
+        policy_version_id,
+        "exploration_capital_limit",
     )
     if threshold is None:
         threshold = DEFAULT_EXPLORATION_CAPITAL_PCT
 
     exploration_pct = (exploration_value / total_value * 100).quantize(Decimal("0.01"))
     if exploration_pct > threshold:
-        return [EvalResult(
-            exceeded=True,
-            detail=f"EXPLORATION bucket: {exploration_pct}% (limit {threshold}%)",
-            actual_value=exploration_pct, threshold_value=threshold,
-        )]
+        return [
+            EvalResult(
+                exceeded=True,
+                detail=f"EXPLORATION bucket: {exploration_pct}% (limit {threshold}%)",
+                actual_value=exploration_pct,
+                threshold_value=threshold,
+            )
+        ]
 
     return []
 
@@ -306,16 +366,19 @@ def evaluate_data_quality_staleness(
 
     cutoff = datetime.now(timezone.utc)
     from datetime import timedelta
+
     threshold_dt = cutoff - timedelta(hours=staleness_hours)
 
     stale = [p for p in positions if p.observed_at < threshold_dt]
     if stale:
-        return [EvalResult(
-            exceeded=True,
-            detail=f"{len(stale)} position(s) with data older than {staleness_hours}h",
-            actual_value=Decimal(str(len(stale))),
-            threshold_value=Decimal("0"),
-        )]
+        return [
+            EvalResult(
+                exceeded=True,
+                detail=f"{len(stale)} position(s) with data older than {staleness_hours}h",
+                actual_value=Decimal(str(len(stale))),
+                threshold_value=Decimal("0"),
+            )
+        ]
 
     return []
 
