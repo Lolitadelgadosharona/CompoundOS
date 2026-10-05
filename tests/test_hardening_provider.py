@@ -67,3 +67,30 @@ def test_malformed_truncated_or_invalid_usage_is_rejected(monkeypatch, body):
     monkeypatch.setattr("urllib.request.urlopen", lambda *a, **k: BytesIO(body))
     with pytest.raises(ProviderError):
         DeepSeekProvider(api_key="synthetic-test-only").call("system", "user")
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "supporting_arguments",
+        "risks",
+        "policy_alignment",
+        "long_term_compounding",
+        "index_passive_investing",
+        "macroeconomic_context",
+        "risk_capital_preservation",
+        "devils_advocate",
+        "policy_alignment_role",
+        "synthesis_chair",
+    ],
+)
+def test_incomplete_structured_committee_cannot_validate(field):
+    from apps.api.services.provider_output_validator import validate_provider_output
+    from tests.test_committee_provider import _valid_report
+
+    report = _valid_report()
+    if field in report["sections"]:
+        report["sections"][field] = {}
+    else:
+        report[field] = " " if field == "policy_alignment" else []
+    assert not validate_provider_output(report, set()).passed

@@ -136,7 +136,13 @@ def validate_provider_output(
             not isinstance(x, str) or not x.strip() for x in value
         ):
             errors.append(ValidationError(key, "Must be an array of nonempty strings"))
-    if not isinstance(parsed.get("policy_alignment"), str):
+    for key in ["supporting_arguments", "risks"]:
+        if not parsed.get(key):
+            errors.append(ValidationError(key, "Must contain a substantive entry"))
+    if (
+        not isinstance(parsed.get("policy_alignment"), str)
+        or not parsed["policy_alignment"].strip()
+    ):
         errors.append(ValidationError("policy_alignment", "Must be text"))
     if errors:
         return ValidationResult.rejected(errors)
@@ -211,7 +217,7 @@ def _validate_role_sections(parsed: dict[str, Any]) -> list[ValidationError]:
         return [ValidationError("sections", "sections must be an object")]
     errors: list[ValidationError] = []
     for role in REQUIRED_ROLE_SECTIONS:
-        if role not in sections or sections[role] is None:
+        if not isinstance(sections.get(role), str) or not sections[role].strip():
             errors.append(ValidationError(f"sections.{role}", f"Missing role section: {role}"))
     return errors
 
