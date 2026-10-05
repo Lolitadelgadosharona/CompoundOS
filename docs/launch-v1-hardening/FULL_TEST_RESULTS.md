@@ -1,0 +1,9 @@
+# Full verification results
+
+Final serial full backend regression: **1583 passed, 135 warnings**, 180.62 seconds; no tests removed. Frontend: **259 passed**. Python lint, frontend typecheck/lint/build and production dependency audits pass. Final acceptance counts are also recorded in the implementation report and final logs. Required baseline: backend >=1539, frontend >=259. Existing tests are preserved; positive fixtures now include actual context citations, explicit test adapter registration, canonical research provenance, completed synthetic Committee reviews and explicitly evaluable published test policies. Two Journal persistence fixtures publish a new synthetic version with supported constraints and test notes, retaining the prior setup version; this does not edit a sealed Policy. These fixtures do not raise an Owner threshold or alter real data.
+
+Frontend: 259 passed; type-check, lint and production build passed. Backend final full regression, Python lint and targeted counterexamples are recorded after all code changes. Alembic runs only against newly created names ending _test on loopback port 55467. All SQL-writing tests run serially against their own isolated test DB; migration/restore probes have separate newly created DBs.
+
+Build traceability is already enforced by Docker SHA/timestamp arguments and /api/version. The final package records the exact local candidate SHA and image/endpoint verification strength. Historical deployed SHA remains UNKNOWN; no deployment was performed. GitHub CI results describe the unchanged PR base, not these unpushed commits.
+
+Evidence is preserved in the Owner review package. UNIT and synthetic PostgreSQL INTEGRATION results are not real-provider or production evidence. No production migration, deployment, broker connection, trade, push or merge was performed.
