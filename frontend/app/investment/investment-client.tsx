@@ -469,7 +469,7 @@ export default function InvestmentClient() {
                   onChange={e => setSelected(old => old.map(x =>
                     x.asset_id === t.asset_id ? {
                       ...x, leverage_status: e.target.checked ? "unleveraged" : "unknown",
-                    } : x)))} />
+                    } : x))} />
                 Owner confirms non-leveraged product from fund documentation (Owner attestation)
               </label>
             )}
@@ -477,7 +477,7 @@ export default function InvestmentClient() {
               Equity look-through % if verified
               <input type="number" min="0" max="100" value={t.equity_exposure_pct ?? ""}
                 onChange={e => setSelected(old => old.map(x =>
-                  x.asset_id === t.asset_id ? { ...x, equity_exposure_pct: e.target.value } : x)))} />
+                  x.asset_id === t.asset_id ? { ...x, equity_exposure_pct: e.target.value } : x))} />
             </label>
             <button
               onClick={() =>
