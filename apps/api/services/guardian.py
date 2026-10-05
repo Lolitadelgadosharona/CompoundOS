@@ -509,6 +509,14 @@ def _evaluate_core(
         for r in arows
     ]
 
+    # Current ledger analysis uses the shared valuation. Do not attach new
+    # ledger calculations to an unrelated historical snapshot foreign key.
+    from apps.api.services.valuation import load_valuation
+    valuation = load_valuation(session, household_id)
+    if valuation.entries:
+        return _evaluate_current_ledger(session, household_id, as_of_date,
+                                        target_check_id, allocations, valuation)
+
     # --- Load Portfolio snapshot ---
     srow = session.execute(
         text(
@@ -912,3 +920,88 @@ def _load_eval_result(session: Session, run_id: UUID) -> dict:
             for e in erows
         ],
     }
+
+
+def _evaluate_current_ledger(
+    session, household_id, as_of_date, target_check_id, allocations, valuation
+):
+    """Transient ledger result: no schema change or historical snapshot rewrite."""
+    run = {
+        "id": None,
+        "household_id": str(household_id),
+        "status": "unavailable"
+        if not valuation.recommendation_ready
+        else "evaluated_current_ledger",
+        "skip_reason": valuation.status if not valuation.recommendation_ready else None,
+        "checks_evaluated": 0,
+        "events_created": 0,
+        "as_of_date": str(as_of_date),
+        "started_at": valuation.as_of,
+    }
+    output = {
+        "evaluation_run": run,
+        "events": [],
+        "valuation": valuation.contract(),
+        "persisted": False,
+        "analysis_findings": [],
+        "source": "current_ledger",
+    }
+    if not valuation.recommendation_ready:
+        return output
+    rows = session.execute(
+        text("""SELECT cc.id, cc.check_id, cc.check_type, cc.threshold_value,
+        cc.severity, cc.target_category, cc.target_holding_category, cc.staleness_days
+        FROM guardian_check_confirmed cc JOIN guardian_checks gc ON gc.id=cc.check_id
+        WHERE gc.household_id=:hid AND (CAST(:cid AS uuid) IS NULL OR cc.check_id=:cid)"""),
+        {"hid": household_id, "cid": target_check_id},
+    ).fetchall()
+    if target_check_id is not None and not rows:
+        raise CheckNotFoundError
+    holdings = [
+        PortfolioHolding(
+            asset_category=e.get("asset_class") or e["asset_type"], total_value=e["base_value"]
+        )
+        for e in valuation.entries
+        if e["kind"] == "position"
+    ]
+    total = compute_total_value(holdings)
+    categories = build_category_map(holdings)
+    if total <= 0:
+        run.update(status="unavailable", skip_reason="No positive position value")
+        return output
+    for row in rows:
+        chk = CheckInput(
+            check_id=str(row[1]),
+            check_version_id=str(row[0]),
+            check_type=row[2],
+            threshold_value=row[3],
+            severity=row[4],
+            target_category_norm=row[5],
+            target_holding_category_norm=row[6],
+            staleness_days=row[7],
+        )
+        if chk.check_type == "drift":
+            result = evaluate_drift(chk, allocations, categories, total)
+        elif chk.check_type == "category_exposure":
+            result = evaluate_category_exposure(chk, categories, total)
+        elif chk.check_type == "staleness":
+            observed = min(e["observed_at"].date() for e in valuation.entries)
+            result = evaluate_staleness(chk, observed, as_of_date)
+        else:
+            continue
+        run["checks_evaluated"] += 1
+        if result.exceeded:
+            output["analysis_findings"].append(
+                {
+                    "id": None,
+                    "check_id": chk.check_id,
+                    "check_type": chk.check_type,
+                    "exceeded": True,
+                    "persisted": False,
+                    "drift_pp": str(result.drift_pp) if result.drift_pp is not None else None,
+                    "exposure_pct": str(result.exposure_pct)
+                    if result.exposure_pct is not None
+                    else None,
+                }
+            )
+    return output

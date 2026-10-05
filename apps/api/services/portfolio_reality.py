@@ -73,89 +73,34 @@ def _money(value: Decimal | None) -> str | None:
 
 
 def wealth_summary(session: Session, household_id: UUID) -> dict:
-    """Aggregate wealth by asset_type + cash + capital bucket. Read-only."""
-    household = _household(session)
-    portfolio = get_portfolio(session, household.id)
-    if portfolio is None:
-        return {
-            "net_worth": None, "stocks": None, "etf": None, "bonds": None,
-            "cash": None, "other": None,
-            "capital_bucket_summary": [], "last_updated": None,
-        }
+    """Common valuation; positions and cash are loaded independently."""
+    from apps.api.services.valuation import load_valuation
 
-    type_rows = session.execute(text(
-        "SELECT COALESCE(ast.asset_type, 'OTHER'),"
-        " COALESCE(SUM(p.market_value), 0)"
-        " FROM positions p"
-        " JOIN accounts a ON p.account_id = a.id"
-        " JOIN assets ast ON p.asset_id = ast.id"
-        " WHERE a.portfolio_id = :pid AND p.is_latest = TRUE"
-        " GROUP BY ast.asset_type"
-    ), {"pid": portfolio.id}).fetchall()
-
-    cash_total = session.execute(text(
-        "SELECT COALESCE(SUM(cb.amount), 0)"
-        " FROM cash_balances cb"
-        " JOIN accounts a ON cb.account_id = a.id"
-        " WHERE a.portfolio_id = :pid AND cb.is_latest = TRUE"
-    ), {"pid": portfolio.id}).scalar() or Decimal("0")
-
-    bucket_rows = session.execute(text(
-        "SELECT a.capital_bucket,"
-        " COALESCE(SUM(p.market_value), 0),"
-        " COALESCE(SUM(cb.amount), 0)"
-        " FROM accounts a"
-        " LEFT JOIN positions p ON p.account_id = a.id AND p.is_latest = TRUE"
-        " LEFT JOIN cash_balances cb ON cb.account_id = a.id AND cb.is_latest = TRUE"
-        " WHERE a.portfolio_id = :pid"
-        " GROUP BY a.capital_bucket"
-    ), {"pid": portfolio.id}).fetchall()
-
-    last_updated = session.execute(text(
-        "SELECT MAX(observed_at) FROM ("
-        "  SELECT observed_at FROM positions p"
-        "   JOIN accounts a ON p.account_id = a.id"
-        "   WHERE a.portfolio_id = :pid AND p.is_latest = TRUE"
-        "  UNION ALL"
-        "  SELECT observed_at FROM cash_balances cb"
-        "   JOIN accounts a ON cb.account_id = a.id"
-        "   WHERE a.portfolio_id = :pid AND cb.is_latest = TRUE"
-        ") sub"
-    ), {"pid": portfolio.id}).scalar()
-
-    stocks = etf = bonds = other = position_cash = Decimal("0")
-    for asset_type, value in type_rows:
-        value = value or Decimal("0")
-        if asset_type == "STOCK":
-            stocks += value
-        elif asset_type == "ETF":
-            etf += value
-        elif asset_type == "BOND":
-            bonds += value
-        elif asset_type in ("CASH", "MONEY_MARKET"):
-            position_cash += value
-        else:
-            other += value
-
-    cash = position_cash + cash_total
-    net_worth = stocks + etf + bonds + other + cash
-
+    v = load_valuation(session, household_id)
+    categories = {k: Decimal(0) for k in ("stocks", "etf", "bonds", "cash", "other")}
+    buckets = {}
+    if not v.reasons:
+        for e in v.entries:
+            category = (
+                "cash"
+                if e["kind"] == "cash"
+                else {
+                    "STOCK": "stocks",
+                    "ETF": "etf",
+                    "BOND": "bonds",
+                    "CASH": "cash",
+                    "MONEY_MARKET": "cash",
+                }.get(e.get("asset_type"), "other")
+            )
+            categories[category] += e["base_value"]
+            bucket = e.get("capital_bucket") or "Other"
+            buckets[bucket] = buckets.get(bucket, Decimal(0)) + e["base_value"]
     return {
-        "net_worth": _money(net_worth) if net_worth else None,
-        "stocks": _money(stocks) if stocks else None,
-        "etf": _money(etf) if etf else None,
-        "bonds": _money(bonds) if bonds else None,
-        "cash": _money(cash) if cash else None,
-        "other": _money(other) if other else None,
-        "capital_bucket_summary": [
-            {
-                "bucket": bucket,
-                "value": _money((pos_value or Decimal("0"))
-                               + (cash_value or Decimal("0"))),
-            }
-            for bucket, pos_value, cash_value in bucket_rows
-        ],
-        "last_updated": str(last_updated) if last_updated else None,
+        "net_worth": _money(v.total()) if v.total() is not None and v.entries else None,
+        **{k: _money(n) if not v.reasons and n else None for k, n in categories.items()},
+        "capital_bucket_summary": [{"bucket": k, "value": _money(n)} for k, n in buckets.items()],
+        "last_updated": v.as_of.isoformat(),
+        **v.contract(),
     }
 
 

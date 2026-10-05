@@ -209,56 +209,17 @@ class AllocationService:
 
     @staticmethod
     def deploy(amount: float) -> AllocationGuidance:
-        return AllocationGuidance(
-            available_capital=amount,
-            recommendations=[
-                {
-                    "symbol": "GOOGL", "confidence": 68,
-                    "current_weight": 8, "target_weight": 12,
-                    "rationale": "Underweight vs. policy target",
-                    "action": f"Allocate ${amount * 0.4:,.0f}",
-                },
-                {
-                    "symbol": "BRK.B", "confidence": 65,
-                    "current_weight": 5, "target_weight": 8,
-                    "rationale": "Diversification benefit",
-                    "action": f"Allocate ${amount * 0.3:,.0f}",
-                },
-                {
-                    "symbol": "VOO", "confidence": 60,
-                    "current_weight": 15, "target_weight": 18,
-                    "rationale": "Broad market exposure",
-                    "action": f"Allocate ${amount * 0.3:,.0f}",
-                },
-            ],
-            cash_alternative={
-                "symbol": "SHY", "yield": 4.5,
-                "rationale": "If no deployment, earn 4.5% yield",
-            },
-            constraints_checked=[
-                "Allocation stays within policy targets",
-                "No position exceeds 25% concentration limit",
-                "Tech sector remains under 50%",
-                "Portfolio beta stays under 1.5",
-            ],
-        )
+        return AllocationGuidance(available_capital=amount, recommendations=[],
+                                  cash_alternative={}, constraints_checked=[],
+                                  disclaimer=("Unavailable: validated valuation "
+                                              "and policy-aware planning "
+                                              "are not implemented. Guidance only; no execution."))
 
     @staticmethod
     def sell_to_raise(amount: float,
                       positions: Optional[list[dict]] = None,
                       ) -> list[dict]:
-        return [
-            {
-                "symbol": "JNJ", "shares_to_sell": "~50",
-                "reason": "Underperformer (-3% YTD), stale research",
-                "tax_impact": "Small gain — minimal tax impact",
-            },
-            {
-                "symbol": "PG", "shares_to_sell": "~30",
-                "reason": "Low conviction (confidence 55)",
-                "tax_impact": "Long-term gain — favorable rate",
-            },
-        ]
+        return []
 
 
 # ═══════════════════════════════════════════════════════════════════════

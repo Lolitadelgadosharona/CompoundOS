@@ -26,6 +26,10 @@ def dashboard_summary(session: Session = Depends(get_session)):
     snap = dashboard_service.build_dashboard(session, hid)
     return {
         "net_worth": snap.net_worth.total_value,
+        "base_currency": snap.net_worth.base_currency,
+        "quality_status": snap.net_worth.quality_status,
+        "recommendation_ready": snap.net_worth.recommendation_ready,
+        "quality_reasons": snap.net_worth.quality_reasons,
         "pending_decisions": len(snap.pending_decisions),
         "allocation": dashboard_service.allocation_context(snap.allocation),
         "guardian_alerts": [

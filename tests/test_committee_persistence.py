@@ -347,7 +347,7 @@ class TestConstraints:
                     "  confidence, citation_ref)"
                     " VALUES (:id, :sid, 'owner_claim', 'T', now(),"
                     "  'abc', '{}', 'compoundos_internal', 'current',"
-                    "  'low', 'ref')"
+                    "  'invalid', 'ref')"
                 ), {"id": str(uuid4()), "sid": str(s.id)})
                 conn.commit()
 

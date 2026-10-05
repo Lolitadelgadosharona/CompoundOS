@@ -74,7 +74,10 @@ export type GuardianEvaluationRun = {
 };
 
 export type GuardianEvaluateResponse = {
-  evaluation_run: GuardianEvaluationRun;
+  evaluation_run: Omit<GuardianEvaluationRun, "id"> & { id: string | null };
+  persisted?: boolean;
+  valuation?: { status: string; base_currency: string; recommendation_ready: boolean; reasons: string[] };
+  analysis_findings?: { check_id: string; check_type: string; exceeded: boolean }[];
   events: GuardianEvent[];
 };
 

@@ -58,32 +58,14 @@ class EvalResult:
 
 
 def _load_positions(
-    session: Session, household_id: UUID,
+    session: Session, household_id: UUID, valuation=None,
 ) -> list[PositionRow]:
-    """Load all latest positions with account and asset info."""
-    rows = session.execute(
-        text(
-            "SELECT p.id, p.account_id, p.asset_id, p.market_value, p.quantity,"
-            " p.observed_at, a.capital_bucket, ast.sector, ast.asset_type"
-            " FROM positions p"
-            " JOIN accounts a ON p.account_id = a.id"
-            " JOIN portfolios pf ON a.portfolio_id = pf.id"
-            " JOIN assets ast ON p.asset_id = ast.id"
-            " WHERE p.is_latest = TRUE AND pf.household_id = :hid"
-        ),
-        {"hid": household_id},
-    ).fetchall()
-
-    return [
-        PositionRow(
-            position_id=r[0], account_id=r[1], asset_id=r[2],
-            market_value=Decimal(str(r[3])) if r[3] is not None else None,
-            quantity=Decimal(str(r[4])),
-            observed_at=r[5],
-            capital_bucket=r[6], sector=r[7], asset_type=r[8],
-        )
-        for r in rows
-    ]
+    from apps.api.services.valuation import load_valuation
+    v = valuation or load_valuation(session, household_id)
+    return [PositionRow(position_id=e["id"], account_id=e["account_id"], asset_id=e["asset_id"],
+        market_value=e["base_value"], quantity=e["quantity"], observed_at=e["observed_at"],
+        capital_bucket=e["capital_bucket"], sector=e.get("sector"), asset_type=e["asset_type"])
+        for e in v.entries if e["kind"] == "position"]
 
 
 def _load_bucket_targets(
@@ -140,7 +122,12 @@ def evaluate_capital_bucket_drift(
     policy_version_id: str,
 ) -> list[EvalResult]:
     """Compare actual bucket allocations against policy targets."""
-    positions = _load_positions(session, household_id)
+    from apps.api.services.valuation import load_valuation
+    valuation = load_valuation(session, household_id)
+    if not valuation.recommendation_ready:
+        return [EvalResult(exceeded=False, detail="Not evaluated: " + valuation.status,
+                          context={"evaluation_status": "UNAVAILABLE", **valuation.contract()})]
+    positions = _load_positions(session, household_id, valuation)
     targets = _load_bucket_targets(session, policy_version_id)
     if not targets:
         return []
@@ -184,7 +171,12 @@ def evaluate_single_position_concentration(
     policy_version_id: str,
 ) -> list[EvalResult]:
     """Detect positions exceeding max_single_position_pct."""
-    positions = _load_positions(session, household_id)
+    from apps.api.services.valuation import load_valuation
+    valuation = load_valuation(session, household_id)
+    if not valuation.recommendation_ready:
+        return [EvalResult(exceeded=False, detail="Not evaluated: " + valuation.status,
+                          context={"evaluation_status": "UNAVAILABLE", **valuation.contract()})]
+    positions = _load_positions(session, household_id, valuation)
     if not positions:
         return []
 
@@ -220,7 +212,12 @@ def evaluate_sector_concentration(
     policy_version_id: str,
 ) -> list[EvalResult]:
     """Detect sectors exceeding max_sector_concentration_pct."""
-    positions = _load_positions(session, household_id)
+    from apps.api.services.valuation import load_valuation
+    valuation = load_valuation(session, household_id)
+    if not valuation.recommendation_ready:
+        return [EvalResult(exceeded=False, detail="Not evaluated: " + valuation.status,
+                          context={"evaluation_status": "UNAVAILABLE", **valuation.contract()})]
+    positions = _load_positions(session, household_id, valuation)
     if not positions:
         return []
 
@@ -260,7 +257,12 @@ def evaluate_exploration_capital_limit(
     policy_version_id: str,
 ) -> list[EvalResult]:
     """Check EXPLORATION bucket against capital limit."""
-    positions = _load_positions(session, household_id)
+    from apps.api.services.valuation import load_valuation
+    valuation = load_valuation(session, household_id)
+    if not valuation.recommendation_ready:
+        return [EvalResult(exceeded=False, detail="Not evaluated: " + valuation.status,
+                          context={"evaluation_status": "UNAVAILABLE", **valuation.contract()})]
+    positions = _load_positions(session, household_id, valuation)
     if not positions:
         return []
 

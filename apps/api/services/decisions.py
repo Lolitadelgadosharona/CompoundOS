@@ -305,6 +305,12 @@ def confirm_draft(
             if draft.revision != payload.expected_revision:
                 raise DecisionConflictError
 
+            # Revalidate current valuation for research-generated recommendations;
+            # human-authored journal entries retain their existing lifecycle.
+            if "research_run_id=" in (draft.evidence_or_sources or ""):
+                from apps.api.services.valuation import require_recommendation_ready
+                require_recommendation_ready(session, household_id)
+
             # Validate required fields
             for field_name in CONFIRM_REQUIRED_FIELDS:
                 if field_name == "decision_date":

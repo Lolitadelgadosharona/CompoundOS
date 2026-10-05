@@ -91,6 +91,8 @@ class DeployRequest(BaseModel):
 def deploy_capital(body: DeployRequest):
     guidance = AllocationService.deploy(body.amount)
     return {
+        "status": "unavailable",
+        "approval_eligible": False,
         "available": guidance.available_capital,
         "recommendations": guidance.recommendations,
         "cash_alternative": guidance.cash_alternative,
@@ -107,6 +109,9 @@ class SellRequest(BaseModel):
 def sell_to_raise(body: SellRequest):
     options = AllocationService.sell_to_raise(body.amount)
     return {
+        "status": "unavailable",
+        "approval_eligible": False,
+        "message": "Validated sell planning is not implemented",
         "amount_needed": body.amount,
         "options": options,
         "disclaimer": "Guidance only. No execution. Not tax advice.",

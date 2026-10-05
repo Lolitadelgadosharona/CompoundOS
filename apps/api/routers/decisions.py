@@ -59,6 +59,9 @@ DatabaseSession = Annotated[Session, Depends(get_session)]
 
 
 def _translate(exc: Exception) -> HTTPException:
+    from apps.api.services.valuation import RecommendationUnavailable
+    if isinstance(exc, RecommendationUnavailable):
+        return HTTPException(status_code=409, detail=str(exc))
     if isinstance(exc, HouseholdRequiredError):
         return HTTPException(status_code=404, detail="Household profile not found")
     if isinstance(exc, DecisionNotFoundError):
