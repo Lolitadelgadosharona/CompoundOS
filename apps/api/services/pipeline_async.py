@@ -84,8 +84,7 @@ class PipelineProgressTracker:
         return cls._runs.get(run_id)
 
     @classmethod
-    def update(cls, run_id: UUID, state: PipelineState,
-               **kwargs) -> PipelineProgress | None:
+    def update(cls, run_id: UUID, state: PipelineState, **kwargs) -> PipelineProgress | None:
         progress = cls._runs.get(run_id)
         if progress is None:
             return None
@@ -100,10 +99,12 @@ class PipelineProgressTracker:
     def add_step(cls, run_id: UUID, step: str) -> None:
         progress = cls._runs.get(run_id)
         if progress:
-            progress.steps.append({
-                "step": step,
-                "time": datetime.now(timezone.utc).isoformat(),
-            })
+            progress.steps.append(
+                {
+                    "step": step,
+                    "time": datetime.now(timezone.utc).isoformat(),
+                }
+            )
 
 
 def _set_run_status(session, run_id: UUID, status: str) -> None:
@@ -111,16 +112,12 @@ def _set_run_status(session, run_id: UUID, status: str) -> None:
     from sqlalchemy import text
 
     session.execute(
-        text(
-            "UPDATE research_runs SET status = :st, updated_at = NOW()"
-            " WHERE id = :rid"
-        ),
+        text("UPDATE research_runs SET status = :st, updated_at = NOW()" " WHERE id = :rid"),
         {"st": status, "rid": run_id},
     )
 
 
-def execute_pipeline(run_id: UUID, symbol: str,
-                     household_id: UUID) -> None:
+def execute_pipeline(run_id: UUID, symbol: str, household_id: UUID) -> None:
     """Run the REAL ResearchIntelligencePipeline as a background task.
 
     This is deliberately a SYNC function: BackgroundTasks runs sync
@@ -151,6 +148,11 @@ def execute_pipeline(run_id: UUID, symbol: str,
     tracker = PipelineProgressTracker
     session = SessionLocal()
     try:
+        from apps.api.services.launch_investment import require_research_target
+        from apps.api.services.valuation import require_recommendation_ready
+
+        require_recommendation_ready(session, household_id)
+        require_research_target(session, run_id)
         # Seed the default prompt templates (idempotent) so prompt
         # governance can resolve an active version before execution.
         from apps.api.services.prompt_governor import PromptGovernor
@@ -181,30 +183,30 @@ def execute_pipeline(run_id: UUID, symbol: str,
         if output.memo is None:
             _set_run_status(session, run_id, "failed")
             session.commit()
-            tracker.update(run_id, PipelineState.FAILED,
-                           error="Memo generation failed")
+            tracker.update(run_id, PipelineState.FAILED, error="Memo generation failed")
             return
 
         # Research → Committee (M5-004)
         bridge = CommitteeIntegrationService.complete_research(
-            session, run_id, household_id,
+            session,
+            run_id,
+            household_id,
         )
         memo_id = bridge["memo_id"]
 
         # Committee → Decision Draft (pending Owner approval)
         memo_row = session.execute(
-            text(
-                "SELECT memo, recommendation FROM investment_memos"
-                " WHERE id = :id"
-            ),
+            text("SELECT memo, recommendation FROM investment_memos" " WHERE id = :id"),
             {"id": UUID(bridge["memo_id"])},
         ).fetchone()
-        memo_json = (memo_row[0] if isinstance(memo_row[0], dict)
-                     else json.loads(memo_row[0]))
+        memo_json = memo_row[0] if isinstance(memo_row[0], dict) else json.loads(memo_row[0])
         recommendation = memo_row[1] or "HOLD"
         decision, _draft = DecisionBridgeService.create_decision_draft(
-            session, run_id, _symbol_for_run(session, run_id),
-            recommendation, memo_json.get("thesis", ""),
+            session,
+            run_id,
+            _symbol_for_run(session, run_id),
+            recommendation,
+            memo_json.get("thesis", ""),
             memo_json.get("risks", []),
         )
         # Persist committee session/evidence + decision draft + run status.
@@ -214,15 +216,16 @@ def execute_pipeline(run_id: UUID, symbol: str,
         session.commit()
 
         tracker.update(
-            run_id, PipelineState.COMPLETE,
+            run_id,
+            PipelineState.COMPLETE,
             memo_id=str(memo_id),
             decision_id=str(decision.id),
-            confidence=(output.confidence.score
-                        if output.confidence else None),
+            confidence=(output.confidence.score if output.confidence else None),
         )
         tracker.add_step(run_id, f"Memo ready: /memo/{memo_id}")
         tracker.add_step(
-            run_id, f"Pending decision: {decision.id}",
+            run_id,
+            f"Pending decision: {decision.id}",
         )
     except Exception as exc:  # noqa: BLE001 — background worker boundary
         try:
@@ -233,4 +236,3 @@ def execute_pipeline(run_id: UUID, symbol: str,
         tracker.update(run_id, PipelineState.FAILED, error=str(exc))
     finally:
         session.close()
-

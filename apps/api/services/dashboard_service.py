@@ -55,7 +55,7 @@ def build_dashboard(session: Session, household_id: UUID) -> DashboardSnapshot:
         base_currency=valuation.base_currency or "UNKNOWN",
         quality_status=valuation.status,
         recommendation_ready=valuation.recommendation_ready,
-        quality_reasons=valuation.reasons,
+        quality_reasons=valuation.reasons + valuation.trust_blockers,
         by_currency={k: str(v) for k, v in native.items()},
         by_account_type={k: str(v) for k, v in accounts.items()} if not valuation.reasons else {},
         unconverted_currencies=sorted(

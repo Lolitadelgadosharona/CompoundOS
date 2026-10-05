@@ -52,7 +52,7 @@ def ask(
     try:
         instrument = resolve_query(query_from_question(body.question), get_instrument_provider())
         symbol = instrument.symbol
-        canonical_asset(session, instrument)
+        canonical = canonical_asset(session, instrument)
     except AmbiguousInstrument as exc:
         raise HTTPException(
             409, detail={"message": str(exc), "candidates": exc.candidates}
@@ -69,6 +69,7 @@ def ask(
         symbol,
         household_id,
         title=body.question,
+        asset_id=canonical.id,
     )
     run_id = UUID(result["run_id"])
 

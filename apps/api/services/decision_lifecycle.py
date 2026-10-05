@@ -94,6 +94,22 @@ class CommitteeIntegrationService:
             )
             session.flush()
 
+        from apps.api.services.launch_investment import digest, research_review_context
+        from apps.api.services.valuation import RecommendationUnavailable
+
+        try:
+            context = research_review_context(session, run_id)
+        except RecommendationUnavailable:
+            context = None  # Historical analysis remains readable; approval is unavailable.
+        facts = {
+            "memo_id": str(memo_row[0]),
+            "run_id": str(run_id),
+            "symbol": _symbol_for_run(session, run_id),
+            "thesis": memo_row[1].get("thesis", ""),
+            "confidence": memo_row[2],
+            "review_context": context,
+        }
+
         # Link research request to committee review
         req = session.execute(
             text("SELECT request_id FROM research_runs WHERE id = :rid"),
@@ -120,16 +136,8 @@ class CommitteeIntegrationService:
                     {
                         "id": uuid4(),
                         "sid": session_id,
-                        "ch": str(uuid4()),
-                        "content": json.dumps(
-                            {
-                                "memo_id": str(memo_row[0]),
-                                "run_id": str(run_id),
-                                "symbol": _symbol_for_run(session, run_id),
-                                "thesis": memo_row[1].get("thesis", ""),
-                                "confidence": memo_row[2],
-                            }
-                        ),
+                        "ch": digest(facts),
+                        "content": json.dumps(facts, default=str),
                     },
                 )
 

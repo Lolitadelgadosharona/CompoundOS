@@ -215,4 +215,8 @@ def get_fx_provider():
 
 def configured_data_sources():
     """Authoritative adapter registry; business services do not name a market vendor."""
-    return {get_instrument_provider().name, get_market_provider().name, get_fx_provider().name}
+    import os
+    adapters = [get_instrument_provider(), get_market_provider(), get_fx_provider()]
+    if any(getattr(p, "test_only", False) for p in adapters) and os.getenv("ENVIRONMENT") != "test":
+        raise InstrumentUnavailable("Test-only provider cannot support production recommendations")
+    return {p.name for p in adapters}

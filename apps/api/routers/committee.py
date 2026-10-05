@@ -38,9 +38,7 @@ router = APIRouter(prefix="/api/committee", tags=["committee"])
 
 def _require_household_id(session: Session) -> str:
     row = session.execute(
-        __import__("sqlalchemy").text(
-            "SELECT id FROM household_profiles LIMIT 1"
-        ),
+        __import__("sqlalchemy").text("SELECT id FROM household_profiles LIMIT 1"),
     ).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="No household found.")
@@ -48,7 +46,8 @@ def _require_household_id(session: Session) -> str:
 
 
 def _get_session_or_404(
-    session: Session, session_id: str,
+    session: Session,
+    session_id: str,
 ) -> CommitteeSession:
     cs = session.query(CommitteeSession).filter_by(id=session_id).first()
     if not cs:
@@ -68,7 +67,10 @@ def create_session(
 ) -> SessionResponse:
     household_id = UUID(_require_household_id(session))
     cs = orch.create_committee_session(
-        session, household_id, payload.title, payload.proposal_text,
+        session,
+        household_id,
+        payload.title,
+        payload.proposal_text,
     )
     return SessionResponse.model_validate(cs)
 
@@ -109,9 +111,12 @@ def get_session_detail(
     cs = _get_session_or_404(session, session_id)
     evidence = [
         {
-            "id": str(e.id), "source_type": e.source_type,
-            "source_title": e.source_title, "citation_ref": e.citation_ref,
-            "confidence": e.confidence, "provenance": e.provenance,
+            "id": str(e.id),
+            "source_type": e.source_type,
+            "source_title": e.source_title,
+            "citation_ref": e.citation_ref,
+            "confidence": e.confidence,
+            "provenance": e.provenance,
         }
         for e in cs.evidence_items
     ]
@@ -119,28 +124,38 @@ def get_session_detail(
     if cs.report:
         r = cs.report
         report = {
-            "id": str(r.id), "provider": r.provider, "model_id": r.model_id,
-            "prompt_version": r.prompt_version, "schema_version": r.schema_version,
+            "id": str(r.id),
+            "provider": r.provider,
+            "model_id": r.model_id,
+            "prompt_version": r.prompt_version,
+            "schema_version": r.schema_version,
             "temperature": float(r.temperature) if r.temperature else 0.0,
-            "input_tokens": r.input_tokens, "output_tokens": r.output_tokens,
+            "input_tokens": r.input_tokens,
+            "output_tokens": r.output_tokens,
             "generated_at": r.generated_at.isoformat() if r.generated_at else None,
             "content_hash": r.content_hash,
         }
     outcomes = [
         {
-            "id": str(o.id), "outcome": o.outcome,
+            "id": str(o.id),
+            "outcome": o.outcome,
             "owner_rationale": o.owner_rationale,
             "recorded_at": o.recorded_at.isoformat() if o.recorded_at else None,
         }
         for o in cs.outcomes
     ]
     return SessionDetailResponse(
-        id=cs.id, household_id=cs.household_id,
+        id=cs.id,
+        household_id=cs.household_id,
         parent_session_id=cs.parent_session_id,
-        title=cs.title, proposal_text=cs.proposal_text,
+        title=cs.title,
+        proposal_text=cs.proposal_text,
         status=cs.status,
-        created_at=cs.created_at, updated_at=cs.updated_at,
-        evidence_items=evidence, report=report, outcomes=outcomes,
+        created_at=cs.created_at,
+        updated_at=cs.updated_at,
+        evidence_items=evidence,
+        report=report,
+        outcomes=outcomes,
     )
 
 
@@ -192,7 +207,15 @@ def run_committee(
     payload: RunRequest,  # noqa: ARG001 — explicit Owner confirmation
     session: Session = Depends(get_session),
 ) -> RunResponse:
-    cs = _get_session_or_404(session, session_id)
+    cs = (
+        session.query(CommitteeSession)
+        .filter_by(id=UUID(session_id))
+        .with_for_update()
+        .populate_existing()
+        .first()
+    )
+    if not cs:
+        raise HTTPException(404, "Committee session not found")
     if cs.status != "draft":
         raise HTTPException(
             status_code=409,
@@ -210,7 +233,9 @@ def run_committee(
         provider = DeepSeekProvider()
         report = orch.run_committee(session, cs, provider)
         return RunResponse(
-            session_id=cs.id, status="completed", report_id=report.id,
+            session_id=cs.id,
+            status="completed",
+            report_id=report.id,
         )
     except CredentialError:
         raise HTTPException(
@@ -270,10 +295,13 @@ def get_evidence(
     cs = _get_session_or_404(session, session_id)
     return [
         {
-            "id": str(e.id), "source_type": e.source_type,
-            "source_title": e.source_title, "citation_ref": e.citation_ref,
+            "id": str(e.id),
+            "source_type": e.source_type,
+            "source_title": e.source_title,
+            "citation_ref": e.citation_ref,
             "structured_facts": e.structured_facts,
-            "confidence": e.confidence, "provenance": e.provenance,
+            "confidence": e.confidence,
+            "provenance": e.provenance,
             "as_of": e.as_of.isoformat() if e.as_of else None,
         }
         for e in cs.evidence_items
@@ -308,7 +336,9 @@ def record_outcome(
 
     try:
         co = orch.record_outcome(
-            session, cs, payload.outcome,
+            session,
+            cs,
+            payload.outcome,
             owner_rationale=payload.owner_rationale,
         )
         return OutcomeResponse.model_validate(co)

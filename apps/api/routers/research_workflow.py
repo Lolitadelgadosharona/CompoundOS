@@ -40,7 +40,7 @@ def start_research(
 
     try:
         instrument = resolve_query(body.symbol, get_instrument_provider())
-        canonical_asset(session, instrument)
+        canonical = canonical_asset(session, instrument)
         symbol = instrument.symbol
     except AmbiguousInstrument as exc:
         raise HTTPException(
@@ -56,7 +56,9 @@ def start_research(
         raise HTTPException(status_code=404, detail="Household profile not found")
 
     # Create idea → review → request → run chain (real records)
-    result = DashboardResearchService.create_request(session, symbol, household_id)
+    result = DashboardResearchService.create_request(
+        session, symbol, household_id, asset_id=canonical.id
+    )
     run_id = UUID(result["run_id"])
 
     # Create progress tracker entry

@@ -257,6 +257,33 @@ def discard_draft(session: Session, decision_id: UUID, payload: DiscardDecisionR
             action="decision.draft.discarded",
             metadata={"draft_revision": draft.revision},
         )
+        source = session.execute(
+            text("SELECT run_id FROM decision_research_sources WHERE decision_id=:i"),
+            {"i": decision_id},
+        ).scalar()
+        candidate = session.execute(
+            text("SELECT candidate_id FROM contribution_decisions WHERE decision_id=:i"),
+            {"i": decision_id},
+        ).scalar()
+        if source or candidate:
+            from apps.api.models import AuditEvent
+
+            session.add(
+                AuditEvent(
+                    household_id=household_id,
+                    actor="local-owner",
+                    action="contribution.rejected" if candidate else "decision.research.rejected",
+                    entity_type="ContributionCandidate" if candidate else "Decision",
+                    entity_id=candidate or decision_id,
+                    event_metadata={
+                        "execution": "NONE",
+                        "decision_id": str(decision_id),
+                        "reason": "Owner discarded linked draft",
+                    },
+                )
+            )
+            session.flush()
+            return
         delete_draft(session, draft)
         session.delete(decision)
         session.flush()
@@ -314,6 +341,9 @@ def confirm_draft(
                 from apps.api.services.launch_investment import require_research_target
 
                 require_research_target(session, research_source)
+                from apps.api.services.launch_investment import require_research_committee
+
+                require_research_committee(session, research_source)
 
             from apps.api.services.launch_investment import guard_candidate_confirmation
 

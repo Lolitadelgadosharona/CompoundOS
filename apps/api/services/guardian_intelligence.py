@@ -142,7 +142,7 @@ def evaluate_capital_bucket_drift(
     from apps.api.services.valuation import load_valuation
 
     valuation = load_valuation(session, household_id)
-    if not valuation.recommendation_ready:
+    if not valuation.analysis_ready:
         return [
             EvalResult(
                 exceeded=False,
@@ -150,46 +150,14 @@ def evaluate_capital_bucket_drift(
                 context={"evaluation_status": "UNAVAILABLE", **valuation.contract()},
             )
         ]
-    positions = _load_positions(session, household_id, valuation)
-    targets = _load_bucket_targets(session, policy_version_id)
-    if not targets:
-        return []
+    from apps.api.services.effective_policy import bucket_findings, published_buckets
 
-    total_value = sum((p.market_value or Decimal("0")) for p in positions)
-    if total_value == 0:
-        return []
-
-    # Compute actual bucket values
-    bucket_values: dict[str, Decimal] = {}
-    for p in positions:
-        b = p.capital_bucket
-        bucket_values[b] = bucket_values.get(b, Decimal("0")) + (p.market_value or Decimal("0"))
-
-    results: list[EvalResult] = []
-    for t in targets:
-        actual = bucket_values.get(t.bucket_name, Decimal("0"))
-        actual_pct = (actual / total_value * 100).quantize(Decimal("0.01"))
-
-        if t.max_pct is not None and actual_pct > t.max_pct:
-            results.append(
-                EvalResult(
-                    exceeded=True,
-                    detail=f"Bucket {t.bucket_name}: {actual_pct}% (max {t.max_pct}%)",
-                    actual_value=actual_pct,
-                    threshold_value=t.max_pct,
-                )
-            )
-        elif t.min_pct is not None and actual_pct < t.min_pct:
-            results.append(
-                EvalResult(
-                    exceeded=True,
-                    detail=f"Bucket {t.bucket_name}: {actual_pct}% (min {t.min_pct}%)",
-                    actual_value=actual_pct,
-                    threshold_value=t.min_pct,
-                )
-            )
-
-    return results
+    return [
+        EvalResult(exceeded=True, detail=detail)
+        for detail in bucket_findings(
+            valuation.entries, published_buckets(session, policy_version_id)
+        )
+    ]
 
 
 def evaluate_single_position_concentration(
@@ -202,7 +170,7 @@ def evaluate_single_position_concentration(
     from apps.api.services.valuation import load_valuation
 
     valuation = valuation or load_valuation(session, household_id)
-    if not valuation.recommendation_ready:
+    if not valuation.analysis_ready:
         return [
             EvalResult(
                 exceeded=False,
@@ -257,7 +225,7 @@ def evaluate_sector_concentration(
     from apps.api.services.valuation import load_valuation
 
     valuation = valuation or load_valuation(session, household_id)
-    if not valuation.recommendation_ready:
+    if not valuation.analysis_ready:
         return [
             EvalResult(
                 exceeded=False,
@@ -312,7 +280,7 @@ def evaluate_exploration_capital_limit(
     from apps.api.services.valuation import load_valuation
 
     valuation = valuation or load_valuation(session, household_id)
-    if not valuation.recommendation_ready:
+    if not valuation.analysis_ready:
         return [
             EvalResult(
                 exceeded=False,

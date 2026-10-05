@@ -22,6 +22,7 @@ from apps.api.services.credential_manager import get_api_key
 @dataclass
 class ProviderResponse:
     """Normalized provider response."""
+
     raw_text: str
     parsed_json: Optional[dict[str, Any]] = None
     input_tokens: int = 0
@@ -33,6 +34,7 @@ class ProviderResponse:
 @dataclass
 class ProviderConfig:
     """Configuration for a provider call."""
+
     model: str = "deepseek-chat"
     temperature: float = 0.0
     max_output_tokens: int = 8000
@@ -107,8 +109,7 @@ class AIModelProvider(ABC):
 
     @property
     @abstractmethod
-    def provider_name(self) -> str:
-        ...
+    def provider_name(self) -> str: ...
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -150,6 +151,7 @@ class DeepSeekProvider(AIModelProvider):
             "model": cfg.model,
             "temperature": cfg.temperature,
             "max_tokens": cfg.max_output_tokens,
+            "response_format": {"type": "json_object"},
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -174,7 +176,10 @@ class DeepSeekProvider(AIModelProvider):
                 method="POST",
             )
             with urllib.request.urlopen(req, timeout=cfg.timeout_seconds) as resp:
-                body = json.loads(resp.read().decode("utf-8"))
+                raw_body = resp.read(2_000_001)
+                if len(raw_body) > 2_000_000:
+                    raise ProviderError("Provider response exceeds limit", retryable=False)
+                body = json.loads(raw_body.decode("utf-8"))
         except urllib.error.HTTPError as e:
             status = e.code
             if status == 429:
@@ -182,14 +187,27 @@ class DeepSeekProvider(AIModelProvider):
             if 500 <= status < 600:
                 raise ProviderServerError(f"Provider HTTP {status}")
             raise ProviderError(f"Provider HTTP {status}: {e.reason}", retryable=False)
+        except (ValueError, UnicodeError) as e:
+            raise ProviderError("Malformed provider response", retryable=False) from e
         except OSError as e:
             raise ProviderTimeoutError(f"Connection failed: {e}")
         finally:
             duration_ms = int((time.monotonic() - start) * 1000)
 
-        choice = body.get("choices", [{}])[0]
-        raw_text = choice.get("message", {}).get("content", "")
-        usage = body.get("usage", {})
+        try:
+            choice = body["choices"][0]
+            raw_text = choice["message"]["content"]
+            usage = body["usage"]
+            tokens = [usage["prompt_tokens"], usage["completion_tokens"]]
+            if (
+                not isinstance(raw_text, str)
+                or not raw_text.strip()
+                or choice.get("finish_reason") not in {None, "stop"}
+                or any(type(x) is not int or x < 0 for x in tokens)
+            ):
+                raise ValueError("Invalid content, completion or usage")
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            raise ProviderError("Malformed/incomplete provider response", retryable=False) from exc
 
         return ProviderResponse(
             raw_text=raw_text,

@@ -8,8 +8,12 @@ branch_labels = None
 depends_on = None
 
 
+UUID_PATTERN = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-" "[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+
+
 def upgrade():
-    op.execute("""
+    op.execute(
+        """
     CREATE TABLE owner_web_sessions (
       token_hash text PRIMARY KEY, key_id uuid NOT NULL REFERENCES owner_api_keys(id),
       expires_at timestamptz NOT NULL);
@@ -57,8 +61,8 @@ def upgrade():
     CREATE FUNCTION fn_capture_research_source() RETURNS trigger AS $$
     DECLARE rid uuid;
     BEGIN
-      IF NEW.evidence_or_sources ~ 'research_run_id=[0-9a-fA-F-]{36}' THEN
-        rid := substring(NEW.evidence_or_sources FROM 'research_run_id=([0-9a-fA-F-]{36})')::uuid;
+      IF NEW.evidence_or_sources ~ 'research_run_id=__UUID__' THEN
+        rid := substring(NEW.evidence_or_sources FROM 'research_run_id=(__UUID__)')::uuid;
         IF EXISTS(SELECT 1 FROM research_runs WHERE id=rid) THEN
           INSERT INTO decision_research_sources VALUES (NEW.decision_id,rid) ON CONFLICT DO NOTHING;
         END IF;
@@ -69,9 +73,10 @@ def upgrade():
       FOR EACH ROW EXECUTE FUNCTION fn_capture_research_source();
     INSERT INTO decision_research_sources
       SELECT d.decision_id,r.id FROM decision_drafts d JOIN research_runs r
-      ON r.id::text=substring(d.evidence_or_sources FROM 'research_run_id=([0-9a-fA-F-]{36})')
+      ON r.id::text=lower(substring(d.evidence_or_sources FROM 'research_run_id=(__UUID__)'))
       ON CONFLICT DO NOTHING;
-    """)
+    """.replace("__UUID__", UUID_PATTERN)
+    )
 
 
 def downgrade():

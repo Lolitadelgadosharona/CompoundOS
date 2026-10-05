@@ -930,9 +930,9 @@ def _evaluate_current_ledger(
         "id": None,
         "household_id": str(household_id),
         "status": "unavailable"
-        if not valuation.recommendation_ready
+        if not valuation.analysis_ready
         else "evaluated_current_ledger",
-        "skip_reason": valuation.status if not valuation.recommendation_ready else None,
+        "skip_reason": valuation.status if not valuation.analysis_ready else None,
         "checks_evaluated": 0,
         "events_created": 0,
         "as_of_date": str(as_of_date),
@@ -946,7 +946,7 @@ def _evaluate_current_ledger(
         "analysis_findings": [],
         "source": "current_ledger",
     }
-    if not valuation.recommendation_ready:
+    if not valuation.analysis_ready:
         return output
     rows = session.execute(
         text("""SELECT cc.id, cc.check_id, cc.check_type, cc.threshold_value,
@@ -988,6 +988,9 @@ def _evaluate_current_ledger(
             observed = min(e["observed_at"].date() for e in valuation.entries)
             result = evaluate_staleness(chk, observed, as_of_date)
         else:
+            output["analysis_findings"].append({"check_id": chk.check_id,
+                "check_type": chk.check_type, "severity": "critical", "exceeded": True,
+                "detail": "Unsupported active Guardian rule; evaluation incomplete"})
             continue
         run["checks_evaluated"] += 1
         if result.exceeded:

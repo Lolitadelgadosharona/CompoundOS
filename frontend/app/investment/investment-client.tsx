@@ -81,6 +81,7 @@ type Snapshot = {
     monthly_amount: string;
     monthly_currency: string;
     initial_capital: string;
+    funding_account_id?: string;
     targets: Target[];
   } | null;
   accounts: { id: string; name: string }[];
@@ -166,6 +167,7 @@ export default function InvestmentClient() {
           setMonthly(data.configuration.monthly_amount);
           setMonthlyCurrency(data.configuration.monthly_currency);
           setInitial(data.configuration.initial_capital);
+          setAccount(data.configuration.funding_account_id ?? "");
         }
       })
       .catch((e) => setError(e.message));
@@ -497,6 +499,7 @@ export default function InvestmentClient() {
               api("investment/configuration", "POST", {
                 base_currency: snapshot?.valuation.base_currency,
                 initial_capital: initial,
+                funding_account_id: account || null,
                 monthly_currency: monthlyCurrency,
                 monthly_amount: monthly,
                 targets: selected.map((t) => ({

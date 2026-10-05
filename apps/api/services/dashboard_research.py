@@ -23,8 +23,11 @@ class DashboardResearchService:
 
     @staticmethod
     def create_request(
-        session: Session, symbol: str, household_id: UUID,
+        session: Session,
+        symbol: str,
+        household_id: UUID,
         title: str | None = None,
+        asset_id: UUID | None = None,
     ) -> dict:
         """Create a research request and initial run.
 
@@ -38,6 +41,7 @@ class DashboardResearchService:
         provenance — no schema change.
         """
         from apps.api.services.instrument_resolver import normalize_symbol
+
         symbol = normalize_symbol(symbol)
         idea_title = title or f"Research: {symbol}"
         # Find or create investment idea
@@ -65,8 +69,17 @@ class DashboardResearchService:
 
         # Create research request (parameters stores the raw question)
         req_id = uuid4()
-        params_json = (json.dumps({"question": title, "symbol": symbol})
-                       if title else None)
+        params = {"question": title, "symbol": symbol}
+        if asset_id:
+            from dataclasses import asdict
+
+            from apps.api.services.launch_investment import mapped_instrument
+
+            instrument = mapped_instrument(session, asset_id)
+            if instrument.symbol != symbol:
+                raise ValueError("INSTRUMENT_IDENTITY_MISMATCH: research target")
+            params.update(asset_id=str(asset_id), instrument=asdict(instrument))
+        params_json = json.dumps(params)
         session.execute(
             text(
                 "INSERT INTO research_requests"
@@ -91,8 +104,10 @@ class DashboardResearchService:
 
         session.commit()
         return {
-            "request_id": str(req_id), "run_id": str(run_id),
-            "symbol": symbol, "status": "pending",
+            "request_id": str(req_id),
+            "run_id": str(run_id),
+            "symbol": symbol,
+            "status": "pending",
         }
 
     @staticmethod
@@ -135,7 +150,8 @@ class DashboardResearchService:
         ).fetchall()
         return [
             {
-                "run_id": str(r[0]), "status": r[1],
+                "run_id": str(r[0]),
+                "status": r[1],
                 "date": str(r[2])[:10] if r[2] else None,
                 "memo_id": str(r[3]) if r[3] else None,
                 "confidence": r[4],

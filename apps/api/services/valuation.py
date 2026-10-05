@@ -16,16 +16,28 @@ class Valuation:
     entries: list[dict] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
     cost_estimate: bool = False
+    trust_blockers: list[str] = field(default_factory=list)
 
     @property
     def status(self):
         return (
-            "INCOMPLETE" if self.reasons else "COST_ESTIMATE" if self.cost_estimate else "COMPLETE"
+            "INCOMPLETE"
+            if self.reasons
+            else "COST_ESTIMATE"
+            if self.cost_estimate
+            else "DEGRADED"
+            if self.trust_blockers
+            else "COMPLETE"
         )
 
     @property
     def recommendation_ready(self):
         return self.status == "COMPLETE"
+
+    @property
+    def analysis_ready(self):
+        """Descriptive risk analysis of reported amounts is not recommendation approval."""
+        return not self.reasons and not self.cost_estimate
 
     def total(self, kind=None):
         if self.reasons:
@@ -49,6 +61,12 @@ class Valuation:
             "status": self.status,
             "recommendation_ready": self.recommendation_ready,
             "reasons": self.reasons,
+            "trust_blockers": self.trust_blockers,
+            "readiness_status": "READY"
+            if self.recommendation_ready
+            else "BLOCKED"
+            if self.reasons
+            else "DEGRADED",
             "weight_scope": "positions_only",
             "freshness_hours": 24,
             "total_value": str(self.total()) if self.total() is not None else None,
@@ -85,6 +103,15 @@ class Valuation:
 
 def _currency(currency):
     return ("GBP", Decimal("0.01")) if currency == "GBp" else (currency, Decimal(1))
+
+
+def trusted_source(source):
+    from apps.api.services.launch_providers import configured_data_sources
+
+    try:
+        return source in configured_data_sources()
+    except ValueError:
+        return False
 
 
 def value_rows(base_currency, positions, cash, rates, as_of=None):
@@ -131,6 +158,25 @@ def value_rows(base_currency, positions, cash, rates, as_of=None):
             e["price_unit_multiplier"] = str(_currency(row.get("market_price_currency"))[1])
             errors = []
             if kind == "position":
+                if row.get("quote_quality") in {"OBSERVED", "DELAYED"} and (
+                    not row.get("identity_verified")
+                    or not row.get("quote_identity_verified")
+                    or not trusted_source(row.get("source"))
+                ):
+                    errors.append("QUOTE_IDENTITY_UNRESOLVED_OR_UNTRUSTED")
+                if not row.get("identity_verified") or not row.get("quote_identity_verified"):
+                    result.trust_blockers.append(f"position {key}: INSTRUMENT_IDENTITY_UNRESOLVED")
+                if row.get("quote_quality") not in {"OBSERVED", "DELAYED"} or not trusted_source(
+                    row.get("source")
+                ):
+                    result.trust_blockers.append(f"position {key}: UNTRUSTED_QUOTE")
+            elif row.get("source") in {
+                "simulation",
+                "simulated",
+                "synthetic",
+            } and not trusted_source(row.get("source")):
+                result.trust_blockers.append(f"cash {key}: UNTRUSTED_BALANCE")
+            if kind == "position":
                 price = row.get("market_price")
                 if price is not None:
                     price = Decimal(str(price))
@@ -156,6 +202,17 @@ def value_rows(base_currency, positions, cash, rates, as_of=None):
                     r = max(candidates, key=lambda r: r["observed_at"])
                     raw = Decimal(str(r["rate"]))
                     if raw.is_finite() and raw > 0 and result.as_of - r["observed_at"] <= MAX_AGE:
+                        expected = {
+                            "from_currency": r["from_currency"],
+                            "to_currency": r["to_currency"],
+                        }
+                        identity = r.get("identity") or {}
+                        if (
+                            not trusted_source(r["rate_source"])
+                            or r.get("quality") not in {"OBSERVED", "DELAYED"}
+                            or any(identity.get(k) != v for k, v in expected.items())
+                        ):
+                            result.trust_blockers.append(f"{kind} {key}: UNTRUSTED_FX")
                         rate = raw if r["from_currency"] == ccy else Decimal(1) / raw
                         e.update(
                             fx_observed_rate=str(raw),
@@ -211,7 +268,10 @@ def load_valuation(session, household_id, as_of=None):
     )
     rates = (
         session.execute(
-            text("SELECT from_currency,to_currency,rate,rate_source,observed_at FROM fx_rates")
+            text(
+                "SELECT from_currency,to_currency,rate,rate_source,observed_at,identity,quality "
+                "FROM fx_rates"
+            )
         )
         .mappings()
         .all()
@@ -222,7 +282,7 @@ def load_valuation(session, household_id, as_of=None):
             text("""SELECT DISTINCT ON (o.asset_id) o.*, m.metadata AS instrument_metadata
         FROM market_observations o LEFT JOIN instrument_provider_mappings m
         ON m.asset_id=o.asset_id AND m.provider=o.provider
-        WHERE o.as_of<=:t ORDER BY o.asset_id,o.as_of DESC,o.received_at DESC"""),
+        ORDER BY o.asset_id,o.as_of DESC,o.received_at DESC"""),
             {"t": as_of or datetime.now(timezone.utc)},
         )
         .mappings()
@@ -234,7 +294,25 @@ def load_valuation(session, household_id, as_of=None):
         row = dict(original)
         q = quotes.get(row["asset_id"])
         if q:
+            from apps.api.models import Asset
+            from apps.api.services.instrument_resolver import (
+                Instrument,
+                identity_dimensions,
+                validate_asset_identity,
+            )
+
+            verified = False
+            try:
+                instrument = Instrument(**(q.get("instrument_metadata") or {}))
+                validate_asset_identity(session.get(Asset, row["asset_id"]), instrument)
+                verified = q.get("identity") == identity_dimensions(instrument)
+                quote_ccy = "GBP" if q["currency"] == "GBp" else q["currency"]
+                verified = verified and quote_ccy == instrument.currency
+            except (ValueError, TypeError, KeyError):
+                pass
             row.update(
+                identity_verified=verified,
+                quote_identity_verified=verified,
                 market_value=None,
                 market_value_currency=None,
                 market_price=q["price"],

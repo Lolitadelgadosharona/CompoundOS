@@ -51,6 +51,7 @@ class Settings(BaseModel):
     monthly_amount: Decimal = Field(ge=0)
     initial_capital: Decimal = Field(ge=0)
     targets: list[Target] = Field(min_length=1, max_length=30)
+    funding_account_id: UUID | None = None
 
 
 class Selection(BaseModel):
@@ -261,7 +262,7 @@ def committee(cid: UUID, body: CommitteeConsent, session: Session = Depends(get_
     ):
         raise HTTPException(409, "Preview exact evidence and confirm provider disclosure first")
     from apps.api.models import CommitteeSession
-    from apps.api.services.ai_provider import DeepSeekProvider
+    from apps.api.services.ai_provider import DeepSeekProvider, ProviderError
     from apps.api.services.committee_orchestration import run_committee
     from apps.api.services.credential_manager import CredentialError
 
@@ -272,9 +273,9 @@ def committee(cid: UUID, body: CommitteeConsent, session: Session = Depends(get_
     session.commit()
     try:
         run_committee(
-            session, cs, DeepSeekProvider(), prompt_version="contribution-v1", max_retries=0
+            session, cs, DeepSeekProvider(), prompt_version="contribution-v1.1", max_retries=0
         )
-    except (ValueError, RuntimeError, CredentialError) as exc:
+    except (ValueError, RuntimeError, CredentialError, ProviderError) as exc:
         raise HTTPException(
             503, "Committee unavailable or output rejected; approval remains blocked"
         ) from exc

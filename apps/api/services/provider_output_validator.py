@@ -43,9 +43,18 @@ REQUIRED_ROLE_SECTIONS = [
 ]
 
 FORBIDDEN_WORDS = {
-    "buy", "sell", "hold", "short", "long",
-    "execute", "order", "trade", "position",
-    "purchase", "liquidate", "allocate to",
+    "buy",
+    "sell",
+    "hold",
+    "short",
+    "long",
+    "execute",
+    "order",
+    "trade",
+    "position",
+    "purchase",
+    "liquidate",
+    "allocate to",
 }
 
 FORBIDDEN_PHRASES = [
@@ -97,6 +106,7 @@ class ValidationResult:
 def validate_provider_output(
     parsed: dict[str, Any],
     evidence_ids: set[str],
+    registry: dict | None = None,
 ) -> ValidationResult:
     """Validate LLM output against all rules.
 
@@ -114,6 +124,22 @@ def validate_provider_output(
     if structure_errors:
         return ValidationResult.rejected(structure_errors)
     errors.extend(_validate_required_sections(parsed))
+    for key in [
+        "supporting_arguments",
+        "opposing_arguments",
+        "risks",
+        "minority_opinions",
+        "limitations",
+    ]:
+        value = parsed.get(key)
+        if not isinstance(value, list) or any(
+            not isinstance(x, str) or not x.strip() for x in value
+        ):
+            errors.append(ValidationError(key, "Must be an array of nonempty strings"))
+    if not isinstance(parsed.get("policy_alignment"), str):
+        errors.append(ValidationError("policy_alignment", "Must be text"))
+    if errors:
+        return ValidationResult.rejected(errors)
 
     # 3. Opposing arguments non-empty
     errors.extend(_validate_opposing_arguments(parsed))
@@ -125,7 +151,7 @@ def validate_provider_output(
     errors.extend(_validate_direction(parsed))
 
     # 6. Citation validation
-    errors.extend(_validate_citations(parsed, evidence_ids))
+    errors.extend(_validate_citations(parsed, evidence_ids, registry))
 
     # 7. Forbidden language
     errors.extend(_validate_language(parsed))
@@ -163,15 +189,19 @@ def _validate_required_sections(parsed: dict[str, Any]) -> list[ValidationError]
 def _validate_opposing_arguments(parsed: dict[str, Any]) -> list[ValidationError]:
     args = parsed.get("opposing_arguments")
     if isinstance(args, list) and len(args) == 0:
-        return [ValidationError(
-            "opposing_arguments",
-            "opposing_arguments must be non-empty",
-        )]
+        return [
+            ValidationError(
+                "opposing_arguments",
+                "opposing_arguments must be non-empty",
+            )
+        ]
     if isinstance(args, str) and not args.strip():
-        return [ValidationError(
-            "opposing_arguments",
-            "opposing_arguments must be non-empty",
-        )]
+        return [
+            ValidationError(
+                "opposing_arguments",
+                "opposing_arguments must be non-empty",
+            )
+        ]
     return []
 
 
@@ -182,40 +212,55 @@ def _validate_role_sections(parsed: dict[str, Any]) -> list[ValidationError]:
     errors: list[ValidationError] = []
     for role in REQUIRED_ROLE_SECTIONS:
         if role not in sections or sections[role] is None:
-            errors.append(ValidationError(
-                f"sections.{role}", f"Missing role section: {role}"
-            ))
+            errors.append(ValidationError(f"sections.{role}", f"Missing role section: {role}"))
     return errors
 
 
 def _validate_direction(parsed: dict[str, Any]) -> list[ValidationError]:
     direction = parsed.get("recommended_direction", "")
-    if direction not in ALLOWED_DIRECTIONS:
-        return [ValidationError(
-            "recommended_direction",
-            f"Invalid direction '{direction}'. Allowed: {sorted(ALLOWED_DIRECTIONS)}",
-        )]
+    if not isinstance(direction, str) or direction not in ALLOWED_DIRECTIONS:
+        return [
+            ValidationError(
+                "recommended_direction",
+                f"Invalid direction '{direction}'. Allowed: {sorted(ALLOWED_DIRECTIONS)}",
+            )
+        ]
     return []
 
 
-def _validate_citations(
-    parsed: dict[str, Any],
-    evidence_ids: set[str],
-) -> list[ValidationError]:
-    """Validate that all cited evidence IDs exist in the session."""
-    citations = parsed.get("evidence_citations", [])
+def _validate_citations(parsed, evidence_ids, registry=None):
+    citations = parsed.get("evidence_citations")
     if not isinstance(citations, list):
         return [ValidationError("evidence_citations", "Must be a list")]
-
-    errors: list[ValidationError] = []
+    errors = []
+    if not citations and parsed.get("recommended_direction") != "insufficient_evidence":
+        errors.append(
+            ValidationError("evidence_citations", "Evidence-backed direction requires citations")
+        )
     for i, citation in enumerate(citations):
-        if isinstance(citation, dict):
-            evidence_ref = citation.get("evidence_id", "")
-            if evidence_ref and evidence_ref not in evidence_ids:
-                errors.append(ValidationError(
-                    f"evidence_citations[{i}]",
-                    f"Cited evidence_id '{evidence_ref}' not found in session",
-                ))
+        field = f"evidence_citations[{i}]"
+        if (
+            not isinstance(citation, dict)
+            or set(citation) != {"evidence_id", "citation_ref", "claim"}
+            or any(
+                not isinstance(citation.get(k), str) or not citation[k].strip()
+                for k in ("evidence_id", "citation_ref", "claim")
+            )
+        ):
+            errors.append(ValidationError(field, "Citation requires exact ID, ref and claim"))
+            continue
+        eid = citation["evidence_id"]
+        if eid not in evidence_ids:
+            errors.append(
+                ValidationError(field, "Evidence does not belong to this decision context")
+            )
+        elif registry is not None:
+            expected = registry[eid]
+            if (
+                citation["citation_ref"] != expected["citation_ref"]
+                or citation["claim"] != expected["claim"]
+            ):
+                errors.append(ValidationError(field, "Citation/provenance/classification mismatch"))
     return errors
 
 
@@ -225,10 +270,12 @@ def _validate_language(parsed: dict[str, Any]) -> list[ValidationError]:
     errors: list[ValidationError] = []
     for phrase in FORBIDDEN_PHRASES:
         if phrase.lower() in text:
-            errors.append(ValidationError(
-                "language",
-                f"Forbidden phrase: '{phrase}'",
-            ))
+            errors.append(
+                ValidationError(
+                    "language",
+                    f"Forbidden phrase: '{phrase}'",
+                )
+            )
     return errors
 
 
@@ -246,11 +293,13 @@ def _validate_macro_evidence(parsed: dict[str, Any]) -> list[ValidationError]:
         macro = str(macro)
     if isinstance(macro, str) and macro.strip():
         return []
-    return [ValidationError(
-        "sections.macroeconomic_context",
-        "Macroeconomic context section must be present and may declare"
-        " insufficient current macro evidence",
-    )]
+    return [
+        ValidationError(
+            "sections.macroeconomic_context",
+            "Macroeconomic context section must be present and may declare"
+            " insufficient current macro evidence",
+        )
+    ]
 
 
 # ═══════════════════════════════════════════════════════════════════════════
