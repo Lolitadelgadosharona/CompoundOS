@@ -9,7 +9,7 @@ from sqlalchemy import text
 
 pytestmark = pytest.mark.postgres
 
-HEAD_REVISION = "0034_research_run_status"
+HEAD_REVISION = "0035_launch_foundation"
 _PORTFOLIO_CACHE: dict = {}
 
 
@@ -61,7 +61,7 @@ def _setup_position(session, household_id, market_value=Decimal("50000"),
         quantity=Decimal("100"), quantity_source="provider_reported",
         avg_cost=Decimal("500"), avg_cost_currency=currency,
         market_price=Decimal("500"), market_price_currency=currency,
-        market_value=market_value, observed_at=_now(),
+        market_value=market_value, market_value_currency=currency, observed_at=_now(),
         source="csv", is_latest=True,
     )
     session.add(pos)

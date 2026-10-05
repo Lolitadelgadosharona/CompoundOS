@@ -266,12 +266,12 @@ BOND_PROFILES = {
 class BondService:
     """Treasury ETF bond intelligence. Advisory only."""
 
-    SUPPORTED = {"TLT", "IEF", "SHY"}
+    DEMO_SYMBOLS = frozenset(BOND_PROFILES)
 
     @classmethod
     def analyze(cls, symbol: str) -> BondAnalysis | None:
         symbol = symbol.upper()
-        if symbol not in cls.SUPPORTED:
+        if symbol not in cls.DEMO_SYMBOLS:
             return None
         profile = BOND_PROFILES[symbol]
         return BondAnalysis(

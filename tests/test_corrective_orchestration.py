@@ -260,23 +260,27 @@ class TestHeartbeatDuringPhaseA:
         )
         proc.start()
         assert q.get(timeout=15)["stage"] == "ready"
-        barrier.set()
-        time.sleep(0.3)
-        rc = heartbeat_lease(
-            db_session,
-            lease_id=lease["lease_id"],
-            worker_id="whb",
-            fencing_token=lease["fencing_token"],
-        )
-        assert rc == 1
-        db_session.commit()
-        after = db_session.execute(
-            text("SELECT expires_at,heartbeat_at FROM leases WHERE id=:l"),
-            {"l": lease["lease_id"]},
-        ).fetchone()
-        assert after[0] > before
-        assert after[1] is not None
-        _cleanup(proc)
+        # The child remains in phase A until heartbeat verification finishes.
+        # Competing 0.3-second sleeps allowed finalization to release the lease
+        # before the parent heartbeat, which is correctly rejected by production.
+        try:
+            rc = heartbeat_lease(
+                db_session,
+                lease_id=lease["lease_id"],
+                worker_id="whb",
+                fencing_token=lease["fencing_token"],
+            )
+            assert rc == 1
+            db_session.commit()
+            after = db_session.execute(
+                text("SELECT expires_at,heartbeat_at FROM leases WHERE id=:l"),
+                {"l": lease["lease_id"]},
+            ).fetchone()
+            assert after[0] > before
+            assert after[1] is not None
+        finally:
+            barrier.set()
+            _cleanup(proc)
 
 
 # ============================================================================

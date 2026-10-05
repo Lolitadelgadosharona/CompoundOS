@@ -33,6 +33,26 @@ function jsonResponse(body: unknown, status = 200) {
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
+describe("Guardian valuation quality", () => {
+  it.each(["INCOMPLETE", "COST_ESTIMATE"])("does not report a passed risk check for %s", async (quality) => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const u = String(input);
+      if (u.includes("/households/current")) return jsonResponse(household);
+      if (u.includes("/guardian/evaluate")) return jsonResponse({
+        evaluation_run: { ...evalRun, id: null, status: "unavailable", skip_reason: quality },
+        persisted: false, events: [], valuation: { status: quality, reasons: ["Missing trustworthy valuation"] }
+      });
+      if (u.includes("/guardian/checks")) return jsonResponse({ checks: [checkIdentity] });
+      return new Response(null, { status: 404 });
+    }));
+    render(<GuardianClient />);
+    await screen.findByRole("button", { name: /Evaluate all checks/ });
+    await userEvent.click(screen.getByRole("button", { name: /Evaluate all checks/ }));
+    expect(await screen.findByText(/Not evaluated:/)).toBeTruthy();
+    expect(screen.queryByText("No configured thresholds were exceeded.")).toBeNull();
+  });
+});
+
 describe("GuardianClient — 18-state traceability", () => {
 
   // ── State 1: Loading ──
@@ -237,7 +257,7 @@ describe("GuardianClient — 18-state traceability", () => {
     render(<GuardianClient />);
     await screen.findByRole("button", { name: /Evaluate all checks/ });
     await userEvent.click(screen.getByRole("button", { name: /Evaluate all checks/ }));
-    await waitFor(() => { expect(screen.getByText("No configured thresholds were exceeded.")).toBeTruthy(); });
+    await waitFor(() => { expect(screen.getByText(/Not evaluated:/)).toBeTruthy(); });
   });
 
   it("skip: no_portfolio_snapshot", async () => {
@@ -251,7 +271,7 @@ describe("GuardianClient — 18-state traceability", () => {
     render(<GuardianClient />);
     await screen.findByRole("button", { name: /Evaluate all checks/ });
     await userEvent.click(screen.getByRole("button", { name: /Evaluate all checks/ }));
-    await waitFor(() => { expect(screen.getByText("No configured thresholds were exceeded.")).toBeTruthy(); });
+    await waitFor(() => { expect(screen.getByText(/Not evaluated:/)).toBeTruthy(); });
   });
 
   it("skip: zero_total_value", async () => {
@@ -265,7 +285,7 @@ describe("GuardianClient — 18-state traceability", () => {
     render(<GuardianClient />);
     await screen.findByRole("button", { name: /Evaluate all checks/ });
     await userEvent.click(screen.getByRole("button", { name: /Evaluate all checks/ }));
-    await waitFor(() => { expect(screen.getByText("No configured thresholds were exceeded.")).toBeTruthy(); });
+    await waitFor(() => { expect(screen.getByText(/Not evaluated:/)).toBeTruthy(); });
   });
 
   // ── State 8: Event List / State 9: Event Detail ──

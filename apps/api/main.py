@@ -22,6 +22,7 @@ from apps.api.routers.households import router as households_router
 from apps.api.routers.imports import router as imports_router
 from apps.api.routers.intelligence import router as intelligence_router
 from apps.api.routers.investment_os import router as investment_os_router
+from apps.api.routers.launch_v1 import router as launch_router
 from apps.api.routers.notifications import router as notifications_router
 from apps.api.routers.observability import router as observability_router
 from apps.api.routers.policies import router as policies_router
@@ -53,7 +54,7 @@ async def auth_middleware(request: Request, call_next):
     path = request.url.path
 
     # PUBLIC: health endpoints never require auth
-    if path in ("/health", "/api/health"):
+    if path in ("/health", "/api/health", "/api/version"):
         return await call_next(request)
 
     env = os.getenv("ENVIRONMENT", "").strip().lower()
@@ -63,25 +64,37 @@ async def auth_middleware(request: Request, call_next):
 
     # All other endpoints require X-API-Key
     api_key = request.headers.get("X-API-Key")
-    if not api_key:
+    cookie_token = request.cookies.get("compoundos_session") if not api_key else None
+    if cookie_token and request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+        origin = request.headers.get("origin")
+
+        expected_origin = os.getenv("COMPOUNDOS_PUBLIC_ORIGIN") or f"{request.url.scheme}://{request.headers.get('host')}"
+        if not origin or origin != expected_origin:
+            return JSONResponse(status_code=403, content={"detail": "Same-origin request required"})
+    if not api_key and not cookie_token:
         return JSONResponse(
             status_code=401,
             content={"detail": "X-API-Key header required"},
         )
 
-    key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+    key_hash = hashlib.sha256((api_key or cookie_token).encode()).hexdigest()
     from sqlalchemy import text as _t
 
     from apps.api.database import SessionLocal
+
     db = SessionLocal()
     try:
-        row = db.execute(
-            _t(
-                "SELECT id FROM owner_api_keys"
-                " WHERE key_hash = :kh AND revoked_at IS NULL"
-            ),
-            {"kh": key_hash},
-        ).fetchone()
+        if cookie_token:
+            row = db.execute(
+                _t("""SELECT k.id FROM owner_api_keys k JOIN owner_web_sessions s ON s.key_id=k.id
+              WHERE s.token_hash=:kh AND s.expires_at>NOW() AND k.revoked_at IS NULL"""),
+                {"kh": key_hash},
+            ).fetchone()
+        else:
+            row = db.execute(
+                _t("SELECT id FROM owner_api_keys" " WHERE key_hash = :kh AND revoked_at IS NULL"),
+                {"kh": key_hash},
+            ).fetchone()
         if row is None:
             db.execute(
                 _t(
@@ -105,10 +118,7 @@ async def auth_middleware(request: Request, call_next):
                 content={"detail": "Invalid API key"},
             )
         db.execute(
-            _t(
-                "UPDATE owner_api_keys SET last_used_at = NOW()"
-                " WHERE id = :kid"
-            ),
+            _t("UPDATE owner_api_keys SET last_used_at = NOW()" " WHERE id = :kid"),
             {"kid": row[0]},
         )
         db.execute(
@@ -135,6 +145,7 @@ async def auth_middleware(request: Request, call_next):
 
     return await call_next(request)
 
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
@@ -150,8 +161,7 @@ async def validation_exception_handler(
 ) -> JSONResponse:
     """Return validation details without echoing sensitive request values."""
     details = [
-        {"loc": error["loc"], "msg": error["msg"], "type": error["type"]}
-        for error in exc.errors()
+        {"loc": error["loc"], "msg": error["msg"], "type": error["type"]} for error in exc.errors()
     ]
     return JSONResponse(status_code=422, content={"detail": details})
 
@@ -196,3 +206,12 @@ app.include_router(setup_router)
 app.include_router(household_router)
 app.include_router(auth_router)
 app.include_router(observability_router)
+
+app.include_router(launch_router)
+
+
+@app.get("/api/version")
+def version():
+    from apps.api.services.build_info import build_info
+
+    return build_info()

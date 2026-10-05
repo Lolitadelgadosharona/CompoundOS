@@ -16,17 +16,20 @@ pytestmark = pytest.mark.postgres
 
 def _setup_household(db_session):
     hh = uuid4()
-    db_session.execute(text(
-        "INSERT INTO household_profiles (id, singleton_key, household_name,"
-        " base_currency, investment_horizon, liquidity_needs, risk_statement,"
-        " notes, created_at, updated_at)"
-        " VALUES (:id, TRUE, 't', 'USD', 'lt', 'l', 'm', '', NOW(), NOW())"
-        " ON CONFLICT (singleton_key) DO NOTHING"
-    ), {"id": hh})
+    db_session.execute(
+        text(
+            "INSERT INTO household_profiles (id, singleton_key, household_name,"
+            " base_currency, investment_horizon, liquidity_needs, risk_statement,"
+            " notes, created_at, updated_at)"
+            " VALUES (:id, TRUE, 't', 'USD', 'lt', 'l', 'm', '', NOW(), NOW())"
+            " ON CONFLICT (singleton_key) DO NOTHING"
+        ),
+        {"id": hh},
+    )
     db_session.commit()
-    return db_session.execute(text(
-        "SELECT id FROM household_profiles WHERE singleton_key = TRUE"
-    )).fetchone()[0]
+    return db_session.execute(
+        text("SELECT id FROM household_profiles WHERE singleton_key = TRUE")
+    ).fetchone()[0]
 
 
 class TestSymbolResolver:
@@ -43,8 +46,12 @@ class TestSymbolResolver:
 
     def test_all_supported_companies(self):
         cases = {
-            "Nvidia": "NVDA", "Apple": "AAPL", "Microsoft": "MSFT",
-            "Tesla": "TSLA", "Amazon": "AMZN", "Google": "GOOGL",
+            "Nvidia": "NVDA",
+            "Apple": "AAPL",
+            "Microsoft": "MSFT",
+            "Tesla": "TSLA",
+            "Amazon": "AMZN",
+            "Google": "GOOGL",
             "Meta": "META",
         }
         for name, ticker in cases.items():
@@ -64,8 +71,7 @@ class TestSymbolResolver:
 class TestAskCioEndpoint:
     def test_ask_returns_run_id(self, api_client, db_session):
         _setup_household(db_session)
-        r = api_client.post("/api/cio/ask",
-                            json={"question": "Should I buy Nvidia?"})
+        r = api_client.post("/api/cio/ask", json={"question": "Should I buy Nvidia?"})
         assert r.status_code == 200
         data = r.json()
         assert data["symbol"] == "NVDA"
@@ -74,13 +80,11 @@ class TestAskCioEndpoint:
 
     def test_ask_unknown_symbol_400(self, api_client, db_session):
         _setup_household(db_session)
-        r = api_client.post("/api/cio/ask",
-                            json={"question": "asdf qwerty zxcv"})
+        r = api_client.post("/api/cio/ask", json={"question": "asdf qwerty zxcv"})
         assert r.status_code == 400
 
     def test_ask_no_household_404(self, api_client):
-        r = api_client.post("/api/cio/ask",
-                            json={"question": "Should I buy Nvidia?"})
+        r = api_client.post("/api/cio/ask", json={"question": "Should I buy Nvidia?"})
         assert r.status_code == 404
 
 
@@ -88,22 +92,29 @@ class TestQuestionSaved:
     def test_question_saved_to_parameters(self, db_session):
         hh = _setup_household(db_session)
         result = DashboardResearchService.create_request(
-            db_session, "NVDA", hh, title="Should I buy Nvidia?",
+            db_session,
+            "NVDA",
+            hh,
+            title="Should I buy Nvidia?",
         )
-        row = db_session.execute(text(
-            "SELECT parameters FROM research_requests WHERE id = :id"
-        ), {"id": UUID(result["request_id"])}).fetchone()
+        row = db_session.execute(
+            text("SELECT parameters FROM research_requests WHERE id = :id"),
+            {"id": UUID(result["request_id"])},
+        ).fetchone()
         assert row[0]["question"] == "Should I buy Nvidia?"
         assert row[0]["symbol"] == "NVDA"
 
     def test_default_title_backward_compatible(self, db_session):
         hh = _setup_household(db_session)
         result = DashboardResearchService.create_request(
-            db_session, "AAPL", hh,
+            db_session,
+            "AAPL",
+            hh,
         )
-        row = db_session.execute(text(
-            "SELECT parameters FROM research_requests WHERE id = :id"
-        ), {"id": UUID(result["request_id"])}).fetchone()
+        row = db_session.execute(
+            text("SELECT parameters FROM research_requests WHERE id = :id"),
+            {"id": UUID(result["request_id"])},
+        ).fetchone()
         assert row[0] is None  # no title → no parameters
 
 
@@ -113,11 +124,14 @@ class TestDecisionIdInStatus:
             PipelineProgressTracker,
             PipelineState,
         )
+
         rid = uuid4()
         PipelineProgressTracker.create(rid)
         PipelineProgressTracker.update(
-            rid, PipelineState.COMPLETE,
-            memo_id="memo-123", decision_id="decision-456",
+            rid,
+            PipelineState.COMPLETE,
+            memo_id="memo-123",
+            decision_id="decision-456",
         )
         r = api_client.get(f"/api/research/{rid}/status")
         assert r.status_code == 200
@@ -139,8 +153,7 @@ class TestAskCioAsync:
             calls.append(args)
 
         monkeypatch.setattr(cio, "execute_pipeline", slow_pipeline)
-        r = api_client.post("/api/cio/ask",
-                            json={"question": "Should I buy Nvidia?"})
+        r = api_client.post("/api/cio/ask", json={"question": "Should I buy Nvidia?"})
         assert r.status_code == 200
         body = r.json()
         # "pending" (not "completed") proves the endpoint returned before
@@ -159,7 +172,10 @@ class TestAskCioAsync:
         assert not inspect.iscoroutinefunction(execute_pipeline)
 
     def test_background_execution_updates_tracker(
-        self, api_client, db_session, monkeypatch,
+        self,
+        api_client,
+        db_session,
+        monkeypatch,
     ):
         """The background task drives the tracker to completion."""
         _setup_household(db_session)
@@ -171,13 +187,14 @@ class TestAskCioAsync:
 
         def fake_pipeline(run_id, symbol, household_id):
             PipelineProgressTracker.update(
-                run_id, PipelineState.COMPLETE,
-                memo_id="memo-x", decision_id="decision-y",
+                run_id,
+                PipelineState.COMPLETE,
+                memo_id="memo-x",
+                decision_id="decision-y",
             )
 
         monkeypatch.setattr(cio, "execute_pipeline", fake_pipeline)
-        r = api_client.post("/api/cio/ask",
-                            json={"question": "Should I buy Nvidia?"})
+        r = api_client.post("/api/cio/ask", json={"question": "Should I buy Nvidia?"})
         run_id = r.json()["run_id"]
         s = api_client.get(f"/api/research/{run_id}/status")
         data = s.json()
@@ -205,9 +222,7 @@ class TestResearchPage:
         _setup_household(db_session)
         r = api_client.get("/research")
         assert r.status_code == 200
-        count = db_session.execute(text(
-            "SELECT COUNT(*) FROM llm_execution_log"
-        )).scalar()
+        count = db_session.execute(text("SELECT COUNT(*) FROM llm_execution_log")).scalar()
         assert count == 0
 
     def test_no_secrets(self, api_client):
@@ -216,3 +231,16 @@ class TestResearchPage:
         lower = r.text.lower()
         for secret in ("password", "gho_", "sk-ss-v1", "x-api-key"):
             assert secret not in lower
+
+
+@pytest.fixture(autouse=True)
+def canonical_provider_fixture(monkeypatch):
+    from tests.test_launch_v1 import SyntheticProvider
+
+    provider = SyntheticProvider()
+    monkeypatch.setattr(
+        "apps.api.services.launch_providers.get_instrument_provider", lambda: provider
+    )
+    monkeypatch.setattr(
+        "apps.api.services.symbol_resolver.get_instrument_provider", lambda: provider
+    )

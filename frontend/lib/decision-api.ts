@@ -142,7 +142,7 @@ export type ArchiveResponse = ConfirmResponse & {
   archive_reason: string | null;
 };
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 const BASE_PATH = "/api/decisions";
 
 class DecisionApiError extends Error {

@@ -507,24 +507,13 @@ class EvidenceCollector:
 
     def _load_portfolio(self, session: Session,
                         household_id: UUID) -> dict:
-        rows = session.execute(
-            text(
-                "SELECT a.symbol, p.market_value, a.currency"
-                " FROM positions p JOIN assets a ON p.asset_id = a.id"
-                " JOIN accounts ac ON p.account_id = ac.id"
-                " JOIN portfolios pf ON ac.portfolio_id = pf.id"
-                " WHERE pf.household_id = :hid AND p.is_latest = TRUE"
-            ),
-            {"hid": household_id},
-        ).fetchall()
-        total = sum(r[1] for r in rows if r[1]) if rows else 0
-        return {
-            "total_value": str(total),
-            "positions": [
-                {"symbol": r[0], "value": str(r[1]), "currency": r[2]}
-                for r in rows
-            ],
-        }
+        from apps.api.services.valuation import load_valuation
+        v = load_valuation(session, household_id)
+        return {**v.contract(), "total_value": str(v.total()) if v.total() is not None else None,
+                "positions": [{"symbol": e.get("symbol"), "value": (str(e["base_value"])
+                                         if e["base_value"] is not None else None),
+                               "currency": v.base_currency, "quality_status": e["quality_status"]}
+                              for e in v.entries if e["kind"] == "position"]}
 
     def _load_guardian(self, session: Session,
                        household_id: UUID) -> dict:

@@ -75,6 +75,8 @@ class PortfolioIntelligenceService:
         if not holdings:
             return PortfolioContext()
 
+        if len({h.currency for h in holdings}) > 1:
+            raise ValueError("Multi-currency analysis requires the common valuation contract")
         total = sum(h.market_value for h in holdings)
         alloc = PortfolioIntelligenceService._calculate_allocation(
             holdings, total,

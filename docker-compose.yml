@@ -4,7 +4,12 @@
 
 services:
   api:
-    build: .
+    build:
+      context: .
+      args:
+        GIT_SHA: ${GIT_SHA:?Exact commit SHA required}
+        BUILD_TIMESTAMP: ${BUILD_TIMESTAMP:?UTC timestamp required}
+        APP_VERSION: ${APP_VERSION:-0.2.0}
     container_name: compoundos-api
     restart: unless-stopped
     ports:
@@ -14,6 +19,8 @@ services:
     environment:
       - DATABASE_URL=postgresql+psycopg://compoundos:${DB_PASSWORD:?required}@db:5432/compoundos
       - REDIS_URL=redis://redis:6379/0
+      - COMPOUNDOS_PUBLIC_ORIGIN=${COMPOUNDOS_PUBLIC_ORIGIN:?Owner HTTPS origin required}
+      - COMPOUNDOS_RUN_MIGRATIONS=0
     depends_on:
       db:
         condition: service_healthy
@@ -45,10 +52,28 @@ services:
     volumes:
       - redisdata:/data
 
+  web:
+    build:
+      context: ./frontend
+      args:
+        GIT_SHA: ${GIT_SHA:?Exact commit SHA required}
+        BUILD_TIMESTAMP: ${BUILD_TIMESTAMP:?UTC timestamp required}
+        APP_VERSION: ${APP_VERSION:-0.2.0}
+    restart: unless-stopped
+    environment:
+      API_INTERNAL_URL: http://api:8000
+    depends_on:
+      - api
+
   caddy:
     image: caddy:2-alpine
     container_name: compoundos-caddy
     restart: unless-stopped
+    environment:
+      CADDY_DOMAIN: ${CADDY_DOMAIN:?HTTPS domain required}
+    depends_on:
+      - api
+      - web
     ports:
       - "80:80"
       - "443:443"

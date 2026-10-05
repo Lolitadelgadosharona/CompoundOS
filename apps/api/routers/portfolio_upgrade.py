@@ -28,10 +28,15 @@ class AnalyticsRequest(BaseModel):
 @router.post("/analytics")
 def portfolio_analytics(body: AnalyticsRequest):
     pa = AnalyticsService.analyze(
-        body.returns, body.benchmark_returns,
-        body.risk_free, body.period,
+        body.returns,
+        body.benchmark_returns,
+        body.risk_free,
+        body.period,
     )
     return {
+        "classification": "EXPERIMENTAL_OWNER_INPUT_METRICS",
+        "recommendation_ready": False,
+        "limitations": ["Legacy calculations are not validated backtest evidence"],
         "sharpe_ratio": pa.sharpe_ratio,
         "sharpe_rating": pa.sharpe_rating,
         "max_drawdown_pct": pa.max_drawdown_pct,
@@ -54,6 +59,8 @@ class BenchmarkRequest(BaseModel):
 def benchmark_compare(body: BenchmarkRequest):
     br = BenchmarkService.compare(body.portfolio_return_pct, body.period)
     return {
+        "classification": "DEMO",
+        "recommendation_ready": False,
         "portfolio_return": br.portfolio_return_pct,
         "sp500_return": br.sp500_return_pct,
         "balanced_return": br.balanced_return_pct,
@@ -82,11 +89,18 @@ class BriefRequest(BaseModel):
 @router.post("/brief")
 def committee_brief(body: BriefRequest):
     brief = CommitteeBriefService.generate(
-        body.symbol, body.recommendation, body.confidence,
-        body.quality_score, body.quality_label,
-        body.votes, body.key_facts, body.risks,
+        body.symbol,
+        body.recommendation,
+        body.confidence,
+        body.quality_score,
+        body.quality_label,
+        body.votes,
+        body.key_facts,
+        body.risks,
     )
     return {
+        "classification": "OWNER_INPUT_RENDERING",
+        "recommendation_ready": False,
         "symbol": brief.symbol,
         "recommendation": brief.recommendation,
         "confidence": brief.confidence,
@@ -110,6 +124,8 @@ def bond_analysis(symbol: str):
     if result is None:
         return {"error": f"Unsupported bond: {symbol}"}
     return {
+        "classification": "DEMO",
+        "recommendation_ready": False,
         "symbol": result.symbol,
         "name": result.name,
         "yield_pct": result.yield_pct,
@@ -127,4 +143,8 @@ class BondPortfolioRequest(BaseModel):
 
 @router.post("/bond/portfolio")
 def bond_portfolio(body: BondPortfolioRequest):
-    return BondService.portfolio_context(body.positions)
+    return {
+        "classification": "DEMO",
+        "recommendation_ready": False,
+        **BondService.portfolio_context(body.positions),
+    }

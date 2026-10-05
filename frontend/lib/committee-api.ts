@@ -146,14 +146,14 @@ export class CommitteeNetworkError extends Error {
 // Helpers
 // ═══════════════════════════════════════════════════════════════════════════
 
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+const BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 function url(path: string, params?: Record<string, string>): string {
-  const u = new URL(path, BASE);
+  const u = new URL(path, BASE || "http://relative.invalid");
   if (params) {
     Object.entries(params).forEach(([k, v]) => u.searchParams.set(k, v));
   }
-  return u.toString();
+  return BASE ? u.toString() : u.pathname + u.search;
 }
 
 async function request<T>(

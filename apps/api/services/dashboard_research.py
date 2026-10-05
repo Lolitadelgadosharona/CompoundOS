@@ -37,6 +37,8 @@ class DashboardResearchService:
         is also stored in research_requests.parameters (JSONB) for
         provenance — no schema change.
         """
+        from apps.api.services.instrument_resolver import normalize_symbol
+        symbol = normalize_symbol(symbol)
         idea_title = title or f"Research: {symbol}"
         # Find or create investment idea
         idea_id = uuid4()

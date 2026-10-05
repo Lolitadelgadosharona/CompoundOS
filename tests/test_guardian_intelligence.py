@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 pytestmark = pytest.mark.postgres
 
-HEAD_REVISION = "0034_research_run_status"
+HEAD_REVISION = "0035_launch_foundation"
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -75,7 +75,7 @@ def _setup_portfolio_data(
         quantity=Decimal("100"), quantity_source="provider_reported",
         avg_cost=Decimal("500"), avg_cost_currency="USD",
         market_price=Decimal("500"), market_price_currency="USD",
-        market_value=market_value,
+        market_value=market_value, market_value_currency="USD",
         observed_at=_now(), source="csv", is_latest=True,
     )
     session.add(position)

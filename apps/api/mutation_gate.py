@@ -14,7 +14,7 @@ from apps.api.config import get_database_url
 
 MUTATION_METHODS = {"POST", "PATCH", "PUT", "DELETE"}
 ALLOWED_PATHS = {"/api/health/live", "/api/health/ready", "/api/health/full"}
-EXPECTED_HEAD = "0034_research_run_status"
+EXPECTED_HEAD = "0035_launch_foundation"
 
 
 async def mutation_gate(request: Request, call_next):
@@ -24,14 +24,23 @@ async def mutation_gate(request: Request, call_next):
     if request.url.path in ALLOWED_PATHS:
         return await call_next(request)
 
+    import os
+
+    from apps.api.services.build_info import build_info
+
+    if (
+        os.getenv("ENVIRONMENT", "").lower() not in {"development", "test"}
+        and not build_info()["traceable"]
+    ):
+        return JSONResponse(
+            status_code=503, content={"detail": "Untraceable production build; mutations blocked"}
+        )
     try:
         engine = create_engine(get_database_url())
         try:
             with engine.connect() as conn:
                 conn.execute(text("SELECT 1"))
-                row = conn.execute(text(
-                    "SELECT version_num FROM alembic_version"
-                )).fetchone()
+                row = conn.execute(text("SELECT version_num FROM alembic_version")).fetchone()
                 if not row or row[0] != EXPECTED_HEAD:
                     return JSONResponse(
                         status_code=503,

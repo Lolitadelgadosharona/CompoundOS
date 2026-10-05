@@ -68,8 +68,13 @@ async def dashboard(request: Request,
     snap = dashboard_service.build_dashboard(session, hid)
     providers, ai_health = _runtime_health(session)
     return templates.TemplateResponse(request, "dashboard.html", {
-        "net_worth": f"${snap.net_worth.total_value}",
-        "cash_position": dashboard_service.cash_position(session, hid),
+        "valuation": snap.valuation,
+        "net_worth": (
+            f"{snap.net_worth.base_currency} "
+            f"{snap.net_worth.total_value or 'Incomplete valuation'} "
+            f"({snap.net_worth.quality_status})"
+        ),
+        "cash_position": snap.cash_position,
         "allocation": dashboard_service.allocation_context(snap.allocation),
         "pending_decisions": dashboard_service.list_pending_decisions_detail(
             session, hid),

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
+<p role="status">Valuation: {{ summary.status }}. Manual cost estimates are not live market prices. {% for reason in summary.reasons %}{{ reason }}; {% endfor %}</p>
 <h1>Portfolio</h1>
 
 <!-- Section 1: Wealth Summary -->
@@ -8,23 +9,23 @@
     <div class="card-grid">
         <div class="card">
             <h3>Net Worth</h3>
-            <div class="card-value">${{ summary.net_worth or "Not configured" }}</div>
+            <div class="card-value">{{ summary.base_currency }} {{ summary.net_worth if summary.net_worth is not none else ("Incomplete valuation" if summary.status == "INCOMPLETE" else "Not configured") }}</div>
         </div>
         <div class="card">
             <h3>Stocks</h3>
-            <div class="card-value">${{ summary.stocks or "—" }}</div>
+            <div class="card-value">{{ summary.base_currency }} {{ summary.stocks or "—" }}</div>
         </div>
         <div class="card">
             <h3>ETF</h3>
-            <div class="card-value">${{ summary.etf or "—" }}</div>
+            <div class="card-value">{{ summary.base_currency }} {{ summary.etf or "—" }}</div>
         </div>
         <div class="card">
             <h3>Cash</h3>
-            <div class="card-value">${{ summary.cash or "—" }}</div>
+            <div class="card-value">{{ summary.base_currency }} {{ summary.cash or "—" }}</div>
         </div>
         <div class="card">
             <h3>Other</h3>
-            <div class="card-value">${{ summary.other or "—" }}</div>
+            <div class="card-value">{{ summary.base_currency }} {{ summary.other or "—" }}</div>
         </div>
     </div>
     {% if summary.capital_bucket_summary %}
@@ -33,7 +34,7 @@
         {% for b in summary.capital_bucket_summary %}
         <div class="mini-bar">
             <span>{{ b.bucket }}</span>
-            <span>${{ b.value }}</span>
+            <span>{{ summary.base_currency }} {{ b.value }}</span>
         </div>
         {% endfor %}
     </div>

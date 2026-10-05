@@ -17,7 +17,11 @@ class AllocationEntry(BaseModel):
 
 
 class NetWorth(BaseModel):
-    total_value: str
+    total_value: Optional[str]
+    base_currency: str = "USD"
+    quality_status: str = "COMPLETE"
+    recommendation_ready: bool = True
+    quality_reasons: list[str] = Field(default_factory=list)
     by_currency: dict[str, str] = Field(default_factory=dict)
     by_account_type: dict[str, str] = Field(default_factory=dict)
     unconverted_currencies: list[str] = Field(default_factory=list)
@@ -25,6 +29,8 @@ class NetWorth(BaseModel):
 
 
 class Allocation(BaseModel):
+    quality_status: str = "COMPLETE"
+    weight_scope: str = "positions_only"
     by_asset_class: dict[str, AllocationEntry] = Field(default_factory=dict)
     by_bucket: dict[str, AllocationEntry] = Field(default_factory=dict)
     by_currency: dict[str, AllocationEntry] = Field(default_factory=dict)
@@ -85,6 +91,8 @@ class ActivityFeed(BaseModel):
 
 
 class DashboardSnapshot(BaseModel):
+    valuation: dict = Field(default_factory=dict)
+    cash_position: Optional[str] = None
     net_worth: NetWorth
     allocation: Allocation
     policy_compliance: PolicyCompliance

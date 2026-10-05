@@ -3,8 +3,12 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:?Build requires exact commit SHA}
+        BUILD_TIMESTAMP: ${BUILD_TIMESTAMP:?Build requires UTC timestamp}
+        APP_VERSION: ${APP_VERSION:-0.2.0}
     environment:
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://127.0.0.1:8000}
+      API_INTERNAL_URL: http://api:8000
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
@@ -24,9 +28,15 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:?Build requires exact commit SHA}
+        BUILD_TIMESTAMP: ${BUILD_TIMESTAMP:?Build requires UTC timestamp}
+        APP_VERSION: ${APP_VERSION:-0.2.0}
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-compoundos}:${POSTGRES_PASSWORD:-local-development-only}@postgres:5432/${POSTGRES_DB:-compoundos}
       REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      COMPOUNDOS_PUBLIC_ORIGIN: ${COMPOUNDOS_PUBLIC_ORIGIN:?Set HTTPS Owner origin}
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -48,6 +58,10 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:?Build requires exact commit SHA}
+        BUILD_TIMESTAMP: ${BUILD_TIMESTAMP:?Build requires UTC timestamp}
+        APP_VERSION: ${APP_VERSION:-0.2.0}
     command: ["alembic", "upgrade", "head"]
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-compoundos}:${POSTGRES_PASSWORD:-local-development-only}@postgres:5432/${POSTGRES_DB:-compoundos}

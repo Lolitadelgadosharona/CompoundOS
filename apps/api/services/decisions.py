@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
 
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -81,7 +82,6 @@ class DecisionIncompleteError(Exception):
     pass
 
 
-
 class DecisionLifecycleError(Exception):
     pass
 
@@ -108,9 +108,7 @@ def _require_decision(
     *,
     for_update: bool = False,
 ) -> Decision:
-    decision = get_decision_for_household(
-        session, decision_id, household_id, for_update=for_update
-    )
+    decision = get_decision_for_household(session, decision_id, household_id, for_update=for_update)
     if decision is None:
         raise DecisionNotFoundError
     return decision
@@ -205,20 +203,14 @@ def update_draft(
         raise NoDecisionChangesError
 
     with _ensure_transaction(session):
-        decision = _require_decision(
-            session, decision_id, household_id, for_update=True
-        )
+        decision = _require_decision(session, decision_id, household_id, for_update=True)
         if decision.status != "draft":
             raise DecisionLifecycleError
         draft = _require_draft(session, decision_id, for_update=True)
         if draft.revision != payload.expected_revision:
             raise DecisionConflictError
 
-        changed = sorted(
-            name
-            for name, value in submitted.items()
-            if getattr(draft, name) != value
-        )
+        changed = sorted(name for name, value in submitted.items() if getattr(draft, name) != value)
         if not changed:
             raise NoDecisionChangesError
 
@@ -243,14 +235,10 @@ def update_draft(
 # ---------------------------------------------------------------------------
 
 
-def discard_draft(
-    session: Session, decision_id: UUID, payload: DiscardDecisionRequest
-) -> None:
+def discard_draft(session: Session, decision_id: UUID, payload: DiscardDecisionRequest) -> None:
     household_id = _require_household(session)
     with _ensure_transaction(session):
-        decision = _require_decision(
-            session, decision_id, household_id, for_update=True
-        )
+        decision = _require_decision(session, decision_id, household_id, for_update=True)
         if decision.status != "draft":
             raise DecisionLifecycleError
         draft = _require_draft(session, decision_id, for_update=True)
@@ -286,9 +274,7 @@ def confirm_draft(
     try:
         with _ensure_transaction(session):
             # Lock Policy first (OD-S3-5)
-            policy = get_policy_for_household(
-                session, household_id, for_update=True
-            )
+            policy = get_policy_for_household(session, household_id, for_update=True)
             if policy is None:
                 raise PolicyNotFoundError
             current_published = get_current_published_version(session, policy.id)
@@ -296,14 +282,44 @@ def confirm_draft(
                 raise PublishedPolicyNotFoundError
 
             # Lock Decision and Draft
-            decision = _require_decision(
-                session, decision_id, household_id, for_update=True
-            )
+            decision = _require_decision(session, decision_id, household_id, for_update=True)
             if decision.status != "draft":
                 raise DecisionLifecycleError
             draft = _require_draft(session, decision_id, for_update=True)
             if draft.revision != payload.expected_revision:
                 raise DecisionConflictError
+
+            # Revalidate current valuation for research-generated recommendations;
+            # human-authored journal entries retain their existing lifecycle.
+            research_source = session.execute(
+                text("SELECT run_id FROM decision_research_sources WHERE decision_id=:id"),
+                {"id": decision_id},
+            ).scalar()
+            if session.execute(
+                text(
+                    (
+                        "SELECT 1 FROM audit_events WHERE entity_id=:id AND "
+                        "action='decision.research.rejected'"
+                    )
+                ),
+                {"id": decision_id},
+            ).scalar():
+                from apps.api.services.valuation import RecommendationUnavailable
+
+                raise RecommendationUnavailable("Research review rejected")
+            if research_source or "research_run_id=" in (draft.evidence_or_sources or ""):
+                from apps.api.services.valuation import require_recommendation_ready
+
+                require_recommendation_ready(session, household_id)
+                from apps.api.services.launch_investment import require_research_target
+
+                require_research_target(session, research_source)
+
+            from apps.api.services.launch_investment import guard_candidate_confirmation
+
+            guard_candidate_confirmation(
+                session, household_id, decision_id, current_published.id, draft
+            )
 
             # Validate required fields
             for field_name in CONFIRM_REQUIRED_FIELDS:
@@ -430,9 +446,7 @@ def archive_decision(
 ) -> Decision:
     household_id = _require_household(session)
     with _ensure_transaction(session):
-        decision = _require_decision(
-            session, decision_id, household_id, for_update=True
-        )
+        decision = _require_decision(session, decision_id, household_id, for_update=True)
         if decision.status != "confirmed":
             raise DecisionLifecycleError
         decision.status = "archived"
@@ -452,9 +466,7 @@ def archive_decision(
 def unarchive_decision(session: Session, decision_id: UUID) -> Decision:
     household_id = _require_household(session)
     with _ensure_transaction(session):
-        decision = _require_decision(
-            session, decision_id, household_id, for_update=True
-        )
+        decision = _require_decision(session, decision_id, household_id, for_update=True)
         if decision.status != "archived":
             raise DecisionLifecycleError
         decision.status = "confirmed"
@@ -482,9 +494,7 @@ def append_correction(
     household_id = _require_household(session)
     try:
         with _ensure_transaction(session):
-            decision = _require_decision(
-                session, decision_id, household_id, for_update=True
-            )
+            decision = _require_decision(session, decision_id, household_id, for_update=True)
             if decision.status not in ("confirmed", "archived"):
                 raise DecisionLifecycleError
 
@@ -535,9 +545,7 @@ def append_correction(
         raise
 
 
-def read_corrections(
-    session: Session, decision_id: UUID
-) -> list[DecisionCorrection]:
+def read_corrections(session: Session, decision_id: UUID) -> list[DecisionCorrection]:
     household_id = _require_household(session)
     _require_decision(session, decision_id, household_id)
     return list_corrections(session, decision_id)

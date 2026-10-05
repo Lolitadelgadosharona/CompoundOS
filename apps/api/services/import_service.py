@@ -26,6 +26,7 @@ from apps.api.models import (
     Account,
     CashBalance,
     DataSource,
+    Portfolio,
     Position,
     Transaction,
 )
@@ -34,6 +35,7 @@ from apps.api.models import (
 def _parse_position_row(row: dict[str, str]) -> dict:
     """Parse position CSV row into DB-ready kwargs."""
     from apps.api.importers.csv_parser import parse_csv_datetime, parse_csv_decimal
+
     return {
         "source_record_id": row["source_record_id"].strip(),
         "quantity": Decimal(row["quantity"].strip()),
@@ -45,6 +47,7 @@ def _parse_position_row(row: dict[str, str]) -> dict:
 
 def _parse_transaction_row(row: dict[str, str]) -> dict:
     from apps.api.importers.csv_parser import parse_csv_datetime, parse_csv_decimal
+
     return {
         "source_record_id": row["source_record_id"].strip(),
         "transaction_type": row["transaction_type"].strip(),
@@ -59,6 +62,7 @@ def _parse_transaction_row(row: dict[str, str]) -> dict:
 
 def _parse_balance_row(row: dict[str, str]) -> dict:
     from apps.api.importers.csv_parser import parse_csv_datetime
+
     return {
         "source_record_id": row["source_record_id"].strip(),
         "amount": Decimal(row["amount"].strip()),
@@ -67,11 +71,21 @@ def _parse_balance_row(row: dict[str, str]) -> dict:
 
 
 def _resolve_account(
-    session: Session, provider_account_id: str,
+    session: Session,
+    provider_account_id: str,
 ) -> Optional[Account]:
-    return session.scalar(
+    account = session.scalar(
         select(Account).where(Account.provider_account_id == provider_account_id)
     )
+    if account:
+        from apps.api.services.launch_investment import lock_household
+
+        household_id = session.scalar(
+            select(Portfolio.household_id).where(Portfolio.id == account.portfolio_id)
+        )
+        if household_id:
+            lock_household(session, household_id)
+    return account
 
 
 def _upsert_position(
@@ -84,10 +98,12 @@ def _upsert_position(
 ) -> tuple[bool, bool]:
     """Upsert a position. Returns (was_created, was_updated)."""
     existing = session.scalar(
-        select(Position).where(
+        select(Position)
+        .where(
             Position.source == source,
             Position.source_record_id == row_data["source_record_id"],
-        ).with_for_update()
+        )
+        .with_for_update()
     )
 
     if existing is not None:
@@ -135,10 +151,12 @@ def _upsert_cash_balance(
     currency: str,
 ) -> tuple[bool, bool]:
     existing = session.scalar(
-        select(CashBalance).where(
+        select(CashBalance)
+        .where(
             CashBalance.source == source,
             CashBalance.source_record_id == row_data["source_record_id"],
-        ).with_for_update()
+        )
+        .with_for_update()
     )
 
     if existing is not None:
@@ -180,13 +198,23 @@ def import_positions_from_csv(
                 errors=len(validation.errors),
                 warnings=len(validation.warnings),
             ),
-            errors=[{
-                "row_index": e.row_index, "column": e.column, "message": e.message,
-            } for e in validation.errors],
-            warnings=[{
-                "code": "VALIDATION", "row_index": w.row_index,
-                "column": w.column, "message": w.message,
-            } for w in validation.warnings],
+            errors=[
+                {
+                    "row_index": e.row_index,
+                    "column": e.column,
+                    "message": e.message,
+                }
+                for e in validation.errors
+            ],
+            warnings=[
+                {
+                    "code": "VALIDATION",
+                    "row_index": w.row_index,
+                    "column": w.column,
+                    "message": w.message,
+                }
+                for w in validation.warnings
+            ],
         )
     source_display = "csv"
     summary = ImportSummary(rows_processed=len(rows))
@@ -204,7 +232,8 @@ def import_positions_from_csv(
         account = _resolve_account(session, row["account_provider_id"].strip())
         if account is None:
             validation.error(
-                i, "account_provider_id",
+                i,
+                "account_provider_id",
                 f"Account not found: {row['account_provider_id']!r}",
             )
             continue
@@ -218,7 +247,13 @@ def import_positions_from_csv(
 
         # Asset resolution
         asset_before = resolve_asset(
-            session, symbol, exchange, isin, currency, name, asset_type,
+            session,
+            symbol,
+            exchange,
+            isin,
+            currency,
+            name,
+            asset_type,
         )
         if asset_before.confidence == "unverified":
             assets_created_count += 1
@@ -226,7 +261,12 @@ def import_positions_from_csv(
             assets_resolved.add(str(asset_before.id))
 
         created, updated = _upsert_position(
-            session, account.id, asset_before.id, source_display, parsed, currency,
+            session,
+            account.id,
+            asset_before.id,
+            source_display,
+            parsed,
+            currency,
         )
         if created:
             summary.positions_created += 1
@@ -244,13 +284,23 @@ def import_positions_from_csv(
                 errors=len(validation.errors),
                 warnings=len(validation.warnings),
             ),
-            errors=[{
-                "row_index": e.row_index, "column": e.column, "message": e.message,
-            } for e in validation.errors],
-            warnings=[{
-                "code": "VALIDATION", "row_index": w.row_index,
-                "column": w.column, "message": w.message,
-            } for w in validation.warnings],
+            errors=[
+                {
+                    "row_index": e.row_index,
+                    "column": e.column,
+                    "message": e.message,
+                }
+                for e in validation.errors
+            ],
+            warnings=[
+                {
+                    "code": "VALIDATION",
+                    "row_index": w.row_index,
+                    "column": w.column,
+                    "message": w.message,
+                }
+                for w in validation.warnings
+            ],
         )
 
     summary.assets_resolved = len(assets_resolved)
@@ -259,9 +309,7 @@ def import_positions_from_csv(
     summary.errors = len(validation.errors)
 
     # Update data source last_import_at
-    ds = session.scalar(
-        select(DataSource).where(DataSource.source_key == source_key)
-    )
+    ds = session.scalar(select(DataSource).where(DataSource.source_key == source_key))
     if ds is not None:
         ds.last_import_at = datetime.now(timezone.utc)
 
@@ -269,10 +317,15 @@ def import_positions_from_csv(
         source_key=source_key,
         imported_at=datetime.now(timezone.utc),
         summary=summary,
-        warnings=[{
-            "code": "VALIDATION", "row_index": w.row_index,
-            "column": w.column, "message": w.message,
-        } for w in validation.warnings],
+        warnings=[
+            {
+                "code": "VALIDATION",
+                "row_index": w.row_index,
+                "column": w.column,
+                "message": w.message,
+            }
+            for w in validation.warnings
+        ],
     )
 
 
@@ -294,13 +347,23 @@ def import_transactions_from_csv(
                 errors=len(validation.errors),
                 warnings=len(validation.warnings),
             ),
-            errors=[{
-                "row_index": e.row_index, "column": e.column, "message": e.message,
-            } for e in validation.errors],
-            warnings=[{
-                "code": "VALIDATION", "row_index": w.row_index,
-                "column": w.column, "message": w.message,
-            } for w in validation.warnings],
+            errors=[
+                {
+                    "row_index": e.row_index,
+                    "column": e.column,
+                    "message": e.message,
+                }
+                for e in validation.errors
+            ],
+            warnings=[
+                {
+                    "code": "VALIDATION",
+                    "row_index": w.row_index,
+                    "column": w.column,
+                    "message": w.message,
+                }
+                for w in validation.warnings
+            ],
         )
 
     summary = ImportSummary(rows_processed=len(rows))
@@ -323,7 +386,8 @@ def import_transactions_from_csv(
         account = _resolve_account(session, row["account_provider_id"].strip())
         if account is None:
             validation.error(
-                i, "account_provider_id",
+                i,
+                "account_provider_id",
                 f"Account not found: {row['account_provider_id']!r}",
             )
             continue
@@ -345,7 +409,13 @@ def import_transactions_from_csv(
             name = row.get("name", "").strip() or None
             asset_type = row.get("asset_type", "").strip() or None
             asset = resolve_asset(
-                session, symbol, exchange, isin, currency, name, asset_type,
+                session,
+                symbol,
+                exchange,
+                isin,
+                currency,
+                name,
+                asset_type,
             )
             asset_id = asset.id
 
@@ -378,17 +448,20 @@ def import_transactions_from_csv(
                 errors=len(validation.errors),
                 transactions_skipped=summary.transactions_skipped,
             ),
-            errors=[{
-                "row_index": e.row_index, "column": e.column, "message": e.message,
-            } for e in validation.errors],
+            errors=[
+                {
+                    "row_index": e.row_index,
+                    "column": e.column,
+                    "message": e.message,
+                }
+                for e in validation.errors
+            ],
         )
 
     summary.warnings = len(validation.warnings)
     summary.errors = len(validation.errors)
 
-    ds = session.scalar(
-        select(DataSource).where(DataSource.source_key == source_key)
-    )
+    ds = session.scalar(select(DataSource).where(DataSource.source_key == source_key))
     if ds is not None:
         ds.last_import_at = datetime.now(timezone.utc)
 
@@ -396,10 +469,15 @@ def import_transactions_from_csv(
         source_key=source_key,
         imported_at=datetime.now(timezone.utc),
         summary=summary,
-        warnings=[{
-            "code": "VALIDATION", "row_index": w.row_index,
-            "column": w.column, "message": w.message,
-        } for w in validation.warnings],
+        warnings=[
+            {
+                "code": "VALIDATION",
+                "row_index": w.row_index,
+                "column": w.column,
+                "message": w.message,
+            }
+            for w in validation.warnings
+        ],
     )
 
 
@@ -421,9 +499,14 @@ def import_cash_balances_from_csv(
                 errors=len(validation.errors),
                 warnings=len(validation.warnings),
             ),
-            errors=[{
-                "row_index": e.row_index, "column": e.column, "message": e.message,
-            } for e in validation.errors],
+            errors=[
+                {
+                    "row_index": e.row_index,
+                    "column": e.column,
+                    "message": e.message,
+                }
+                for e in validation.errors
+            ],
         )
 
     summary = ImportSummary(rows_processed=len(rows))
@@ -433,7 +516,8 @@ def import_cash_balances_from_csv(
         account = _resolve_account(session, row["account_provider_id"].strip())
         if account is None:
             validation.error(
-                i, "account_provider_id",
+                i,
+                "account_provider_id",
                 f"Account not found: {row['account_provider_id']!r}",
             )
             continue
@@ -446,7 +530,11 @@ def import_cash_balances_from_csv(
 
         currency = row.get("currency", account.currency or "USD").strip()
         created, updated = _upsert_cash_balance(
-            session, account.id, source_display, parsed, currency,
+            session,
+            account.id,
+            source_display,
+            parsed,
+            currency,
         )
         if created:
             summary.cash_balances_created += 1
@@ -463,17 +551,20 @@ def import_cash_balances_from_csv(
                 errors=len(validation.errors),
                 warnings=len(validation.warnings),
             ),
-            errors=[{
-                "row_index": e.row_index, "column": e.column, "message": e.message,
-            } for e in validation.errors],
+            errors=[
+                {
+                    "row_index": e.row_index,
+                    "column": e.column,
+                    "message": e.message,
+                }
+                for e in validation.errors
+            ],
         )
 
     summary.warnings = len(validation.warnings)
     summary.errors = len(validation.errors)
 
-    ds = session.scalar(
-        select(DataSource).where(DataSource.source_key == source_key)
-    )
+    ds = session.scalar(select(DataSource).where(DataSource.source_key == source_key))
     if ds is not None:
         ds.last_import_at = datetime.now(timezone.utc)
 
@@ -481,8 +572,13 @@ def import_cash_balances_from_csv(
         source_key=source_key,
         imported_at=datetime.now(timezone.utc),
         summary=summary,
-        warnings=[{
-            "code": "VALIDATION", "row_index": w.row_index,
-            "column": w.column, "message": w.message,
-        } for w in validation.warnings],
+        warnings=[
+            {
+                "code": "VALIDATION",
+                "row_index": w.row_index,
+                "column": w.column,
+                "message": w.message,
+            }
+            for w in validation.warnings
+        ],
     )

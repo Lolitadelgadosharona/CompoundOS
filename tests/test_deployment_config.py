@@ -41,8 +41,9 @@ class TestEntrypoint:
         content = (REPO_ROOT / "scripts" / "entrypoint.sh").read_text()
         assert "alembic upgrade head" in content
         assert "exec uvicorn" in content
-        assert content.index("alembic upgrade head") < content.index(
-            "exec uvicorn")
+        assert content.index("if ! alembic upgrade head") < content.index(
+            "\nexec uvicorn")
+        assert '${COMPOUNDOS_RUN_MIGRATIONS:-0}' in content
 
     def test_fails_closed(self):
         content = (REPO_ROOT / "scripts" / "entrypoint.sh").read_text()

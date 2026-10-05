@@ -24,7 +24,7 @@ from apps.api.models import (
 
 pytestmark = pytest.mark.postgres
 
-HEAD_REVISION = "0034_research_run_status"
+HEAD_REVISION = "0035_launch_foundation"
 PREVIOUS_REVISION = "0011_fencing_closure"
 
 COMMITTEE_TABLES = {
@@ -347,7 +347,7 @@ class TestConstraints:
                     "  confidence, citation_ref)"
                     " VALUES (:id, :sid, 'owner_claim', 'T', now(),"
                     "  'abc', '{}', 'compoundos_internal', 'current',"
-                    "  'low', 'ref')"
+                    "  'invalid', 'ref')"
                 ), {"id": str(uuid4()), "sid": str(s.id)})
                 conn.commit()
 

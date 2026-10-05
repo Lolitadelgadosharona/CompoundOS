@@ -148,7 +148,7 @@ class TestNotificationCheck:
         finally:
             sys.platform = old_platform
 
-    def test_enabled_no_adapter_no_impact(self, db_session: Session) -> None:
+    def test_enabled_no_adapter_no_impact(self, db_session: Session, monkeypatch) -> None:
         """Without macOS adapter, notifications have no impact on overall health."""
         from apps.api.services.notification_service import update_preferences
         update_preferences(db_session, enabled=True,
@@ -164,7 +164,8 @@ class TestNotificationCheck:
             {"id": uuid4(), "now": NOW},
         )
         db_session.commit()
-        # On Linux CI, adapter is unavailable
+        # Explicitly exercise the non-macOS path on every host.
+        monkeypatch.setattr("sys.platform", "linux")
         c = check_notification(db_session, NOW)
         assert c.status == HEALTHY
         assert compute_overall([c]) == HEALTHY

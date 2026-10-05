@@ -9,6 +9,7 @@ export default function HomePage() {
         <Link className="primary-link" href="/household">
           Open household profile
         </Link>
+        <Link href="/investment">Open Investment Workspace</Link>
         <Link href="/policy">Open Investment Policy</Link>
         <Link href="/portfolio">Open Portfolio</Link>
         <Link href="/decisions">Open Decision Journal</Link>

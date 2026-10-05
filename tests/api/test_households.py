@@ -249,6 +249,9 @@ def test_audit_failure_rolls_back_household_update(
 def test_migration_contains_only_approved_product_tables(postgres_engine) -> None:
     tables = set(inspect(postgres_engine).get_table_names())
     assert tables - {"alembic_version"} == {
+        "owner_web_sessions", "instrument_provider_mappings", "market_observations",
+        "investment_configurations", "contribution_candidates", "contribution_decisions",
+        "decision_research_sources",
         "audit_events",
         "household_profiles",
         "investment_policies",

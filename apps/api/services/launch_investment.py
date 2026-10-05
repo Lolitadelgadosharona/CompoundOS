@@ -1,0 +1,1000 @@
+"""V1 orchestration over existing ledger, Policy, Guardian, Committee and Journal.
+
+No execution adapter. Evidence/configuration append-only; decision status belongs to Journal.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
+from uuid import UUID, uuid4
+
+from sqlalchemy import text
+
+from apps.api.models import (
+    Asset,
+    AuditEvent,
+    CommitteeEvidenceItem,
+    CommitteeSession,
+)
+from apps.api.repositories.decisions import get_current_published_version, get_policy_for_household
+from apps.api.repositories.policy_enrichment import list_version_rules
+from apps.api.services import guardian_intelligence as gi
+from apps.api.services.contribution_engine import contribution_plan, decimal_amount
+from apps.api.services.instrument_resolver import (
+    Instrument,
+    InstrumentUnavailable,
+    canonical_asset,
+    resolve_query,
+)
+from apps.api.services.launch_providers import (
+    configured_data_sources,
+    get_fx_provider,
+    get_instrument_provider,
+    get_market_provider,
+)
+from apps.api.services.valuation import (
+    MAX_AGE,
+    RecommendationUnavailable,
+    Valuation,
+    load_valuation,
+    value_rows,
+)
+
+D = Decimal
+
+
+def encoded(value):
+    return json.dumps(value, sort_keys=True, default=str, separators=(",", ":"))
+
+
+def digest(value):
+    return hashlib.sha256(encoded(value).encode()).hexdigest()
+
+
+def lock_household(session, hid):
+    session.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:h,0))"), {"h": str(hid)})
+
+
+def audit(session, hid, action, eid, metadata):
+    session.add(
+        AuditEvent(
+            household_id=hid,
+            actor="local-owner",
+            action=action,
+            entity_type="Contribution",
+            entity_id=eid,
+            event_metadata=metadata,
+        )
+    )
+    session.flush()
+
+
+def policy(session, hid):
+    p = get_policy_for_household(session, hid)
+    version = get_current_published_version(session, p.id) if p else None
+    if not version:
+        raise RecommendationUnavailable("Publish an Investment Policy first")
+    return version
+
+
+def configuration(session, hid):
+    row = (
+        session.execute(
+            text(
+                (
+                    "SELECT * FROM investment_configurations WHERE household_id=:h ORDER BY"
+                    " created_at DESC,id DESC LIMIT 1"
+                )
+            ),
+            {"h": hid},
+        )
+        .mappings()
+        .first()
+    )
+    if not row:
+        raise RecommendationUnavailable("Investment configuration required")
+    return row
+
+
+def configure(session, hid, settings):
+    lock_household(session, hid)
+    v = policy(session, hid)
+    base = session.execute(
+        text("SELECT base_currency FROM household_profiles WHERE id=:h"), {"h": hid}
+    ).scalar()
+    if settings["base_currency"] != base:
+        raise ValueError("Configuration base currency must match household")
+    targets = settings["targets"]
+    if len({t["asset_id"] for t in targets}) != len(targets):
+        raise ValueError("Duplicate canonical target")
+    contribution_plan({}, {t["asset_id"]: t["weight"] for t in targets}, 0, 0)
+    decimal_amount(settings["monthly_amount"])
+    decimal_amount(settings["initial_capital"])
+    for t in targets:
+        a = session.get(Asset, UUID(t["asset_id"]))
+        if not a:
+            raise ValueError("Unknown canonical target")
+        # Require verified dynamic provider mapping rather than accepting guessed imported types.
+        mapping = session.execute(
+            text("SELECT 1 FROM instrument_provider_mappings WHERE asset_id=:a"), {"a": a.id}
+        ).scalar()
+        if not mapping:
+            raise ValueError("Resolve target instrument before configuring")
+    cid = uuid4()
+    session.execute(
+        text(
+            (
+                "INSERT INTO "
+                "investment_configurations(id,household_id,policy_version_id,settings) "
+                "VALUES(:i,:h,:p,CAST(:s AS jsonb))"
+            )
+        ),
+        {"i": cid, "h": hid, "p": v.id, "s": encoded(settings)},
+    )
+    audit(session, hid, "contribution.configuration.created", cid, {"policy_version_id": str(v.id)})
+    session.commit()
+    return {"id": str(cid), "policy_version_id": str(v.id), **settings}
+
+
+def mapped_instrument(session, aid):
+    row = session.execute(
+        text(
+            (
+                "SELECT metadata FROM instrument_provider_mappings WHERE asset_id=:a "
+                "ORDER BY verified_at DESC LIMIT 1"
+            )
+        ),
+        {"a": aid},
+    ).scalar()
+    if not row:
+        asset = session.get(Asset, aid)
+        if not asset or not asset.symbol:
+            raise InstrumentUnavailable("Canonical instrument lacks provider identity")
+        instrument = resolve_query(asset.symbol, get_instrument_provider())
+        if instrument.currency != asset.currency or (
+            asset.exchange and asset.exchange != instrument.exchange
+        ):
+            raise InstrumentUnavailable(
+                "Imported instrument identity needs explicit reconciliation"
+            )
+        canonical = canonical_asset(session, instrument)
+        if canonical.id != aid:
+            raise InstrumentUnavailable(
+                "Imported instrument identity does not match; preserve UUID"
+            )
+        return instrument
+    return Instrument(**row)
+
+
+def trusted_source(source):
+    import os
+
+    if os.getenv("ENVIRONMENT", "").lower() == "test":
+        return True
+    try:
+        return source in configured_data_sources()
+    except InstrumentUnavailable:
+        return False
+
+
+def check_observation(obs, now):
+    stamp = obs.as_of
+    amount = obs.price if hasattr(obs, "price") else obs.rate
+    if (
+        not amount.is_finite()
+        or amount <= 0
+        or stamp.tzinfo is None
+        or stamp > now
+        or now - stamp > MAX_AGE
+    ):
+        raise RecommendationUnavailable("Missing, invalid, future or stale price/FX observation")
+    if obs.quality not in {"OBSERVED", "DELAYED"} or not obs.provider:
+        raise RecommendationUnavailable("Untrusted market/FX source quality")
+
+
+def refresh_data(session, hid):
+    """Explicit Owner request. Append observations; never rewrite quantity/cost/cash."""
+    lock_household(session, hid)
+    now = datetime.now(timezone.utc)
+    assets = set(
+        session.execute(
+            text("""SELECT p.asset_id FROM positions p JOIN accounts a ON a.id=p.account_id
+        JOIN portfolios pf ON pf.id=a.portfolio_id WHERE pf.household_id=:h AND p.is_latest"""),
+            {"h": hid},
+        ).scalars()
+    )
+    try:
+        settings = configuration(session, hid)["settings"]
+        assets.update(UUID(t["asset_id"]) for t in settings["targets"])
+    except RecommendationUnavailable:
+        settings = None
+    failures = []
+    for aid in sorted(assets, key=str):
+        try:
+            instrument = mapped_instrument(session, aid)
+            if instrument.asset_type == "CASH":
+                continue
+            obs = get_market_provider().price(instrument)
+            check_observation(obs, now)
+            if obs.provider != instrument.provider or obs.provider_id != instrument.provider_id:
+                raise InstrumentUnavailable("Quote/provider identity mismatch")
+            session.execute(
+                text(
+                    (
+                        "INSERT INTO "
+                        "market_observations(id,asset_id,price,currency,as_of,provider,quality)"
+                        "\n                VALUES(:i,:a,:p,:c,:t,:s,:q)"
+                    )
+                ),
+                {
+                    "i": uuid4(),
+                    "a": aid,
+                    "p": obs.price,
+                    "c": obs.currency,
+                    "t": obs.as_of,
+                    "s": obs.provider,
+                    "q": obs.quality,
+                },
+            )
+        except (ValueError, InstrumentUnavailable) as exc:
+            failures.append({"asset_id": str(aid), "reason": str(exc)})
+    base = session.execute(
+        text("SELECT base_currency FROM household_profiles WHERE id=:h"), {"h": hid}
+    ).scalar()
+    valuation = load_valuation(session, hid, now)
+    currencies = {e["currency"] for e in valuation.entries if e.get("currency")}
+    if settings:
+        currencies.add(settings["monthly_currency"])
+        for aid in assets:
+            asset = session.get(Asset, aid)
+            if asset:
+                currencies.add(asset.currency)
+    for currency in sorted(currencies - {base}):
+        try:
+            obs = get_fx_provider().fx(currency, base)
+            check_observation(obs, now)
+            if (obs.base_currency, obs.quote_currency) != (currency, base):
+                raise InstrumentUnavailable("FX pair mismatch")
+            session.execute(
+                text(
+                    (
+                        "INSERT INTO "
+                        "fx_rates(id,from_currency,to_currency,rate,rate_source,observed_at)"
+                        "\n                VALUES(:i,:f,:t,:r,:s,:d)"
+                    )
+                ),
+                {
+                    "i": uuid4(),
+                    "f": currency,
+                    "t": base,
+                    "r": obs.rate,
+                    "s": obs.provider,
+                    "d": obs.as_of,
+                },
+            )
+        except ValueError as exc:
+            failures.append({"currency": currency, "reason": str(exc)})
+    audit(
+        session, hid, "contribution.data.refreshed", hid, {"failures": failures, "as_of": str(now)}
+    )
+    session.commit()
+    return {"failures": failures, "valuation": load_valuation(session, hid).contract()}
+
+
+def contribution_fx(session, settings, now):
+    rates = (
+        session.execute(
+            text("SELECT from_currency,to_currency,rate,rate_source,observed_at FROM fx_rates")
+        )
+        .mappings()
+        .all()
+    )
+    converted = value_rows(
+        settings["base_currency"],
+        [],
+        [
+            {
+                "id": "planned_contribution",
+                "currency": settings["monthly_currency"],
+                "amount": settings["monthly_amount"],
+                "observed_at": now,
+                "source": "owner_configuration",
+            }
+        ],
+        rates,
+        now,
+    )
+    if not converted.recommendation_ready:
+        raise RecommendationUnavailable("; ".join(converted.reasons))
+    return converted
+
+
+def policy_inputs(session, version):
+    """Read existing published Policy only. Unsupported rules do not silently pass."""
+    thresholds = {"_severity": {}}
+    blockers = []
+    for rule in list_version_rules(session, version.id):
+        if not rule.enabled:
+            continue
+        if rule.rule_type in {
+            "max_single_position_pct",
+            "max_sector_concentration_pct",
+            "min_cash_reserve_pct",
+            "exploration_capital_limit",
+        }:
+            try:
+                value = decimal_amount(rule.rule_value)
+                if value > 100:
+                    raise ValueError("percentage >100")
+                thresholds[rule.rule_type] = value
+                thresholds["_severity"][rule.rule_type] = rule.severity
+            except ValueError:
+                blockers.append("Invalid published rule " + rule.rule_type)
+        elif rule.rule_type == "custom":
+            try:
+                custom = json.loads(rule.rule_value)
+                if custom.get("schema") != "contribution-v1" or set(custom) - {
+                    "schema",
+                    "max_equity_pct",
+                }:
+                    raise ValueError("Unknown custom rule")
+                thresholds["max_equity_pct"] = decimal_amount(custom["max_equity_pct"])
+                if thresholds["max_equity_pct"] > 100:
+                    raise ValueError("Invalid equity limit")
+                thresholds["_severity"]["max_equity_pct"] = rule.severity
+            except (ValueError, KeyError, TypeError):
+                blockers.append("Published custom rule cannot be deterministically evaluated")
+        elif rule.rule_type == "approval_required_for":
+            # Every V1 plan already requires Committee and explicit Owner approval.
+            continue
+        else:
+            blockers.append("Published rule requires review: " + rule.rule_type)
+    # Preserve Policy prose; deterministic code cannot interpret arbitrary text.
+    prohibited = version.prohibited_assets.strip()
+    if prohibited.lower() in {"none", "no prohibited assets", "[]"}:
+        prohibited = []
+    else:
+        try:
+            prohibited = json.loads(prohibited)
+            if not isinstance(prohibited, list) or any(not isinstance(x, str) for x in prohibited):
+                raise ValueError("Not a symbol list")
+        except (ValueError, TypeError):
+            prohibited = []
+            blockers.append("Prohibited-assets prose needs an explicit published symbol list")
+    if version.leverage_policy.strip().lower() not in {
+        "none",
+        "no leverage",
+        "leverage prohibited",
+        "no margin or leverage",
+        "prohibited",
+    }:
+        blockers.append("Leverage policy needs explicit prohibition for V1")
+    from apps.api.services.instrument_resolver import normalize_symbol
+
+    try:
+        prohibited = [normalize_symbol(symbol) for symbol in prohibited]
+    except ValueError:
+        blockers.append("Invalid prohibited symbol in published Policy")
+    return thresholds, prohibited, blockers
+
+
+def state_fingerprint(session, hid, config):
+    # Observation identities/times belong to candidate evidence; don't include changing wall-clock.
+    tables = [
+        (
+            "positions",
+            "p",
+            "JOIN accounts a ON a.id=p.account_id JOIN portfolios pf ON pf.id=a.portfolio_id",
+            "pf.household_id=:h AND p.is_latest",
+        ),
+        (
+            "cash_balances",
+            "p",
+            "JOIN accounts a ON a.id=p.account_id JOIN portfolios pf ON pf.id=a.portfolio_id",
+            "pf.household_id=:h AND p.is_latest",
+        ),
+    ]
+    ledger = []
+    for table, alias, joins, where in tables:
+        rows = (
+            session.execute(
+                text(f"SELECT p.* FROM {table} p {joins} WHERE {where} ORDER BY p.id"), {"h": hid}
+            )
+            .mappings()
+            .all()
+        )
+        ledger.append([dict(r) for r in rows])
+    return digest(
+        {"ledger": ledger, "configuration_id": str(config["id"]), "settings": config["settings"]}
+    )
+
+
+def evaluate(session, hid, config, now=None, funding="monthly"):
+    now = now or datetime.now(timezone.utc)
+    settings = config["settings"]
+    version = policy(session, hid)
+    if version.id != config["policy_version_id"]:
+        raise RecommendationUnavailable("Published Policy changed; revise configuration")
+    v = load_valuation(session, hid, now)
+    if not v.recommendation_ready:
+        raise RecommendationUnavailable(v.status + "; " + "; ".join(v.reasons))
+    # Every target needs a real observed quote, even if not yet held.
+    quotes = []
+    for t in settings["targets"]:
+        aid = UUID(t["asset_id"])
+        instrument = mapped_instrument(session, aid)
+        if instrument.asset_type == "CASH":
+            raise RecommendationUnavailable(
+                "Cash is a retained balance; use min_cash_reserve_pct, not a BUY target"
+            )
+        quote = (
+            session.execute(
+                text(
+                    (
+                        "SELECT * FROM market_observations WHERE asset_id=:a AND as_of<=:t "
+                        "ORDER BY as_of DESC,received_at DESC LIMIT 1"
+                    )
+                ),
+                {"a": aid, "t": now},
+            )
+            .mappings()
+            .first()
+        )
+        if (
+            not quote
+            or now - quote["as_of"] > MAX_AGE
+            or quote["quality"] not in {"OBSERVED", "DELAYED"}
+            or not trusted_source(quote["provider"])
+        ):
+            raise RecommendationUnavailable("Missing/stale target price: " + instrument.symbol)
+        quotes.append({**dict(quote), "symbol": instrument.symbol, "classification": "FACT"})
+    fx = (
+        contribution_fx(session, settings, now)
+        if funding == "monthly"
+        else value_rows(
+            settings["base_currency"],
+            [],
+            [
+                {
+                    "id": "initial_cash_budget",
+                    "currency": settings["base_currency"],
+                    "amount": settings["initial_capital"],
+                    "observed_at": now,
+                    "source": "owner_configuration",
+                }
+            ],
+            [],
+            now,
+        )
+    )
+    # A reported import value cannot stand in for required market observations.
+    for entry in v.positions():
+        if entry.get("quote_quality") not in {"OBSERVED", "DELAYED"}:
+            raise RecommendationUnavailable(
+                "Observed price required for every held canonical asset"
+            )
+    rates = (
+        session.execute(
+            text("SELECT from_currency,to_currency,rate,rate_source,observed_at FROM fx_rates")
+        )
+        .mappings()
+        .all()
+    )
+    target_prices = value_rows(
+        settings["base_currency"],
+        [
+            {
+                "id": q["asset_id"],
+                "quantity": D(1),
+                "market_price": q["price"],
+                "market_price_currency": q["currency"],
+                "market_price_as_of": q["as_of"],
+                "source": q["provider"],
+            }
+            for q in quotes
+        ],
+        [],
+        rates,
+        now,
+    )
+    for entry in v.entries + fx.entries + target_prices.entries:
+        source = entry.get("fx_source")
+        if source and source != "same_currency_identity" and not trusted_source(source):
+            raise RecommendationUnavailable("Untrusted or simulated FX source")
+        if entry["kind"] == "position" and not trusted_source(entry.get("price_source")):
+            raise RecommendationUnavailable("Untrusted or simulated price source")
+    if not target_prices.recommendation_ready:
+        raise RecommendationUnavailable(
+            "Target price/FX unavailable: " + "; ".join(target_prices.reasons)
+        )
+    thresholds, prohibited, policy_blocks = policy_inputs(session, version)
+    policy_warnings = []
+    current = {}
+    for e in v.positions():
+        key = str(e["asset_id"])
+        current[key] = current.get(key, D(0)) + e["base_value"]
+    plan = contribution_plan(
+        current,
+        {t["asset_id"]: t["weight"] for t in settings["targets"]},
+        fx.total(),
+        v.total(),
+        thresholds.get("min_cash_reserve_pct", 0),
+        existing_cash=funding == "initial",
+    )
+    post_cash = (
+        D(plan["post_value"])
+        - sum(current.values())
+        - sum(D(r["buy_amount"]) for r in plan["rows"])
+    )
+    if D(plan["post_value"]) and post_cash / D(plan["post_value"]) * 100 < thresholds.get(
+        "min_cash_reserve_pct", 0
+    ):
+        if thresholds["_severity"].get("min_cash_reserve_pct") == "warning":
+            policy_warnings.append("Published cash floor remains unmet; purchases retained as cash")
+        else:
+            policy_blocks.append("Published minimum cash reserve remains unmet")
+    positions = [dict(e) for e in v.positions()]
+    reviews = {t["asset_id"]: t for t in settings["targets"]}
+    # Product leverage is not inferred from a ticker or name. Owner attestation is labeled evidence.
+    for aid in set(current) | {r["asset_id"] for r in plan["rows"] if D(r["buy_amount"]) > 0}:
+        asset = session.get(Asset, UUID(aid))
+        if mapped_instrument(session, UUID(aid)).asset_type in {"ETF", "FUND"}:
+            status = reviews.get(aid, {}).get("leverage_status", "unknown")
+            if status != "unleveraged":
+                policy_blocks.append(
+                    "Product leverage unverified or prohibited: " + str(asset.symbol)
+                )
+    equity_limit = thresholds.get("max_equity_pct")
+    if equity_limit is not None:
+        projected_values = dict(current)
+        for r in plan["rows"]:
+            projected_values[r["asset_id"]] = projected_values.get(r["asset_id"], D(0)) + D(
+                r["buy_amount"]
+            )
+        equity_value = D(0)
+        for aid, value in projected_values.items():
+            asset = session.get(Asset, UUID(aid))
+            exposure = (
+                100
+                if mapped_instrument(session, UUID(aid)).asset_type == "STOCK"
+                else reviews.get(aid, {}).get("equity_exposure_pct")
+            )
+            if exposure is None:
+                policy_blocks.append("Equity look-through exposure unknown: " + str(asset.symbol))
+            else:
+                equity_value += value * decimal_amount(exposure) / 100
+        if D(plan["post_value"]) and equity_value / D(plan["post_value"]) * 100 > equity_limit:
+            if thresholds["_severity"].get("max_equity_pct") == "warning":
+                policy_warnings.append("Published equity allocation limit exceeded")
+            else:
+                policy_blocks.append("Published equity allocation limit exceeded")
+    for row in plan["rows"]:
+        asset = session.get(Asset, UUID(row["asset_id"]))
+        row["symbol"] = asset.symbol
+        if asset.symbol in prohibited and D(row["buy_amount"]) > 0:
+            policy_blocks.append("Prohibited asset " + asset.symbol)
+        amount = D(row["buy_amount"])
+        if amount:
+            # Projected position is evidence only, never written as an actual holding.
+            positions.append(
+                {
+                    "id": uuid4(),
+                    "asset_id": asset.id,
+                    "account_id": None,
+                    "base_value": amount,
+                    "quantity": D(0),
+                    "observed_at": now,
+                    "capital_bucket": "CORE",
+                    "sector": asset.sector,
+                    "asset_type": asset.asset_type,
+                    "kind": "position",
+                }
+            )
+    projected = Valuation(v.base_currency, now, positions)
+    guardian_findings = []
+    for label, fn in [
+        ("concentration", gi.evaluate_single_position_concentration),
+        ("sector", gi.evaluate_sector_concentration),
+        ("exploration", gi.evaluate_exploration_capital_limit),
+    ]:
+        for result in fn(session, hid, str(version.id), valuation=projected):
+            if result.exceeded:
+                rule_type = {
+                    "concentration": "max_single_position_pct",
+                    "sector": "max_sector_concentration_pct",
+                    "exploration": "exploration_capital_limit",
+                }[label]
+                guardian_findings.append(
+                    {
+                        "check": label,
+                        "detail": result.detail,
+                        "severity": thresholds["_severity"].get(rule_type, "warning"),
+                    }
+                )
+    if gi.has_active_critical_event(session, hid):
+        guardian_findings.append(
+            {
+                "check": "active_critical_event",
+                "severity": "critical",
+                "detail": "Existing critical Guardian event blocks approval",
+            }
+        )
+    # Reuse confirmed Guardian rules on current and projected ledgers.
+    from apps.api.services.guardian import _evaluate_current_ledger
+    from apps.api.services.guardian_evaluator import PolicyAllocation
+
+    allocations = (
+        session.execute(
+            text("SELECT * FROM investment_policy_version_allocations WHERE version_id=:p"),
+            {"p": version.id},
+        )
+        .mappings()
+        .all()
+    )
+    alloc = [
+        PolicyAllocation(
+            asset_class_name=r["asset_class_name"],
+            normalized_name=r["normalized_asset_class_name"],
+            target_percentage=r["target_percentage"],
+        )
+        for r in allocations
+    ]
+    legacy = _evaluate_current_ledger(session, hid, date.today(), None, alloc, v)
+    projected_legacy = _evaluate_current_ledger(session, hid, date.today(), None, alloc, projected)
+    for finding in legacy.get("analysis_findings", []) + projected_legacy.get(
+        "analysis_findings", []
+    ):
+        if finding.get("severity") == "critical":
+            guardian_findings.append(
+                {"check": "confirmed_guardian", "detail": finding, "severity": "critical"}
+            )
+    guardian_blocked = any(f.get("severity") == "critical" for f in guardian_findings)
+    return {
+        "classification": "FACT",
+        "instrument_reviews_classification": "OWNER_ATTESTATION",
+        "as_of": str(now),
+        "configuration_id": str(config["id"]),
+        "policy_version_id": str(version.id),
+        "fingerprint": state_fingerprint(session, hid, config),
+        "valuation": v.contract(),
+        "market_data": quotes,
+        "fx": fx.contract(),
+        "target_price_valuation": target_prices.contract(),
+        "funding": funding,
+        "targets": settings["targets"],
+        "monthly_contribution": {
+            "amount": settings["monthly_amount"],
+            "currency": settings["monthly_currency"],
+        },
+        "plan": plan,
+        "policy": {
+            "status": "BLOCKED" if policy_blocks else "WARNING" if policy_warnings else "PASS",
+            "findings": policy_blocks + policy_warnings,
+            "published_text": {
+                k: getattr(version, k)
+                for k in [
+                    "prohibited_assets",
+                    "leverage_policy",
+                    "liquidity",
+                    "diversification",
+                    "decision_process",
+                ]
+            },
+        },
+        "guardian": {
+            "status": "BLOCKED" if guardian_blocked else "WARNING" if guardian_findings else "PASS",
+            "findings": guardian_findings,
+            "current_analysis": legacy,
+        },
+        "recommendation_ready": not policy_blocks and not guardian_blocked,
+    }
+
+
+def make_candidate(session, hid, funding="monthly"):
+    lock_household(session, hid)
+    config = configuration(session, hid)
+    evidence = evaluate(session, hid, config, funding=funding)
+    cid = uuid4()
+    now = datetime.now(timezone.utc)
+    stamps = [datetime.fromisoformat(str(q["as_of"])) for q in evidence["market_data"]]
+    for entry in evidence["valuation"]["inputs"] + evidence["fx"]["inputs"]:
+        for key in ["price_as_of", "fx_as_of"]:
+            if entry.get(key):
+                stamps.append(datetime.fromisoformat(entry[key]))
+    expiry = min([now + timedelta(hours=1)] + [s + MAX_AGE for s in stamps])
+    session.execute(
+        text(
+            (
+                "INSERT INTO "
+                "contribution_candidates(id,household_id,configuration_id,evidence,content_hash,expires_at)"
+                " VALUES(:i,:h,:c,CAST(:e AS jsonb),:s,:t)"
+            )
+        ),
+        {
+            "i": cid,
+            "h": hid,
+            "c": config["id"],
+            "e": encoded(evidence),
+            "s": digest(evidence),
+            "t": expiry,
+        },
+    )
+    audit(
+        session,
+        hid,
+        "contribution.candidate.created",
+        cid,
+        {
+            "content_hash": digest(evidence),
+            "recommendation_ready": evidence["recommendation_ready"],
+        },
+    )
+    session.commit()
+    return candidate_detail(session, hid, cid)
+
+
+def candidate_detail(session, hid, cid):
+    row = (
+        session.execute(
+            text("SELECT * FROM contribution_candidates WHERE id=:i AND household_id=:h"),
+            {"i": cid, "h": hid},
+        )
+        .mappings()
+        .first()
+    )
+    if not row:
+        raise ValueError("Candidate not found for household")
+    result = {**dict(row), "id": str(row["id"])}
+    link = (
+        session.execute(
+            text("SELECT * FROM contribution_decisions WHERE candidate_id=:i"), {"i": cid}
+        )
+        .mappings()
+        .first()
+    )
+    if link:
+        decision_status = session.execute(
+            text("SELECT status FROM decisions WHERE id=:i"), {"i": link["decision_id"]}
+        ).scalar()
+        cs = session.get(CommitteeSession, link["committee_session_id"])
+        result.update(
+            decision_id=str(link["decision_id"]),
+            decision_status=decision_status,
+            committee_session_id=str(cs.id),
+            committee_status=cs.status,
+            committee_report=cs.report.report_content if cs.report else None,
+        )
+    else:
+        result.update(decision_status="not_reviewed", committee_status="not_requested")
+    if session.execute(
+        text("SELECT 1 FROM audit_events WHERE entity_id=:i AND action='contribution.rejected'"),
+        {"i": cid},
+    ).scalar():
+        result["decision_status"] = "rejected"
+    return result
+
+
+def validate_candidate(session, hid, cid):
+    lock_household(session, hid)
+    row = candidate_detail(session, hid, cid)
+    if (
+        row["expires_at"] <= datetime.now(timezone.utc)
+        or digest(row["evidence"]) != row["content_hash"]
+    ):
+        raise RecommendationUnavailable("Candidate expired or evidence integrity failed")
+    rejected = session.execute(
+        text("SELECT 1 FROM audit_events WHERE entity_id=:i AND action='contribution.rejected'"),
+        {"i": cid},
+    ).scalar()
+    if rejected:
+        raise RecommendationUnavailable("Candidate rejected")
+    config = configuration(session, hid)
+    fresh = evaluate(session, hid, config, funding=row["evidence"].get("funding", "monthly"))
+    if (
+        fresh["fingerprint"] != row["evidence"]["fingerprint"]
+        or fresh["policy_version_id"] != row["evidence"]["policy_version_id"]
+    ):
+        raise RecommendationUnavailable(
+            "Ledger/configuration/Policy changed; generate a new candidate"
+        )
+
+    # Existing quote changes require a new committee review, not approval of a different plan.
+    def stable(x):
+        return [{k: str(v) for k, v in q.items() if k not in {"classification"}} for q in x]
+
+    if stable(fresh["market_data"]) != stable(row["evidence"]["market_data"]):
+        raise RecommendationUnavailable("Market observations changed; regenerate candidate")
+    if (
+        fresh["plan"] != row["evidence"]["plan"]
+        or not fresh["recommendation_ready"]
+        or fresh["valuation"]["inputs"] != row["evidence"]["valuation"]["inputs"]
+        or [{k: v for k, v in e.items() if k != "price_as_of"} for e in fresh["fx"]["inputs"]]
+        != [
+            {k: v for k, v in e.items() if k != "price_as_of"}
+            for e in row["evidence"]["fx"]["inputs"]
+        ]
+    ):
+        raise RecommendationUnavailable(
+            "Policy/Guardian blocked or FX changed; regenerate candidate"
+        )
+    return row
+
+
+def preview_committee(session, hid, cid):
+    row = validate_candidate(session, hid, cid)
+    if row.get("decision_id"):
+        return row
+    from apps.api.decision_schemas import CreateDecisionRequest, UpdateDecisionDraftRequest
+    from apps.api.services.committee_orchestration import create_committee_session
+    from apps.api.services.decisions import create_decision, update_draft
+
+    cs = create_committee_session(
+        session,
+        hid,
+        "Contribution review",
+        (
+            "Review deterministic evidence; all model statements are INFERENCE. Do "
+            "not supply numeric facts; cite evidence IDs. Quantitative facts remain"
+            " in the evidence panel. No action before Owner approval. Return "
+            "confidence as low, medium or high. Do not use digits in narrative or "
+            "repeat numerical facts; refer to evidence citations instead."
+        ),
+    )
+    fact = row["evidence"]
+    item = CommitteeEvidenceItem(
+        id=uuid4(),
+        session_id=cs.id,
+        source_type="portfolio_snapshot",
+        source_id=None,
+        source_title="FACT: deterministic contribution evidence",
+        as_of=row["created_at"],
+        content_hash=row["content_hash"],
+        structured_facts=fact,
+        provenance="compoundos_internal",
+        freshness="candidate expires " + str(row["expires_at"]),
+        confidence="high",
+        citation_ref="contribution:" + str(cid),
+    )
+    session.add(item)
+    decision, draft = create_decision(
+        session, CreateDecisionRequest(title="Manual contribution plan")
+    )
+    draft = update_draft(
+        session,
+        decision.id,
+        UpdateDecisionDraftRequest(
+            expected_revision=draft.revision,
+            decision_summary="Manual contribution-first plan; no trade execution",
+            rationale=encoded(fact["plan"]),
+            risks_and_uncertainties=(
+                "Delayed prices; FX and market movement; manual execution required"
+            ),
+            evidence_or_sources="contribution_candidate="
+            + str(cid)
+            + "; hash="
+            + row["content_hash"],
+            expected_outcome="Reduce allocation drift using new funds",
+            review_trigger="After manual execution or before candidate expiry",
+            decision_date=date.today(),
+        ),
+    )
+    session.execute(
+        text(
+            (
+                "INSERT INTO "
+                "contribution_decisions(candidate_id,decision_id,committee_session_id) "
+                "VALUES(:c,:d,:s)"
+            )
+        ),
+        {"c": cid, "d": decision.id, "s": cs.id},
+    )
+    audit(
+        session,
+        hid,
+        "contribution.committee.previewed",
+        cid,
+        {"evidence_hash": row["content_hash"], "decision_id": str(decision.id)},
+    )
+    session.commit()
+    return candidate_detail(session, hid, cid)
+
+
+def guard_candidate_confirmation(session, hid, did, pid, draft):
+    cid = session.execute(
+        text("SELECT candidate_id FROM contribution_decisions WHERE decision_id=:i"), {"i": did}
+    ).scalar()
+    if not cid:
+        return
+    row = validate_candidate(session, hid, cid)
+    cs = session.get(CommitteeSession, UUID(row["committee_session_id"]))
+    import os
+
+    if (
+        cs.report
+        and os.getenv("ENVIRONMENT", "").lower() != "test"
+        and cs.report.provider != "deepseek"
+    ):
+        raise RecommendationUnavailable(
+            "Simulated or unconfigured Committee provider cannot authorize a plan"
+        )
+    if (
+        not cs.report
+        or cs.status != "completed"
+        or cs.report.prompt_version != "contribution-v1"
+        or cs.report.report_content.get("recommended_direction") != "aligned_with_policy"
+    ):
+        raise RecommendationUnavailable(
+            "Validated aligned Committee report required before manual approval"
+        )
+    if str(pid) != row["evidence"]["policy_version_id"] or draft.rationale != encoded(
+        row["evidence"]["plan"]
+    ):
+        raise RecommendationUnavailable(
+            "Published Policy or execution plan differs from reviewed evidence"
+        )
+    if row["decision_status"] != "draft":
+        raise RecommendationUnavailable("Candidate already decided")
+
+
+def approve(session, hid, cid):
+    row = validate_candidate(session, hid, cid)
+    if not row.get("decision_id"):
+        raise RecommendationUnavailable("Ask Committee first")
+    from apps.api.services.decision_lifecycle import OwnerDecisionService
+
+    OwnerDecisionService.confirm_decision(session, UUID(row["decision_id"]))
+    audit(
+        session,
+        hid,
+        "contribution.manual.approved",
+        cid,
+        {"execution": "MANUAL", "evidence_hash": row["content_hash"]},
+    )
+    session.commit()
+    return {
+        "status": "approved",
+        "execution": "MANUAL",
+        "plan": row["evidence"]["plan"],
+        "decision_id": row["decision_id"],
+    }
+
+
+def require_research_target(session, run_id):
+    if not run_id:
+        raise RecommendationUnavailable("Research provenance unverified; regenerate research")
+    symbol = session.execute(
+        text("""SELECT rq.parameters->>'symbol' FROM research_runs r
+      JOIN research_requests rq ON rq.id=r.request_id WHERE r.id=:r"""),
+        {"r": run_id},
+    ).scalar()
+    if not symbol:
+        # Legacy research metadata can be recovered only through its immutable FK chain.
+        title = session.execute(
+            text(
+                (
+                    "SELECT i.title FROM research_runs r JOIN research_requests rq ON "
+                    "rq.id=r.request_id\n          JOIN committee_review_requests cr ON "
+                    "cr.id=rq.review_request_id JOIN investment_ideas i ON "
+                    "i.id=cr.investment_idea_id\n          WHERE r.id=:r"
+                )
+            ),
+            {"r": run_id},
+        ).scalar()
+        from apps.api.services.instrument_resolver import normalize_symbol
+
+        try:
+            symbol = normalize_symbol((title or "").removeprefix("Research: "))
+        except ValueError as exc:
+            raise RecommendationUnavailable("Research target identity unverified") from exc
+    quotes = session.execute(
+        text("""SELECT mo.as_of FROM market_observations mo
+       JOIN assets a ON a.id=mo.asset_id WHERE a.symbol=:s
+       ORDER BY mo.as_of DESC LIMIT 1"""),
+        {"s": symbol},
+    ).scalar()
+    now = datetime.now(timezone.utc)
+    if not quotes or quotes > now or now - quotes > MAX_AGE:
+        raise RecommendationUnavailable("Observed current target price required")
