@@ -14,7 +14,11 @@ from apps.api.models import Asset
 
 
 class InstrumentUnavailable(ValueError):
-    pass
+    code = "INSTRUMENT_IDENTITY_UNRESOLVED"
+
+
+class IdentityMismatch(InstrumentUnavailable):
+    code = "INSTRUMENT_IDENTITY_MISMATCH"
 
 
 class AmbiguousInstrument(InstrumentUnavailable):
@@ -85,20 +89,73 @@ def resolve_query(query, provider):
     raise AmbiguousInstrument([asdict(i) for i in candidates])
 
 
+def identity_dimensions(instrument):
+    """Venue, currency and provider identity are part of identity; names are descriptive."""
+    if not all(
+        (
+            instrument.symbol,
+            instrument.name,
+            instrument.exchange,
+            instrument.asset_type,
+            instrument.currency,
+            instrument.provider,
+            instrument.provider_id,
+        )
+    ):
+        raise InstrumentUnavailable("INSTRUMENT_IDENTITY_UNRESOLVED: incomplete identity")
+    normalize_symbol(instrument.symbol)
+    normalize_symbol(instrument.provider_id)
+    if not re.fullmatch("[A-Z]{3}", instrument.currency):
+        raise InstrumentUnavailable("INSTRUMENT_IDENTITY_UNRESOLVED: currency")
+    return {
+        k: getattr(instrument, k)
+        for k in ("symbol", "exchange", "asset_type", "currency", "provider", "provider_id")
+    }
+
+
+def validate_asset_identity(asset, instrument):
+    identity_dimensions(instrument)
+    if not asset or asset.symbol != instrument.symbol or asset.currency != instrument.currency:
+        raise IdentityMismatch("INSTRUMENT_IDENTITY_MISMATCH: canonical symbol/currency")
+    if not asset.exchange or asset.exchange != instrument.exchange:
+        raise IdentityMismatch("INSTRUMENT_IDENTITY_MISMATCH: canonical venue")
+    # Historical imports may have an explicit unknown classification. Preserve it;
+    # provider metadata supplies the verified classification without rewriting history.
+    if asset.asset_type not in {instrument.asset_type, "OTHER"}:
+        raise IdentityMismatch("INSTRUMENT_IDENTITY_MISMATCH: canonical type")
+
+
 def canonical_asset(session, instrument):
     """Preserve existing UUIDs; never mutate a historical identity to another market."""
+    identity_dimensions(instrument)
+    # Shared provider lock precedes canonical lock, including conflicting metadata.
+    session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:k,0))"),
+        {"k": "provider:" + instrument.provider + ":" + instrument.provider_id},
+    )
     session.execute(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:k,0))"),
         {"k": "instrument:" + instrument.symbol + ":" + instrument.currency},
     )
-    mapping = session.execute(
-        text(
-            "SELECT asset_id FROM instrument_provider_mappings WHERE provider=:p AND provider_id=:i"
-        ),
-        {"p": instrument.provider, "i": instrument.provider_id},
-    ).scalar()
+    mapping = (
+        session.execute(
+            text(
+                "SELECT asset_id,metadata FROM instrument_provider_mappings "
+                "WHERE provider=:p AND provider_id=:i"
+            ),
+            {"p": instrument.provider, "i": instrument.provider_id},
+        )
+        .mappings()
+        .first()
+    )
     if mapping:
-        return session.get(Asset, mapping)
+        if identity_dimensions(Instrument(**mapping["metadata"])) != identity_dimensions(
+            instrument
+        ):
+            raise IdentityMismatch("INSTRUMENT_IDENTITY_MISMATCH: provider mapping conflict")
+        asset = session.get(Asset, mapping["asset_id"])
+        validate_asset_identity(asset, instrument)
+        return asset
     matches = list(
         session.scalars(
             select(Asset).where(
@@ -119,6 +176,10 @@ def canonical_asset(session, instrument):
                 )
             )
         )
+    if matches and any(a.exchange is None for a in matches):
+        raise InstrumentUnavailable(
+            "INSTRUMENT_IDENTITY_UNRESOLVED: historical venue requires explicit reconciliation"
+        )
     if len(matches) > 1:
         raise InstrumentUnavailable("Historical identity conflict requires explicit mapping")
     asset = (
@@ -134,6 +195,15 @@ def canonical_asset(session, instrument):
             confidence="verified",
         )
     )
+    validate_asset_identity(asset, instrument)
+    alias = session.execute(
+        text(
+            "SELECT provider_id FROM instrument_provider_mappings WHERE asset_id=:a AND provider=:p"
+        ),
+        {"a": asset.id, "p": instrument.provider},
+    ).scalar()
+    if alias and alias != instrument.provider_id:
+        raise IdentityMismatch("INSTRUMENT_IDENTITY_MISMATCH: unresolved provider alias")
     session.add(asset)
     session.flush()
     session.execute(
@@ -164,8 +234,12 @@ def ledger_identity(
     if isin:
         asset = session.scalar(select(Asset).where(Asset.isin == isin.strip().upper()))
         if asset:
-            if asset.currency != currency:
-                raise InstrumentUnavailable("ISIN/currency conflict")
+            if (
+                asset.currency != currency
+                or asset.symbol != symbol
+                or (exchange and asset.exchange and asset.exchange != exchange)
+            ):
+                raise IdentityMismatch("INSTRUMENT_IDENTITY_MISMATCH: ISIN/import conflict")
             return asset
     assets = list(
         session.scalars(

@@ -26,6 +26,7 @@ class PriceObservation:
     as_of: datetime
     provider: str
     quality: str = "DELAYED"
+    identity: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,7 @@ class FXObservation:
     as_of: datetime
     provider: str
     quality: str = "OBSERVED"
+    identity: dict | None = None
 
 
 class MarketDataProvider(Protocol):
@@ -78,8 +80,9 @@ class YahooPublicProvider:
             raise InstrumentUnavailable("Provider did not identify instrument")
         return results[0]["meta"]
 
-    def identify(self, provider_id):
-        meta = self._meta(provider_id)
+    def _identity(self, provider_id, meta):
+        if meta.get("symbol") != provider_id:
+            raise InstrumentUnavailable("QUOTE_IDENTITY_MISMATCH: provider symbol")
         typ = {"EQUITY": "STOCK", "ETF": "ETF", "MUTUALFUND": "FUND"}.get(
             meta.get("instrumentType")
         )
@@ -102,6 +105,9 @@ class YahooPublicProvider:
             self.name,
             pid,
         )
+
+    def identify(self, provider_id):
+        return self._identity(provider_id, self._meta(provider_id))
 
     def search(self, query):
         if not query.strip() or len(query) > 200:
@@ -137,6 +143,11 @@ class YahooPublicProvider:
 
     def price(self, instrument):
         meta = self._meta(instrument.provider_id)
+        from apps.api.services.instrument_resolver import identity_dimensions
+
+        actual = self._identity(instrument.provider_id, meta)
+        if identity_dimensions(actual) != identity_dimensions(instrument):
+            raise InstrumentUnavailable("QUOTE_IDENTITY_MISMATCH: canonical dimensions")
         try:
             p = Decimal(str(meta["regularMarketPrice"]))
             stamp = datetime.fromtimestamp(meta["regularMarketTime"], timezone.utc)
@@ -147,7 +158,9 @@ class YahooPublicProvider:
             raise InstrumentUnavailable("Invalid market price")
         if ("GBP" if ccy == "GBp" else ccy) != instrument.currency:
             raise InstrumentUnavailable("Quote currency does not match canonical instrument")
-        return PriceObservation(instrument.provider_id, p, ccy, stamp, self.name)
+        return PriceObservation(
+            actual.provider_id, p, ccy, stamp, self.name, identity=identity_dimensions(actual)
+        )
 
     def fx(self, base, quote):
         if (
@@ -156,7 +169,10 @@ class YahooPublicProvider:
             or base == quote
         ):
             raise InstrumentUnavailable("Invalid FX pair")
-        meta = self._meta(base + quote + "=X")
+        pair = base + quote + "=X"
+        meta = self._meta(pair)
+        if meta.get("symbol") != pair or meta.get("currency") != quote:
+            raise InstrumentUnavailable("QUOTE_IDENTITY_MISMATCH: FX pair/currency")
         try:
             return FXObservation(
                 base,
@@ -165,6 +181,7 @@ class YahooPublicProvider:
                 datetime.fromtimestamp(meta["regularMarketTime"], timezone.utc),
                 self.name,
                 "DELAYED",
+                {"from_currency": base, "to_currency": quote, "provider_id": pair},
             )
         except (KeyError, ValueError, TypeError) as exc:
             raise InstrumentUnavailable("FX provenance missing") from exc
@@ -174,7 +191,7 @@ def _configured_yahoo():
     import os
 
     if (
-        os.getenv("ENVIRONMENT", "").lower() == "production"
+        os.getenv("ENVIRONMENT", "").lower() not in {"development", "test"}
         and os.getenv("COMPOUNDOS_YAHOO_ACCESS_AUTHORIZED") != "1"
     ):
         raise InstrumentUnavailable(
