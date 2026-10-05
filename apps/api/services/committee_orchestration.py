@@ -304,7 +304,11 @@ def run_committee(
         _fail_session(session, committee_session, "Missing usage")
         raise ValueError("Provider usage required for cost evidence")
     actual_cost = (response.input_tokens * rates[0] + response.output_tokens * rates[1]) / 1_000_000
-    if actual_cost > MAX_COST_USD or response.output_tokens > MAX_OUTPUT_TOKENS:
+    if (
+        actual_cost > MAX_COST_USD
+        or response.output_tokens > MAX_OUTPUT_TOKENS
+        or response.input_tokens > MAX_INPUT_TOKENS
+    ):
         _fail_session(session, committee_session, "Usage exceeded budget")
         raise ValueError("Provider usage exceeded budget")
 

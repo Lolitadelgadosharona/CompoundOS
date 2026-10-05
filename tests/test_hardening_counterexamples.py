@@ -177,3 +177,22 @@ def test_spelled_quantitative_assertion_cannot_authorize(db_session, setup, clai
             prompt_version="contribution-v1.1",
         )
     assert cs.status == "failed" and cs.report is None
+
+
+def test_actual_input_usage_over_budget_is_not_persisted(db_session, setup):
+    hid, _, _, _ = setup
+    candidate = svc.make_candidate(db_session, hid)
+    preview = svc.preview_committee(db_session, hid, UUID(candidate["id"]))
+    cs = db_session.get(CommitteeSession, UUID(preview["committee_session_id"]))
+    cs.status = "queued"
+    db_session.commit()
+    report = _valid_report(cs)
+    report["confidence"] = "high"
+    with pytest.raises(ValueError, match="usage exceeded budget"):
+        run_committee(
+            db_session,
+            cs,
+            FakeProvider(response_text=json.dumps(report), input_tokens=50001),
+            prompt_version="contribution-v1.1",
+        )
+    assert cs.status == "failed" and cs.report is None
