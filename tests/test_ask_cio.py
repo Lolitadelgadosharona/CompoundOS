@@ -115,7 +115,7 @@ class TestQuestionSaved:
             text("SELECT parameters FROM research_requests WHERE id = :id"),
             {"id": UUID(result["request_id"])},
         ).fetchone()
-        assert row[0] is None  # no title → no parameters
+        assert row[0] == {"symbol": "AAPL", "question": None}
 
 
 class TestDecisionIdInStatus:

@@ -26,7 +26,7 @@ _FIXED_NOW = datetime(2026, 7, 28, 12, 0, 0, tzinfo=timezone.utc)
 
 # Sentinels injected into proposal/provider/error — must NOT appear in notification body
 _SECRET_PROPOSAL = "SECRET_PROPOSAL_xyz_001"
-_SECRET_PROVIDER = "SECRET_PROVIDER_abc_002"
+_SECRET_PROVIDER = "sk-provider-secret-sentinel"
 _SECRET_ERROR = "SECRET_ERROR_def_003"
 
 
@@ -450,14 +450,14 @@ class TestDedupForSliceB:
 # --- Helpers ---
 
 _VALID_OUTPUT = """{
-    "supporting_arguments": "The current allocation is consistent with stated objectives.",
-    "opposing_arguments": "Market conditions suggest reviewing exposures.",
-    "risks": "Elevated market uncertainty and interest rate sensitivity.",
+    "supporting_arguments": ["The current allocation is consistent with stated objectives."],
+    "opposing_arguments": ["Market conditions suggest reviewing exposures."],
+    "risks": ["Elevated market uncertainty and interest rate sensitivity."],
     "policy_alignment": "The proposal is consistent with the investment policy.",
-    "minority_opinions": "One perspective favors more conservative exposure levels.",
+    "minority_opinions": ["One perspective favors more conservative exposure levels."],
     "evidence_citations": [],
-    "limitations": "Analysis is limited to available data as of valuation date.",
-    "recommended_direction": "aligned_with_policy",
+    "limitations": ["Analysis is limited to available data as of valuation date."],
+    "recommended_direction": "insufficient_evidence",
     "sections": {
         "long_term_compounding": "Compounding effects favor staying invested.",
         "index_passive_investing": "Passive index exposure reduces single-stock risk. """ + _SECRET_PROVIDER + """",

@@ -125,6 +125,8 @@ def _setup_run(db_session, household_id):
         {"id": run_id, "req": req_id},
     )
     db_session.commit()
+    from tests.hardening_research_fixture import bind_test_research_requests
+    bind_test_research_requests(db_session)
     return idea_id, run_id
 
 
@@ -143,7 +145,7 @@ def _seed_policy(db_session, household_id):
             " rebalancing_policy, prohibited_assets, leverage_policy,"
             " decision_process, notes)"
             " VALUES (:id, :pid, 1, 'published', NOW(), 'obj', 'horizon',"
-            " '', '', '', '', '', '', 'decide', '')"
+            " '', '', '', '', '[]', 'no leverage', 'decide', '')"
         ),
         {"id": vid, "pid": policy_id},
     )
@@ -243,6 +245,8 @@ class TestEndToEndWorkflow:
         assert decision.status == "draft"
 
         # 6. Owner approval → confirmed + review scheduling
+        from tests.hardening_research_fixture import prepare_test_research_committee
+        prepare_test_research_committee(db_session)
         result = OwnerDecisionService.confirm_decision(db_session, decision.id)
         assert result["status"] == "approved"
         status = db_session.execute(
@@ -264,30 +268,6 @@ class TestEndToEndWorkflow:
 
 
 @pytest.fixture(autouse=True)
-def observed_research_target(db_session):
-    """Synthetic provider evidence required for research Journal review; not executable approval."""
-    from datetime import datetime, timezone
-
-    from apps.api.models import Asset
-
-    asset = Asset(
-        id=uuid4(),
-        symbol="AAPL",
-        name="SYNTHETIC Apple",
-        exchange="TEST",
-        asset_type="STOCK",
-        currency="USD",
-    )
-    db_session.add(asset)
-    db_session.flush()
-    db_session.execute(
-        text(
-            (
-                'INSERT INTO '
-                'market_observations(id,asset_id,price,currency,as_of,provider,quality)'
-                " VALUES(:i,:a,100,'USD',:t,'synthetic','OBSERVED')"
-            )
-        ),
-        {"i": uuid4(), "a": asset.id, "t": datetime.now(timezone.utc)},
-    )
-    db_session.commit()
+def observed_research_target(db_session, monkeypatch):
+    from tests.hardening_research_fixture import seed_research_instrument
+    seed_research_instrument(db_session, monkeypatch)

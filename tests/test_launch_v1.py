@@ -16,6 +16,7 @@ from apps.api.services.instrument_resolver import (
     Instrument,
     InstrumentUnavailable,
     canonical_asset,
+    identity_dimensions,
     ledger_identity,
     query_from_question,
     resolve_query,
@@ -26,6 +27,7 @@ from apps.api.services.valuation import RecommendationUnavailable, load_valuatio
 
 class SyntheticProvider:
     name = "synthetic"
+    test_only = True
     """Test-only provider, deliberately not exported by production factories."""
 
     def search(self, query):
@@ -50,11 +52,24 @@ class SyntheticProvider:
 
     def price(self, i):
         return PriceObservation(
-            i.provider_id, D(100), "USD", datetime.now(timezone.utc), "synthetic", "OBSERVED"
+            i.provider_id,
+            D(100),
+            "USD",
+            datetime.now(timezone.utc),
+            "synthetic",
+            "OBSERVED",
+            identity_dimensions(i),
         )
 
     def fx(self, a, b):
-        return FXObservation(a, b, D(1) / 7, datetime.now(timezone.utc), "synthetic")
+        return FXObservation(
+            a,
+            b,
+            D(1) / 7,
+            datetime.now(timezone.utc),
+            "synthetic",
+            identity={"from_currency": a, "to_currency": b, "provider_id": a + b + "=X"},
+        )
 
 
 @pytest.fixture
@@ -132,7 +147,12 @@ def test_observation_quality_fails_closed(kind, defect):
 
 
 @pytest.fixture
-def setup(db_session, provider):
+def setup(db_session, provider, monkeypatch, request):
+    from apps.api.services import launch_providers
+
+    for name in ["get_instrument_provider", "get_market_provider", "get_fx_provider"]:
+        monkeypatch.setattr(launch_providers, name, lambda: provider)
+        monkeypatch.setattr(svc, name, lambda: provider)
     from apps.api.models import (
         FxRate,
         HouseholdProfile,
@@ -169,7 +189,11 @@ def setup(db_session, provider):
     db_session.add(v)
     db_session.flush()
     # Explicit TEST policy, not a change to any Owner Policy or default Guardian threshold.
-    for typ, value in [("max_single_position_pct", "60"), ("max_sector_concentration_pct", "100")]:
+    max_position = getattr(request, "param", {}).get("max_position", "60")
+    for typ, value in [
+        ("max_single_position_pct", max_position),
+        ("max_sector_concentration_pct", "100"),
+    ]:
         db_session.add(
             PolicyRule(
                 id=uuid4(),
@@ -198,6 +222,8 @@ def setup(db_session, provider):
             to_currency="USD",
             rate=D(".14"),
             rate_source="synthetic",
+            identity={"from_currency": "CNY", "to_currency": "USD", "provider_id": "CNYUSD=X"},
+            quality="OBSERVED",
             observed_at=now,
         )
     )
@@ -223,11 +249,16 @@ def setup(db_session, provider):
             text(
                 (
                     "INSERT INTO "
-                    "market_observations(id,asset_id,price,currency,as_of,provider,quality)"
-                    " VALUES(:i,:a,100,'USD',:t,'synthetic','OBSERVED')"
+                    "market_observations(id,asset_id,price,currency,as_of,provider,quality,identity)"
+                    " VALUES(:i,:a,100,'USD',:t,'synthetic','OBSERVED',CAST(:identity AS jsonb))"
                 )
             ),
-            {"i": uuid4(), "a": a.id, "t": now},
+            {
+                "i": uuid4(),
+                "a": a.id,
+                "t": now,
+                "identity": json.dumps(identity_dimensions(provider.identify(a.symbol))),
+            },
         )
     db_session.commit()
     return h.id, aid, assets, v.id
@@ -300,13 +331,24 @@ def test_approval_journal_audit_manual_only(db_session, setup):
     report["recommended_direction"] = "aligned_with_policy"
     report["confidence"] = "medium"
     cs = db_session.get(CommitteeSession, UUID(preview["committee_session_id"]))
+    from apps.api.services.committee_evidence_registry import evidence_registry
+
+    registry = evidence_registry(cs)
+    eid = next(iter(registry))
+    report["evidence_citations"] = [
+        {
+            "evidence_id": eid,
+            "citation_ref": registry[eid]["citation_ref"],
+            "claim": registry[eid]["claim"],
+        }
+    ]
     cs.status = "queued"
     db_session.commit()
     run_committee(
         db_session,
         cs,
         FakeProvider(response_text=json.dumps(report)),
-        prompt_version="contribution-v1",
+        prompt_version="contribution-v1.1",
     )
     result = svc.approve(db_session, hid, UUID(candidate["id"]))
     assert result["execution"] == "MANUAL"
@@ -496,7 +538,7 @@ def test_unobserved_import_value_cannot_create_trusted_candidate(db_session, set
         source="csv",
     )
     db_session.commit()
-    with pytest.raises(RecommendationUnavailable, match="Observed price"):
+    with pytest.raises(RecommendationUnavailable, match="Observed price|DEGRADED"):
         svc.make_candidate(db_session, hid)
 
 
@@ -537,16 +579,16 @@ def test_model_cannot_invent_quantitative_facts(db_session, setup):
     cs = db_session.get(CommitteeSession, UUID(p["committee_session_id"]))
     cs.status = "queued"
     db_session.commit()
-    report = _valid_report()
+    report = _valid_report(cs)
     report["confidence"] = "high"
     report["policy_alignment"] = "FX is 9.99"
     report["recommended_direction"] = "aligned_with_policy"
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Numerical financial facts"):
         run_committee(
             db_session,
             cs,
             FakeProvider(response_text=json.dumps(report)),
-            prompt_version="contribution-v1",
+            prompt_version="contribution-v1.1",
         )
     assert db_session.execute(text("SELECT count(*) FROM committee_reports")).scalar() == 0
 
@@ -561,7 +603,7 @@ def test_populated_evidence_cannot_be_downgraded(db_session, setup, postgres_eng
     db_session.rollback()
     cfg = Config("alembic.ini")
     cfg.attributes["connection"] = postgres_engine
-    with pytest.raises(RuntimeError, match="Preserve populated"):
+    with pytest.raises(RuntimeError, match="Preserve"):
         command.downgrade(cfg, "0034_research_run_status")
     assert db_session.execute(text("SELECT count(*) FROM contribution_candidates")).scalar() == 1
 

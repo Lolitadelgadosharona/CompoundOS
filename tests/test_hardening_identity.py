@@ -1,3 +1,4 @@
+# ruff: noqa: F811
 from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -6,6 +7,8 @@ import pytest
 
 from apps.api.services.instrument_resolver import Instrument, InstrumentUnavailable, canonical_asset
 from apps.api.services.launch_providers import YahooPublicProvider
+from tests.test_launch_v1 import provider as provider
+from tests.test_launch_v1 import setup as setup
 
 
 @pytest.mark.postgres

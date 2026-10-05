@@ -103,6 +103,8 @@ def _seed_decision_chain(db_session, household_id):
         ["Valuation"],
     )
     db_session.commit()
+    from tests.hardening_research_fixture import bind_test_research_requests
+    bind_test_research_requests(db_session)
     return decision.id
 
 
@@ -141,6 +143,10 @@ class TestDecisionApproveWithPolicy:
         hh = _setup_household(db_session)
         api_client.post("/api/policies/setup", json=_setup_payload())
         decision_id = _seed_decision_chain(db_session, hh)
+        from tests.hardening_research_fixture import prepare_test_research_committee
+        from tests.hardening_research_fixture import publish_evaluable_test_policy
+        publish_evaluable_test_policy(db_session)
+        prepare_test_research_committee(db_session)
         r = api_client.post(f"/api/decisions/{decision_id}/approve")
         assert r.status_code == 200
         assert r.json()["status"] == "approved"
@@ -176,30 +182,6 @@ class TestInvestmentPolicyPage:
 
 
 @pytest.fixture(autouse=True)
-def observed_research_target(db_session):
-    """Synthetic provider evidence required for research Journal review; not executable approval."""
-    from datetime import datetime, timezone
-
-    from apps.api.models import Asset
-
-    asset = Asset(
-        id=uuid4(),
-        symbol="AAPL",
-        name="SYNTHETIC Apple",
-        exchange="TEST",
-        asset_type="STOCK",
-        currency="USD",
-    )
-    db_session.add(asset)
-    db_session.flush()
-    db_session.execute(
-        text(
-            (
-                'INSERT INTO '
-                'market_observations(id,asset_id,price,currency,as_of,provider,quality)'
-                " VALUES(:i,:a,100,'USD',:t,'synthetic','OBSERVED')"
-            )
-        ),
-        {"i": uuid4(), "a": asset.id, "t": datetime.now(timezone.utc)},
-    )
-    db_session.commit()
+def observed_research_target(db_session, monkeypatch):
+    from tests.hardening_research_fixture import seed_research_instrument
+    seed_research_instrument(db_session, monkeypatch)

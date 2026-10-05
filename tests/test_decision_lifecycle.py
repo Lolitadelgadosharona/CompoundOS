@@ -114,7 +114,7 @@ def _setup_full_chain(db_session, household_id):
             " rebalancing_policy, prohibited_assets, leverage_policy,"
             " decision_process, notes)"
             " VALUES (:id, :pid, 1, 'published', NOW(),"
-            " 'obj', 'horizon', '', '', '', '', '', '', 'decide', '')"
+            " 'obj', 'horizon', '', '', '', '', '[]', 'no leverage', 'decide', '')"
         ),
         {"id": version_id, "pid": policy_id},
     )
@@ -124,6 +124,8 @@ def _setup_full_chain(db_session, household_id):
         {"id": version_id},
     )
     db_session.commit()
+    from tests.hardening_research_fixture import bind_test_research_requests
+    bind_test_research_requests(db_session)
     return idea_id, run_id, memo_id, rr_id
 
 
@@ -188,6 +190,8 @@ class TestOwnerDecision:
             hh,
         )
         session_id = uuid4()
+        from tests.hardening_research_fixture import prepare_test_research_committee
+        prepare_test_research_committee(db_session)
         result = OwnerDecisionService.approve(
             db_session,
             idea_id,
@@ -223,6 +227,8 @@ class TestOwnerDecision:
             hh,
         )
         session_id = uuid4()
+        from tests.hardening_research_fixture import prepare_test_research_committee
+        prepare_test_research_committee(db_session)
         result = OwnerDecisionService.approve(
             db_session,
             idea_id,
@@ -245,6 +251,8 @@ class TestOwnerDecision:
             hh,
         )
         session_id = uuid4()
+        from tests.hardening_research_fixture import prepare_test_research_committee
+        prepare_test_research_committee(db_session)
         result = OwnerDecisionService.approve(
             db_session,
             idea_id,
@@ -287,6 +295,8 @@ class TestLearningLoop:
             hh,
         )
         session_id = uuid4()
+        from tests.hardening_research_fixture import prepare_test_research_committee
+        prepare_test_research_committee(db_session)
         dec = OwnerDecisionService.approve(
             db_session,
             idea_id,
@@ -347,6 +357,8 @@ class TestProvenance:
             hh,
         )
         # Create decision
+        from tests.hardening_research_fixture import prepare_test_research_committee
+        prepare_test_research_committee(db_session)
         dec = OwnerDecisionService.approve(
             db_session,
             idea_id,
@@ -423,6 +435,8 @@ class TestDecisionLifecycleWiring:
         assert bridge["recommendation"] == "BUY"
 
         # Committee → Decision → Approval → Learning (journal lifecycle)
+        from tests.hardening_research_fixture import prepare_test_research_committee
+        prepare_test_research_committee(db_session)
         result = OwnerDecisionService.approve(
             db_session,
             idea_id,
@@ -489,30 +503,6 @@ class TestDecisionLifecycleWiring:
 
 
 @pytest.fixture(autouse=True)
-def observed_research_target(db_session):
-    """Synthetic provider evidence required for research Journal review; not executable approval."""
-    from datetime import datetime, timezone
-
-    from apps.api.models import Asset
-
-    asset = Asset(
-        id=uuid4(),
-        symbol="AAPL",
-        name="SYNTHETIC Apple",
-        exchange="TEST",
-        asset_type="STOCK",
-        currency="USD",
-    )
-    db_session.add(asset)
-    db_session.flush()
-    db_session.execute(
-        text(
-            (
-                'INSERT INTO '
-                'market_observations(id,asset_id,price,currency,as_of,provider,quality)'
-                " VALUES(:i,:a,100,'USD',:t,'synthetic','OBSERVED')"
-            )
-        ),
-        {"i": uuid4(), "a": asset.id, "t": datetime.now(timezone.utc)},
-    )
-    db_session.commit()
+def observed_research_target(db_session, monkeypatch):
+    from tests.hardening_research_fixture import seed_research_instrument
+    seed_research_instrument(db_session, monkeypatch)

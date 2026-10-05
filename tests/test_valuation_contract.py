@@ -50,7 +50,7 @@ def test_usd_cny_eur_conservation_and_weights():
     assert v.total("cash") == D(160)
     assert sum(e["market_value"] / v.total("position") for e in v.positions()) == 1
     assert v.entries[1]["fx_inverse"] is True
-    assert v.recommendation_ready
+    assert not v.recommendation_ready
 
 
 @pytest.mark.parametrize(
@@ -235,7 +235,7 @@ def test_invalid_derived_price_is_incomplete(price):
 
 def test_freshness_boundary_and_future_fx():
     old = NOW - timedelta(hours=24)
-    assert value_rows(
+    assert not value_rows(
         "USD", [position(700, "CNY")], [], [fx("CNY", "USD", "0.14", observed_at=old)], NOW
     ).recommendation_ready
     assert not value_rows(
