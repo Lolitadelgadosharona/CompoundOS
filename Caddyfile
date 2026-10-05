@@ -1,8 +1,5 @@
-# Same-origin Owner UI and API. Set DOMAIN and COMPOUNDOS_PUBLIC_ORIGIN consistently.
-{
-    email {$CADDY_EMAIL:admin@localhost}
-}
-{$DOMAIN:localhost} {
+# Same-origin Owner UI and API. Set CADDY_DOMAIN and COMPOUNDOS_PUBLIC_ORIGIN consistently.
+{$CADDY_DOMAIN:localhost} {
     @backend path /api/* /health /static/* /dashboard /memo/* /learning /settings/*
     reverse_proxy @backend api:8000
     reverse_proxy web:3000
