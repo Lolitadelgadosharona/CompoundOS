@@ -1,6 +1,6 @@
 /** Sprint 007 Slice B — Health API client (3 endpoints). */
 
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+const BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 export interface ComponentHealth {
   component: string;
@@ -32,8 +32,8 @@ class HealthError extends Error {
 }
 
 async function request<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const url = new URL(path, BASE);
-  const resp = await fetch(url.toString(), { signal });
+  const url = new URL(path, BASE || "http://relative.invalid");
+  const resp = await fetch(BASE ? url.toString() : url.pathname + url.search, { signal });
   if (!resp.ok) throw new HealthError(`Health API error: ${resp.status}`);
   return resp.json();
 }
