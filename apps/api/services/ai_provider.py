@@ -7,6 +7,7 @@ OpenAI/Anthropic adapters require separate Owner authorization.
 from __future__ import annotations
 
 import json
+import os
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -35,7 +36,9 @@ class ProviderResponse:
 class ProviderConfig:
     """Configuration for a provider call."""
 
-    model: str = "deepseek-chat"
+    model: str = field(
+        default_factory=lambda: os.getenv("COMPOUNDOS_DEEPSEEK_MODEL", "deepseek-flash")
+    )
     temperature: float = 0.0
     max_output_tokens: int = 8000
     timeout_seconds: int = 120
@@ -152,6 +155,7 @@ class DeepSeekProvider(AIModelProvider):
             "temperature": cfg.temperature,
             "max_tokens": cfg.max_output_tokens,
             "response_format": {"type": "json_object"},
+            "thinking": {"type": "disabled"},
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},

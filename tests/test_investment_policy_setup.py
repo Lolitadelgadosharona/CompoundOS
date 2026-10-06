@@ -143,8 +143,10 @@ class TestDecisionApproveWithPolicy:
         hh = _setup_household(db_session)
         api_client.post("/api/policies/setup", json=_setup_payload())
         decision_id = _seed_decision_chain(db_session, hh)
-        from tests.hardening_research_fixture import prepare_test_research_committee
-        from tests.hardening_research_fixture import publish_evaluable_test_policy
+        from tests.hardening_research_fixture import (
+            prepare_test_research_committee,
+            publish_evaluable_test_policy,
+        )
         publish_evaluable_test_policy(db_session)
         prepare_test_research_committee(db_session)
         r = api_client.post(f"/api/decisions/{decision_id}/approve")

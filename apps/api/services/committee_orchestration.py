@@ -512,7 +512,7 @@ def _persist_report(
         id=uuid4(),
         session_id=cs.id,
         provider=provider.provider_name,
-        model_id=response.model or "deepseek-chat",
+        model_id=response.model or ProviderConfig().model,
         model_version=None,
         prompt_version=prompt_version,
         schema_version=schema_version,
