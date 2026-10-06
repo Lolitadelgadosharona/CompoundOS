@@ -458,7 +458,7 @@ function PublishReview({
           <PolicyTextReadOnly value={draft} />
           <AllocationReadOnly items={allocationInputs(draft)} />
           <aside className="notice" aria-label="Publication non-advisory notice">
-            <strong>Recordkeeping only</strong>
+            <strong>{process.env.NEXT_PUBLIC_COMPOUNDOS_PREVIEW_MODE === "true" ? "Your choices, your safeguards" : "Recordkeeping only"}</strong>
             <p>{NON_ADVISORY_NOTICE}</p>
           </aside>
           <label className="confirmation-row">
@@ -897,17 +897,17 @@ export function PolicyClient() {
   return (
     <main className="policy-shell">
       <header className="page-header">
-        <p className="eyebrow">CompoundOS · Sprint 002 Slice 2C</p>
+        <p className="eyebrow">{process.env.NEXT_PUBLIC_COMPOUNDOS_PREVIEW_MODE === "true" ? "YOUR FAMILY OFFICE" : "CompoundOS · Sprint 002 Slice 2C"}</p>
         <h1>Investment Policy</h1>
         <p className="lede">Record user-authored Policy text and target percentages through explicit, reviewable saves.</p>
       </header>
 
       <aside className="notice notice-warning" aria-label="Local-only limitation">
         <strong>Local-only, non-production limitation</strong>
-        <p>{LOCAL_ONLY_NOTICE}</p>
+        <p>{process.env.NEXT_PUBLIC_COMPOUNDOS_PREVIEW_MODE === "true" ? "Local Owner Preview — fictional data only. No broker or trade execution." : LOCAL_ONLY_NOTICE}</p>
       </aside>
       <aside className="notice" aria-label="Non-advisory notice">
-        <strong>Recordkeeping only</strong>
+        <strong>{process.env.NEXT_PUBLIC_COMPOUNDOS_PREVIEW_MODE === "true" ? "Your choices, your safeguards" : "Recordkeeping only"}</strong>
         <p>{NON_ADVISORY_NOTICE}</p>
         <p>CompoundOS does not provide investment advice, recommendations, or trade instructions.</p>
       </aside>

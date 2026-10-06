@@ -1,6 +1,8 @@
 import Link from "next/link";
+import OwnerDashboard from "../components/owner/dashboard";
 
 export default function HomePage() {
+  if (process.env.COMPOUNDOS_PREVIEW_MODE === "true") return <OwnerDashboard />;
   return (
     <main className="shell">
       <h1>CompoundOS</h1>

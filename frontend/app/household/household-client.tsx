@@ -301,17 +301,17 @@ export function HouseholdClient() {
   return (
     <main className="household-shell">
       <header className="page-header">
-        <p className="eyebrow">CompoundOS · Sprint 002 Slice 1</p>
+        <p className="eyebrow">{process.env.NEXT_PUBLIC_COMPOUNDOS_PREVIEW_MODE === "true" ? "YOUR FAMILY OFFICE" : "CompoundOS · Sprint 002 Slice 1"}</p>
         <h1>Household profile</h1>
-        <p className="lede">Record the household context that you provide, with an immutable audit trail.</p>
+        <p className="lede">{process.env.NEXT_PUBLIC_COMPOUNDOS_PREVIEW_MODE === "true" ? "Keep your family’s planning context and preferences in one place." : "Record the household context that you provide, with an immutable audit trail."}</p>
       </header>
 
       <aside className="notice notice-warning" aria-label="Local-only limitation">
         <strong>Local-only limitation</strong>
-        <p>{LOCAL_ONLY_NOTICE}</p>
+        <p>{process.env.NEXT_PUBLIC_COMPOUNDOS_PREVIEW_MODE === "true" ? "Local Owner Preview — fictional data only. No broker or trade execution." : LOCAL_ONLY_NOTICE}</p>
       </aside>
       <aside className="notice" aria-label="Non-advisory notice">
-        <strong>Recordkeeping only</strong>
+        <strong>{process.env.NEXT_PUBLIC_COMPOUNDOS_PREVIEW_MODE === "true" ? "Your choices, your safeguards" : "Recordkeeping only"}</strong>
         <p>{NON_ADVISORY_NOTICE}</p>
       </aside>
 
@@ -366,12 +366,25 @@ export function HouseholdClient() {
               <HouseholdSummary profile={profile} />
             )}
           </section>
+          {process.env.NEXT_PUBLIC_COMPOUNDOS_PREVIEW_MODE === "true" ? (
+            <details className="panel"><summary>Household activity & governance</summary>
+              <p>Detailed decision records are available under Decisions.</p>
+              <a href="/governance/journal">Open Journal and Audit</a>
           <AuditTimeline
             error={auditError}
             events={auditEvents}
             loading={auditLoading}
             onRetry={() => void refreshAuditEvents()}
           />
+            </details>
+          ) : (
+          <AuditTimeline
+            error={auditError}
+            events={auditEvents}
+            loading={auditLoading}
+            onRetry={() => void refreshAuditEvents()}
+          />
+          )}
         </>
       ) : null}
     </main>

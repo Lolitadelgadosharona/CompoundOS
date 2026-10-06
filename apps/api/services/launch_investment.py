@@ -63,12 +63,16 @@ def lock_household(session, hid):
     session.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:h,0))"), {"h": str(hid)})
 
 
+def audit_action(action):
+    return "preview." + action if preview_enabled() else action
+
+
 def audit(session, hid, action, eid, metadata):
     session.add(
         AuditEvent(
             household_id=hid,
             actor="preview-owner" if preview_enabled() else "local-owner",
-            action="preview." + action if preview_enabled() else action,
+            action=audit_action(action),
             entity_type="Contribution",
             entity_id=eid,
             event_metadata=dict(metadata, data_mode="SIMULATED", execution_allowed=False)
@@ -819,8 +823,8 @@ def candidate_detail(session, hid, cid):
     else:
         result.update(decision_status="not_reviewed", committee_status="not_requested")
     if session.execute(
-        text("SELECT 1 FROM audit_events WHERE entity_id=:i AND action='contribution.rejected'"),
-        {"i": cid},
+        text("SELECT 1 FROM audit_events WHERE entity_id=:i AND action=:action"),
+        {"i": cid, "action": audit_action("contribution.rejected")},
     ).scalar():
         result["decision_status"] = "rejected"
     return result
@@ -835,8 +839,8 @@ def validate_candidate(session, hid, cid):
     ):
         raise RecommendationUnavailable("Candidate expired or evidence integrity failed")
     rejected = session.execute(
-        text("SELECT 1 FROM audit_events WHERE entity_id=:i AND action='contribution.rejected'"),
-        {"i": cid},
+        text("SELECT 1 FROM audit_events WHERE entity_id=:i AND action=:action"),
+        {"i": cid, "action": audit_action("contribution.rejected")},
     ).scalar()
     if rejected:
         raise RecommendationUnavailable("Candidate rejected")

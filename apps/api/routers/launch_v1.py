@@ -301,8 +301,8 @@ def reject(cid: UUID, session: Session = Depends(get_session)):
     if row.get("decision_status") in {"confirmed", "archived"}:
         raise HTTPException(409, "Decision already confirmed")
     existing = session.execute(
-        text("SELECT 1 FROM audit_events WHERE entity_id=:i AND action='contribution.rejected'"),
-        {"i": cid},
+        text("SELECT 1 FROM audit_events WHERE entity_id=:i AND action=:action"),
+        {"i": cid, "action": svc.audit_action("contribution.rejected")},
     ).scalar()
     if existing:
         raise HTTPException(409, "Already rejected")
@@ -315,3 +315,55 @@ def reject(cid: UUID, session: Session = Depends(get_session)):
     )
     session.commit()
     return {"status": "rejected", "execution": "NONE"}
+
+
+@router.get("/owner-overview")
+def owner_overview(session: Session = Depends(get_session)):
+    """Preview presentation read model; reuse the deterministic evaluator, no persistence."""
+    from apps.api.services.owner_preview import enabled
+
+    if not enabled():
+        raise HTTPException(404, "Owner Preview only")
+    hid = household(session)
+    snapshot = dashboard(session)
+    valuation = load_valuation(session, hid)
+    snapshot["invested_value"] = (
+        str(valuation.total("position")) if valuation.total("position") is not None else None
+    )
+    analysis, reason = None, None
+    try:
+        config = svc.configuration(session, hid)
+        analysis = svc.evaluate(session, hid, config)
+    except (RecommendationUnavailable, InstrumentUnavailable, ValueError) as exc:
+        reason = str(exc)
+    current_review = False
+    if snapshot["candidates"]:
+        try:
+            svc.validate_candidate(session, hid, UUID(snapshot["candidates"][0]["id"]))
+            current_review = True
+        except (RecommendationUnavailable, ValueError):
+            pass
+    from apps.api.services.broker_connections import connection_directory
+
+    return {
+        "snapshot": snapshot,
+        "analysis": analysis,
+        "unavailable_reason": reason,
+        "current_review": current_review,
+        "connections": connection_directory(
+            [a for a in snapshot["accounts"] if a["source"] == "manual"]
+        ),
+    }
+
+
+@router.get("/connections")
+def connections(session: Session = Depends(get_session)):
+    from apps.api.services.owner_preview import enabled
+
+    if not enabled():
+        raise HTTPException(404, "Owner Preview only")
+    from apps.api.services.broker_connections import connection_directory
+    from apps.api.services.portfolio_reality import list_accounts
+
+    accounts = list_accounts(session, household(session))
+    return connection_directory([a for a in accounts if a["source"] == "manual"])

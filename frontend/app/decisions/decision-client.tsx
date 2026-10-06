@@ -613,7 +613,7 @@ function ConfirmReview({
           </dl>
 
           <aside className="notice" aria-label="Confirmation non-advisory notice">
-            <strong>Recordkeeping only</strong>
+            <strong>{process.env.NEXT_PUBLIC_COMPOUNDOS_PREVIEW_MODE === "true" ? "Your choices, your safeguards" : "Recordkeeping only"}</strong>
             <p>{NOTICE_CONFIRM}</p>
           </aside>
 
@@ -1373,7 +1373,7 @@ export function DecisionClient() {
   return (
     <main className="policy-shell">
       <header className="page-header">
-        <p className="eyebrow">CompoundOS · Sprint 002 Slice 3C</p>
+        <p className="eyebrow">{process.env.NEXT_PUBLIC_COMPOUNDOS_PREVIEW_MODE === "true" ? "YOUR FAMILY OFFICE" : "CompoundOS · Sprint 002 Slice 3C"}</p>
         <h1>Decision Journal</h1>
         <p className="lede">
           Record your Decisions explicitly. Draft, confirm, correct — nothing is automatic.
@@ -1383,7 +1383,7 @@ export function DecisionClient() {
       {/* Local-only notice */}
       <aside className="notice notice-warning" aria-label="Local-only limitation">
         <strong>Local-only, non-production limitation</strong>
-        <p>{LOCAL_ONLY_NOTICE}</p>
+        <p>{process.env.NEXT_PUBLIC_COMPOUNDOS_PREVIEW_MODE === "true" ? "Local Owner Preview — fictional data only. No broker or trade execution." : LOCAL_ONLY_NOTICE}</p>
       </aside>
 
       {/* Provisional non-advisory notices */}

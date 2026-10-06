@@ -1,18 +1,18 @@
-# Owner Local Test Guide
+# Owner Experience Test Guide
 
-Open **http://localhost:3802**. No certificate warning, login or API key is needed: the loopback-only Preview uses existing local TEST Owner access. Never enter real credentials or records.
+Open **http://localhost:3802**. No terminal, login or API key is required for normal Preview testing. Persistent DEMO/SIMULATED/no-trades banner applies throughout.
 
-1. Confirm sticky **OWNER PREVIEW / DEMO DATA / NO TRADES** banner.
-2. Open Dashboard / Investment Workspace: USD100k demo holdings plus CNY10k cash; no duplicated100k cash deposit.
-3. Inspect Household, Portfolio and Policy through Home navigation.
-4. Search VTI, QQQ, VXUS, SGOV, BRK.B or Apple; inspect canonical DEMO_EXCHANGE identity.
-5. Refresh DEMO prices/FX and inspect provenance. CNY/USD1/7 is a fixed example, not market FX.
-6. Monthly contribution is CNY10000. Historical50/30/10/10 candidate is blocked by real Guardian20% concentration; approval remains disabled.
-7. For a positive demo, click **Load balanced DEMO targets — existing20% limit**, then **Save targets against published Policy**. Six test targets16.67×five+16.65; no threshold changes or investment advice.
-8. Generate contribution candidate; inspect drift, Policy and Guardian. Unclassified-sector warning is preserved.
-9. Ask Committee → confirm **local simulated analysis** → **Confirm and run SIMULATED COMMITTEE**. Inspect supporting/opposing reasons, risks and citations; no DeepSeek request.
-10. **APPROVE DEMO PLAN** → Decision Journal → select **PREVIEW / SIMULATED** decision → confirmed snapshot and Audit timeline. Refresh to verify persistence. No transaction or execution queue.
+1. Dashboard: inspect total portfolio, holdings, cash, CNY10000 planned monthly contribution, risks and latest plan status.
+2. Portfolio: compare current%, target% and under/overweight positions. Figures come from the real engine.
+3. Review Investment Plan: read proposed purchases and why new capital goes to gaps. No selling is proposed.
+4. Prepare DEMO plan for review. No holdings/cash are changed.
+5. Inspect Policy and Guardian; warnings stay visible and critical blocks keep approval unavailable.
+6. ASK COMMITTEE → confirm local simulated analysis → Run SIMULATED COMMITTEE. Review both reasons, risks and confidence.
+7. APPROVE DEMO PLAN or REJECT. No broker/order/transaction is created; rejected plans cannot be approved later.
+8. Decisions: view date, amount, status and recorded governance. Expand a decision, then open Journal/evidence/audit one level deeper.
+9. Accounts: IB, Fidelity and Schwab are READ ONLY / Not Connected. Manual Portfolio is local records. No real credential fields exist.
+10. Settings → Household for context; explore6/8/10% and10/20/30-year educational wealth scenarios on Dashboard. They are SCENARIO, NOT FORECAST and do not affect the investment plan.
 
-API: http://localhost:8002; docs: http://localhost:8002/docs. Normal testing uses the primary URL only.
+Existing records are preserved. History contains both approval and rejection examples created during verification. Current CNY cash is distinct from the next planned monthly contribution. Performance metrics without trusted history stay Not available.
 
-Developer start: `./scripts/start-owner-preview.sh`; stop: `./scripts/stop-owner-preview.sh` from this dedicated worktree. Stop preserves data volumes and never stops unrelated projects. Do not run `down -v` or copy Preview data to LIVE.
+Developer start/stop remains `./scripts/start-owner-preview.sh` / `./scripts/stop-owner-preview.sh`; stop preserves volumes and never touches other projects. Do not enter real credentials or copy this Preview DB into LIVE.
