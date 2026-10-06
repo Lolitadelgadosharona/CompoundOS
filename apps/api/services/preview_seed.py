@@ -16,6 +16,37 @@ from apps.api.services.portfolio_reality import add_account, add_cash
 from apps.api.services.preview_providers import DemoProvider
 
 
+def restore_review_strategy(s, hid):
+    """Append Owner-authorized DEMO strategy once; never rewrite history or Policy."""
+    current = svc.configuration(s, hid)
+    applied = s.execute(
+        text(
+            "SELECT 1 FROM investment_configurations WHERE household_id=:h "
+            "AND settings->>'owner_review_strategy'='review-2' LIMIT 1"
+        ),
+        {"h": hid},
+    ).scalar()
+    if applied:
+        return  # Subsequent explicit Owner settings are never reset on restart.
+    assets = {
+        symbol: canonical_asset(s, DemoProvider().identify(symbol))
+        for symbol in DemoProvider.catalog
+    }
+    settings = dict(current["settings"])
+    settings["owner_review_strategy"] = "review-2"
+    settings["targets"] = [
+        {
+            "asset_id": str(assets[symbol].id),
+            "weight": weight,
+            "leverage_status": "unleveraged",
+            "equity_exposure_pct": "0" if symbol == "SGOV" else "100",
+        }
+        for symbol, weight in [("VTI", "50"), ("QQQ", "30"), ("VXUS", "10"), ("SGOV", "10")]
+    ]
+    svc.configure(s, hid, settings)
+    svc.refresh_data(s, hid)
+
+
 def seed():
     require_preview()
     with SessionLocal() as s:
@@ -48,7 +79,8 @@ def seed():
                 .household_name.startswith("Owner Preview Household")
             ):
                 raise RuntimeError("Refusing non-preview household")
-            print("Existing preview data retained; no reseed")
+            restore_review_strategy(s, s.query(HouseholdProfile).first().id)
+            print("Existing ledger and history retained; Owner review strategy version ensured")
             return
         now = datetime.now(timezone.utc)
         h = HouseholdProfile(
@@ -135,6 +167,7 @@ def seed():
             s,
             h.id,
             {
+                "owner_review_strategy": "review-2",
                 "base_currency": "USD",
                 "monthly_currency": "CNY",
                 "monthly_amount": "10000",

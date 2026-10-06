@@ -249,12 +249,38 @@ def evaluate_sector_concentration(
     if threshold is None:
         threshold = DEFAULT_MAX_SECTOR_PCT
 
+    from apps.api.services.owner_preview import enabled as preview_enabled
+
+    preview = preview_enabled()
+    missing = any(
+        not p.sector
+        or p.sector.lower() in {"unclassified", "unknown", "diversified"}
+        or p.asset_type.upper() in {"ETF", "FUND"}
+        for p in positions
+    )
     sector_values: dict[str, Decimal] = {}
     for p in positions:
+        if preview and (
+            not p.sector
+            or p.sector.lower() in {"unclassified", "unknown", "diversified"}
+            or p.asset_type.upper() in {"ETF", "FUND"}
+        ):
+            continue  # Missing look-through is neither a sector nor a safe exposure.
         s = p.sector or "Unclassified"
         sector_values[s] = sector_values.get(s, Decimal("0")) + (p.market_value or Decimal("0"))
 
     results: list[EvalResult] = []
+    if preview and missing:
+        results.append(
+            EvalResult(
+                exceeded=False,
+                detail=(
+                    "Sector exposure NOT EVALUATED: "
+                    "classification / ETF look-through unavailable"
+                ),
+                context={"evaluation_status": "NOT_EVALUATED"},
+            )
+        )
     for sector, value in sector_values.items():
         pct = (value / total_value * 100).quantize(Decimal("0.01"))
         if pct > threshold:

@@ -122,6 +122,15 @@ def configure(session, hid, settings):
 
     settings = dict(settings)
     settings["funding_account_id"] = str(funding_account(session, hid, settings)["id"])
+    if preview_enabled():
+        # Existing append-only configuration is the Owner strategy version, not the ledger.
+        settings["strategy"] = {
+            "name": "Owner-approved DEMO strategic allocation",
+            "approval": "EXPLICIT_OWNER_CONFIGURATION",
+            "data_mode": "DEMO",
+            "outside_target_weight": "0",
+            "sales_authorized": False,
+        }
     targets = settings["targets"]
     if len({t["asset_id"] for t in targets}) != len(targets):
         raise ValueError("Duplicate canonical target")
@@ -696,6 +705,7 @@ def evaluate(session, hid, config, now=None, funding="monthly"):
     guardian_findings += _confirmed_findings(legacy)
     guardian_findings += _confirmed_findings(projected_legacy)
     guardian_blocked = any(f.get("severity") == "critical" for f in guardian_findings)
+    incomplete_checks = any(f.get("severity") == "not_evaluated" for f in guardian_findings)
     return {
         "classification": "FACT",
         "data_mode": "SIMULATED" if preview_enabled() else "LIVE",
@@ -738,11 +748,19 @@ def evaluate(session, hid, config, now=None, funding="monthly"):
             },
         },
         "guardian": {
-            "status": "BLOCKED" if guardian_blocked else "WARNING" if guardian_findings else "PASS",
+            "status": "BLOCKED"
+            if guardian_blocked
+            else "WARNING"
+            if any(f.get("severity") != "not_evaluated" for f in guardian_findings)
+            else "NOT EVALUATED"
+            if incomplete_checks
+            else "PASS",
             "findings": guardian_findings,
             "current_analysis": legacy,
         },
-        "recommendation_ready": not policy_blocks and not guardian_blocked,
+        "recommendation_ready": not policy_blocks
+        and not guardian_blocked
+        and not incomplete_checks,
     }
 
 
@@ -1202,6 +1220,17 @@ def policy_guardian_findings(session, hid, version, valuation, thresholds):
         ("exploration", gi.evaluate_exploration_capital_limit),
     ]:
         for result in fn(session, hid, str(version.id), valuation=valuation):
+            if (
+                preview_enabled()
+                and (result.context or {}).get("evaluation_status") == "NOT_EVALUATED"
+            ):
+                guardian_findings.append(
+                    {
+                        "check": label,
+                        "detail": result.detail,
+                        "severity": "not_evaluated",
+                    }
+                )
             if result.exceeded:
                 rule_type = {
                     "concentration": "max_single_position_pct",
