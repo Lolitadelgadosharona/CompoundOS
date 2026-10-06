@@ -21,14 +21,33 @@ class StartResearchRequest(BaseModel):
 
 
 @router.post("/start")
-def start_research(body: StartResearchRequest,
-                   background_tasks: BackgroundTasks,
-                   session: Session = Depends(get_session)):
+def start_research(
+    body: StartResearchRequest,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_session),
+):
     """Create the research FK chain and start async REAL pipeline execution."""
     if not body.symbol or not body.symbol.strip():
         raise HTTPException(status_code=400, detail="Symbol is required")
 
-    symbol = body.symbol.strip().upper()
+    from apps.api.services.instrument_resolver import (
+        AmbiguousInstrument,
+        InstrumentUnavailable,
+        canonical_asset,
+        resolve_query,
+    )
+    from apps.api.services.launch_providers import get_instrument_provider
+
+    try:
+        instrument = resolve_query(body.symbol, get_instrument_provider())
+        canonical = canonical_asset(session, instrument)
+        symbol = instrument.symbol
+    except AmbiguousInstrument as exc:
+        raise HTTPException(
+            409, detail={"message": str(exc), "candidates": exc.candidates}
+        ) from exc
+    except InstrumentUnavailable as exc:
+        raise HTTPException(422, str(exc)) from exc
 
     from apps.api.repositories.decisions import get_household_id
 
@@ -37,7 +56,9 @@ def start_research(body: StartResearchRequest,
         raise HTTPException(status_code=404, detail="Household profile not found")
 
     # Create idea → review → request → run chain (real records)
-    result = DashboardResearchService.create_request(session, symbol, household_id)
+    result = DashboardResearchService.create_request(
+        session, symbol, household_id, asset_id=canonical.id
+    )
     run_id = UUID(result["run_id"])
 
     # Create progress tracker entry

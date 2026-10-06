@@ -1,0 +1,83 @@
+# Isolated local staging only. Never combine with production Compose or production volumes.
+# Supply private test-only DB password and exact reviewed image tags via environment.
+x-staging-logging: &staging-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+services:
+  db:
+    logging: *staging-logging
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: compoundos
+      POSTGRES_PASSWORD: ${COMPOUNDOS_STAGING_DB_PASSWORD:?Private staging password required}
+      POSTGRES_DB: compoundos_readiness_staging_test
+    ports:
+      - '127.0.0.1:55468:5432'
+    volumes:
+      - staging_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U compoundos -d compoundos_readiness_staging_test']
+      interval: 2s
+      timeout: 3s
+      retries: 20
+  api:
+    logging: *staging-logging
+    image: ${COMPOUNDOS_STAGING_API_IMAGE:?Exact reviewed API image required}
+    environment:
+      DATABASE_URL: postgresql+psycopg://compoundos:${COMPOUNDOS_STAGING_DB_PASSWORD:?required}@db:5432/compoundos_readiness_staging_test
+      ENVIRONMENT: production
+      COMPOUNDOS_PUBLIC_ORIGIN: https://localhost:54468
+      COMPOUNDOS_RUN_MIGRATIONS: '0'
+      COMPOUNDOS_YAHOO_ACCESS_AUTHORIZED: '0'
+      COMPOUNDOS_ALLOW_ENV_CREDENTIALS: '0'
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:8000/health']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  web:
+    logging: *staging-logging
+    image: ${COMPOUNDOS_STAGING_WEB_IMAGE:?Exact reviewed Web image required}
+    environment:
+      API_INTERNAL_URL: http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+  caddy:
+    logging: *staging-logging
+    image: caddy:2-alpine
+    ports:
+      - '127.0.0.1:54468:443'
+    configs:
+      - source: staging_caddyfile
+        target: /etc/caddy/Caddyfile
+    volumes:
+      - staging_caddy_data:/data
+      - staging_caddy_config:/config
+    depends_on:
+      - api
+      - web
+configs:
+  staging_caddyfile:
+    content: |
+      localhost {
+        tls internal
+        @backend path /api/* /health /static/* /dashboard /memo/* /learning /settings/*
+        reverse_proxy @backend api:8000
+        reverse_proxy web:3000
+        encode gzip
+        header {
+          X-Content-Type-Options nosniff
+          X-Frame-Options DENY
+          Referrer-Policy strict-origin-when-cross-origin
+        }
+      }
+volumes:
+  staging_pgdata:
+  staging_caddy_data:
+  staging_caddy_config:

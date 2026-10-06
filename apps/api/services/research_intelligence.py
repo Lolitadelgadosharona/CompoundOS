@@ -305,6 +305,11 @@ class ResearchIntelligencePipeline:
                 ) -> ResearchOutput:
         # Phase 1: Evidence
         bundle = self.evidence.collect(session, household_id, symbol)
+        if bundle.portfolio_context.get("recommendation_ready") is False:
+            raise ValueError(
+                "Recommendation unavailable: portfolio valuation "
+                + bundle.portfolio_context["status"]
+            )
 
         # Phase 2: Perspectives
         perspectives = self._execute_perspectives(

@@ -1,5 +1,7 @@
 """Tests for Sprint 014 Slice D — Portfolio Intelligence."""
 
+import pytest
+
 from apps.api.services.portfolio_intelligence import (
     Holding,
     PortfolioIntelligenceService,
@@ -53,15 +55,18 @@ class TestConcentration:
         assert len(ctx.concentration_warnings) > 0
 
     def test_small_position_no_warning(self):
-        holdings = [
-            Holding("AAPL", 40, 150, 175, "tech"),
-            Holding("GOOGL", 40, 140, 180, "tech"),
-            Holding("JNJ", 50, 150, 160, "healthcare"),
-            Holding("PG", 60, 140, 155, "consumer"),
-            Holding("XOM", 60, 60, 115, "energy"),
-        ]
+        holdings = [Holding(symbol, 10, 100, 100, sector) for symbol, sector in
+                    [("AAPL", "tech"), ("GOOGL", "tech"), ("JNJ", "healthcare"),
+                     ("PG", "consumer"), ("XOM", "energy"), ("TLT", "bonds")]]
         ctx = PortfolioIntelligenceService.analyze(holdings)
         assert len(ctx.concentration_warnings) == 0
+
+    def test_twenty_percent_boundary_is_unchanged(self):
+        holdings = [Holding(str(i), 1, 100, 100, str(i)) for i in range(5)]
+        assert PortfolioIntelligenceService.analyze(holdings).concentration_warnings == []
+        holdings[0].current_price = 101
+        assert any("20% threshold" in warning for warning in
+                   PortfolioIntelligenceService.analyze(holdings).concentration_warnings)
 
     def test_sector_over_40pct_warns(self):
         holdings = [
@@ -111,8 +116,8 @@ class TestCurrencyExposure:
             Holding("AAPL", 100, 150, 175, "tech", "USD"),
             Holding("NVO", 100, 100, 120, "healthcare", "DKK"),
         ]
-        ctx = PortfolioIntelligenceService.analyze(holdings)
-        assert len(ctx.currency_exposure) == 2
+        with pytest.raises(ValueError, match="common valuation contract"):
+            PortfolioIntelligenceService.analyze(holdings)
 
 
 class TestPositionWeight:

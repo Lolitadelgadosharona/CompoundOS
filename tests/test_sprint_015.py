@@ -2,6 +2,7 @@
 
 from uuid import uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 
 from apps.api.main import app
@@ -29,13 +30,16 @@ def _seed_household():
 
     s = SessionLocal()
     try:
-        s.execute(text(
-            "INSERT INTO household_profiles (id, singleton_key,"
-            " household_name, base_currency, investment_horizon,"
-            " liquidity_needs, risk_statement, notes, created_at, updated_at)"
-            " VALUES (:id, TRUE, 't', 'USD', 'lt', 'l', 'm', '', NOW(), NOW())"
-            " ON CONFLICT (singleton_key) DO NOTHING"
-        ), {"id": uuid4()})
+        s.execute(
+            text(
+                "INSERT INTO household_profiles (id, singleton_key,"
+                " household_name, base_currency, investment_horizon,"
+                " liquidity_needs, risk_statement, notes, created_at, updated_at)"
+                " VALUES (:id, TRUE, 't', 'USD', 'lt', 'l', 'm', '', NOW(), NOW())"
+                " ON CONFLICT (singleton_key) DO NOTHING"
+            ),
+            {"id": uuid4()},
+        )
         s.commit()
     finally:
         s.close()
@@ -44,6 +48,7 @@ def _seed_household():
 # ═══════════════════════════════════════════════════════════════════════
 # Slice B — Dashboard Data Integration
 # ═══════════════════════════════════════════════════════════════════════
+
 
 class TestDashboardData:
     def test_summary_endpoint(self):
@@ -95,6 +100,7 @@ class TestDashboardData:
 # Slice C — Async Pipeline UX
 # ═══════════════════════════════════════════════════════════════════════
 
+
 class TestPipelineProgress:
     def test_create_progress(self):
         rid = uuid4()
@@ -105,8 +111,7 @@ class TestPipelineProgress:
     def test_progress_state_transitions(self):
         rid = uuid4()
         PipelineProgressTracker.create(rid)
-        p = PipelineProgressTracker.update(rid, PipelineState.RUNNING,
-                                            perspective_count=3)
+        p = PipelineProgressTracker.update(rid, PipelineState.RUNNING, perspective_count=3)
         assert p is not None
         assert p.state == PipelineState.RUNNING
         assert p.progress_pct == 55  # 25 + 3*10
@@ -114,8 +119,7 @@ class TestPipelineProgress:
     def test_complete_sets_confidence(self):
         rid = uuid4()
         PipelineProgressTracker.create(rid)
-        PipelineProgressTracker.update(rid, PipelineState.COMPLETE,
-                                       memo_id="m1", confidence=72)
+        PipelineProgressTracker.update(rid, PipelineState.COMPLETE, memo_id="m1", confidence=72)
         p = PipelineProgressTracker.get(rid)
         assert p is not None
         assert p.is_complete
@@ -125,8 +129,7 @@ class TestPipelineProgress:
     def test_failed_state(self):
         rid = uuid4()
         PipelineProgressTracker.create(rid)
-        PipelineProgressTracker.update(rid, PipelineState.FAILED,
-                                       error="Provider unavailable")
+        PipelineProgressTracker.update(rid, PipelineState.FAILED, error="Provider unavailable")
         p = PipelineProgressTracker.get(rid)
         assert p is not None
         assert p.is_failed
@@ -152,8 +155,7 @@ class TestPipelineProgress:
 
     def test_start_endpoint(self):
         _seed_household()
-        r = client.post("/api/research/start",
-                        json={"symbol": "AAPL"})
+        r = client.post("/api/research/start", json={"symbol": "AAPL"})
         assert r.status_code == 200
         data = r.json()
         assert data["symbol"] == "AAPL"
@@ -168,6 +170,7 @@ class TestPipelineProgress:
 # ═══════════════════════════════════════════════════════════════════════
 # Slice A — Real Investment Validation
 # ═══════════════════════════════════════════════════════════════════════
+
 
 class TestValidation:
     def test_symbols_list(self):
@@ -202,10 +205,8 @@ class TestValidation:
 
     def test_summary(self):
         reports = [
-            ValidationService.evaluate("AAPL", "m1",
-                                       [("c", 8, "")]),
-            ValidationService.evaluate("MSFT", "m2",
-                                       [("c", 3, "")]),
+            ValidationService.evaluate("AAPL", "m1", [("c", 8, "")]),
+            ValidationService.evaluate("MSFT", "m2", [("c", 3, "")]),
         ]
         summary = ValidationService.summary(reports)
         assert summary["total"] == 2
@@ -217,11 +218,11 @@ class TestValidation:
 # Slice D — No autonomous trading
 # ═══════════════════════════════════════════════════════════════════════
 
+
 class TestNoTrading:
     def test_research_start_returns_no_trade(self):
         _seed_household()
-        r = client.post("/api/research/start",
-                        json={"symbol": "AAPL"})
+        r = client.post("/api/research/start", json={"symbol": "AAPL"})
         data = r.json()
         assert "trade" not in str(data).lower()
         assert "execute" not in str(data).lower()
@@ -229,9 +230,21 @@ class TestNoTrading:
 
     def test_status_returns_no_trade(self):
         _seed_household()
-        r = client.post("/api/research/start",
-                        json={"symbol": "AAPL"})
+        r = client.post("/api/research/start", json={"symbol": "AAPL"})
         rid = r.json()["run_id"]
         s = client.get(f"/api/research/{rid}/status")
         data = s.json()
         assert "trade" not in str(data).lower()
+
+
+@pytest.fixture(autouse=True)
+def canonical_provider_fixture(monkeypatch):
+    from tests.test_launch_v1 import SyntheticProvider
+
+    provider = SyntheticProvider()
+    monkeypatch.setattr(
+        "apps.api.services.launch_providers.get_instrument_provider", lambda: provider
+    )
+    monkeypatch.setattr(
+        "apps.api.services.symbol_resolver.get_instrument_provider", lambda: provider
+    )

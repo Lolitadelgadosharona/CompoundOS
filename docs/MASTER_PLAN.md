@@ -736,3 +736,23 @@ Build CompoundOS as a trustworthy, explainable operating system for family offic
   field) resolved. CI: 6/6 checks pass, 302 tests (102 non-PG + 138 PG +
   62 frontend). Slice 3B is Done. Sprint 002 remains In Progress. Slice 3C
   remains Not Authorized and Not Started.
+
+- 2026-10-04: Owner 授权 CompoundOS × Folio Phase 1 本地代码/测试/文档修复。
+  基于 GitHub main 20ceca5 的隔离分支 codex/compoundos-phase1-valuation；
+  未并入 PR117/118/119。共同 valuation-v1、多币种与 JOIN 聚合修复、
+  readiness/人工成本标识、静态 allocation unavailable、依赖维护与测试
+  修正进入本地 Owner Review。历史规则/UUID/Policy/快照不变；新 schema、
+  broker、交易、生产迁移、部署、push/PR/merge 未授权且未执行。
+  Deployed SHA UNKNOWN。后续 CompoundOS 开发统一使用 Codex；Resolver 等
+  下一阶段尚未实施。具体证据和兼容限制见 docs/folio-integration/PHASE1_*.md。
+
+
+## 2026-10-05 — Owner authorized V1 Launch Acceleration Sprint
+此次明确授权覆盖Phase1-only历史状态：隔离codex/compoundos-launch-v1、动态
+Resolver、market/FX、contribution-first、复用Policy/Guardian/Committee/Journal，
+manual Owner workspace与build metadata。逻辑commit/安全条件push/draft PR授权；
+merge/production migration/deploy/broker/trading仍未授权。原repo未提交文件与
+未合并PR117/118/119保持，main20ceca5为base。新增0035仅在新_test DB验证，
+历史原币账本/UUID/Policy/snapshot不改写。Backtest仅typed evidence boundary，
+MC/optimizer后置。DeepSeek与生产market使用/留存授权未确认，不得称已上线。
+结果见docs/launch-v1与COMPOUNDOS_V1_LAUNCH_REPORT.md，完成后停等Owner review。

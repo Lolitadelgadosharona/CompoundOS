@@ -7,7 +7,6 @@ All data is computed live from existing systems. No caching.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
@@ -36,24 +35,55 @@ ACTIVITY_FEED_LIMIT = 20
 
 def build_dashboard(session: Session, household_id: UUID) -> DashboardSnapshot:
     """Assemble complete dashboard from all existing systems. Read-only."""
-    positions = _load_latest_positions(session, household_id)
-    cash = _load_latest_cash_balances(session, household_id)
-    base_currency = _get_base_currency(session, household_id) or "USD"
+    from apps.api.services.valuation import load_valuation
 
-    net_worth = _compute_net_worth(
-        session, positions, cash, base_currency,
+    valuation = load_valuation(session, household_id)
+    positions = valuation.positions()
+    native = {}
+    accounts = {}
+    for entry in valuation.entries:
+        if entry.get("native_value") is not None:
+            ccy = entry["currency"]
+            native[ccy] = native.get(ccy, Decimal(0)) + entry["native_value"]
+        if entry["base_value"] is not None:
+            bucket = entry.get("capital_bucket") or "Other"
+            accounts[bucket] = accounts.get(bucket, Decimal(0)) + entry["base_value"]
+    net_worth = NetWorth(
+        total_value=str(valuation.total().quantize(Decimal("0.01")))
+        if valuation.total() is not None
+        else None,
+        base_currency=valuation.base_currency or "UNKNOWN",
+        quality_status=valuation.status,
+        recommendation_ready=valuation.recommendation_ready,
+        quality_reasons=valuation.reasons + valuation.trust_blockers,
+        by_currency={k: str(v) for k, v in native.items()},
+        by_account_type={k: str(v) for k, v in accounts.items()} if not valuation.reasons else {},
+        unconverted_currencies=sorted(
+            {e["currency"] for e in valuation.entries if e["base_value"] is None and e["currency"]}
+        ),
+        as_of=valuation.as_of,
     )
     allocation = _compute_allocation(positions)
+    allocation.quality_status = valuation.status
     compliance = _compute_compliance(session, positions, household_id)
-    risks = _compute_risks(session, household_id)
+    if not valuation.recommendation_ready:
+        compliance.overall_status = valuation.status.lower()
+    risks = _compute_risks(session, household_id, positions)
+    if not valuation.recommendation_ready:
+        risks.concentration_risk = "unknown"
     pending = _load_pending_decisions(session, household_id)
     ideas = _count_ideas(session, household_id)
     activity = _load_activity_feed(session, household_id)
 
     return DashboardSnapshot(
-        net_worth=net_worth, allocation=allocation,
-        policy_compliance=compliance, risks=risks,
-        pending_decisions=pending, ideas=ideas,
+        valuation=valuation.contract(),
+        cash_position=_format_cash_position(valuation),
+        net_worth=net_worth,
+        allocation=allocation,
+        policy_compliance=compliance,
+        risks=risks,
+        pending_decisions=pending,
+        ideas=ideas,
         recent_activity=activity,
     )
 
@@ -87,128 +117,8 @@ def is_high_impact(
 
 
 def _load_latest_positions(session: Session, household_id: UUID) -> list[dict]:
-    rows = session.execute(
-        text(
-            "SELECT p.id, p.market_value, p.quantity, a.capital_bucket,"
-            " ast.sector, ast.asset_class, ast.currency, ast.name"
-            " FROM positions p"
-            " JOIN accounts a ON p.account_id = a.id"
-            " JOIN portfolios pf ON a.portfolio_id = pf.id"
-            " JOIN assets ast ON p.asset_id = ast.id"
-            " WHERE pf.household_id = :hid AND p.is_latest = TRUE"
-        ),
-        {"hid": household_id},
-    ).fetchall()
-    return [dict(r._mapping) for r in rows]
-
-
-def _load_latest_cash_balances(
-    session: Session, household_id: UUID,
-) -> list[dict]:
-    rows = session.execute(
-        text(
-            "SELECT cb.amount, cb.currency, a.account_type"
-            " FROM cash_balances cb"
-            " JOIN accounts a ON cb.account_id = a.id"
-            " JOIN portfolios pf ON a.portfolio_id = pf.id"
-            " WHERE pf.household_id = :hid AND cb.is_latest = TRUE"
-        ),
-        {"hid": household_id},
-    ).fetchall()
-    return [dict(r._mapping) for r in rows]
-
-
-def _get_base_currency(
-    session: Session, household_id: UUID,
-) -> Optional[str]:
-    row = session.execute(
-        text(
-            "SELECT base_currency FROM household_profiles WHERE id = :hid"
-        ),
-        {"hid": household_id},
-    ).fetchone()
-    return row[0] if row else None
-
-
-def _get_fx_rate(
-    session: Session, from_currency: str, to_currency: str,
-) -> Optional[Decimal]:
-    if from_currency == to_currency:
-        return Decimal("1")
-    row = session.execute(
-        text(
-            "SELECT rate FROM fx_rates"
-            " WHERE from_currency = :fc AND to_currency = :tc"
-            " AND observed_at <= :now"
-            " ORDER BY observed_at DESC LIMIT 1"
-        ),
-        {"fc": from_currency, "tc": to_currency, "now": datetime.now(timezone.utc)},
-    ).fetchone()
-    return Decimal(str(row[0])) if row else None
-
-
-def _compute_net_worth(
-    session: Session,
-    positions: list[dict],
-    cash: list[dict],
-    base_currency: str,
-) -> NetWorth:
-    by_currency: dict[str, Decimal] = {}
-    by_account_type: dict[str, Decimal] = {}
-    unconverted: list[str] = []
-
-    for p in positions:
-        ccy = p.get("currency") or "USD"
-        mv = p.get("market_value") or Decimal("0")
-        by_currency[ccy] = by_currency.get(ccy, Decimal("0")) + mv
-        atype = p.get("capital_bucket") or "Other"
-        try:
-            rate = _get_fx_rate(session, ccy, base_currency)
-            if rate is not None:
-                by_account_type[atype] = (
-                    by_account_type.get(atype, Decimal("0"))
-                    + mv * rate
-                )
-            else:
-                unconverted.append(ccy)
-        except Exception:
-            unconverted.append(ccy)
-
-    for cb in cash:
-        ccy = cb.get("currency") or "USD"
-        amt = cb.get("amount") or Decimal("0")
-        by_currency[ccy] = by_currency.get(ccy, Decimal("0")) + amt
-        atype = cb.get("account_type") or "Unknown"
-        try:
-            rate = _get_fx_rate(session, ccy, base_currency)
-            if rate is not None:
-                by_account_type[atype] = (
-                    by_account_type.get(atype, Decimal("0"))
-                    + amt * rate
-                )
-        except Exception:
-            pass
-
-    total = sum(by_account_type.values())
-    if total == 0:
-        return NetWorth(
-            total_value="0.00",
-            by_currency={k: str(v.quantize(Decimal("0.01")))
-                         for k, v in by_currency.items()} if by_currency else {},
-            by_account_type={},
-            unconverted_currencies=sorted(set(unconverted)),
-            as_of=datetime.now(timezone.utc),
-        )
-
-    return NetWorth(
-        total_value=str(Decimal(total).quantize(Decimal("0.01"))),
-        by_currency={k: str(v.quantize(Decimal("0.01")))
-                     for k, v in by_currency.items()},
-        by_account_type={k: str(v.quantize(Decimal("0.01")))
-                        for k, v in by_account_type.items()},
-        unconverted_currencies=sorted(set(unconverted)),
-        as_of=datetime.now(timezone.utc),
-    )
+    from apps.api.services.valuation import load_valuation
+    return load_valuation(session, household_id).positions()
 
 
 def _compute_allocation(positions: list[dict]) -> Allocation:
@@ -366,7 +276,7 @@ def _compute_compliance(
 
 
 def _compute_risks(
-    session: Session, household_id: UUID,
+    session: Session, household_id: UUID, positions=None,
 ) -> RiskSummary:
     events = session.execute(
         text(
@@ -390,8 +300,10 @@ def _compute_risks(
         {"hid": household_id},
     ).scalar()
 
-    # Concentration risk: max position % of total
-    positions = _load_latest_positions(session, household_id)
+    # Concentration risk: common base-currency position values.
+    if positions is None:
+        from apps.api.services.valuation import load_valuation
+        positions = load_valuation(session, household_id).positions()
     total = sum((p.get("market_value") or Decimal("0")) for p in positions)
     max_pct = Decimal("0")
     if total > 0:
@@ -761,6 +673,8 @@ def learning_metrics(session: Session) -> dict:
 def allocation_context(allocation) -> dict:
     """Map DashboardSnapshot.allocation → the dashboard template's 3-card
     equities/bonds/cash shape (best-effort from asset classes)."""
+    if allocation.quality_status == "INCOMPLETE":
+        return {"equities": None, "bonds": None, "cash": None}
     result = {"equities": 0.0, "bonds": 0.0, "cash": 0.0}
     for cls, entry in allocation.by_asset_class.items():
         try:
@@ -783,17 +697,19 @@ def cash_position(session: Session, household_id: UUID) -> Optional[str]:
     Returns a formatted string, or None when no cash balances exist — the
     UI renders "Not configured" for None (never fabricates a figure).
     """
-    cash = _load_latest_cash_balances(session, household_id)
-    if not cash:
+    from apps.api.services.valuation import load_valuation
+
+    valuation = load_valuation(session, household_id)
+    return _format_cash_position(valuation)
+
+
+def _format_cash_position(valuation):
+    if not any(e["kind"] == "cash" for e in valuation.entries):
         return None
-    base = _get_base_currency(session, household_id) or "USD"
-    total = Decimal("0")
-    for cb in cash:
-        amt = cb.get("amount") or Decimal("0")
-        ccy = cb.get("currency") or base
-        rate = _get_fx_rate(session, ccy, base) or Decimal("1")
-        total += amt * rate
-    return f"${total.quantize(Decimal('0.01'))}"
+    total = valuation.total("cash")
+    if total is None:
+        return f"Incomplete valuation ({valuation.base_currency})"
+    return f"{valuation.base_currency} {total.quantize(Decimal('0.01'))} ({valuation.status})"
 
 
 def last_research(session: Session) -> str:

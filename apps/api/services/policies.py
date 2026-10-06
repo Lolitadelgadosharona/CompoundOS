@@ -16,6 +16,8 @@ from apps.api.models import (
     InvestmentPolicyDraftAllocation,
     InvestmentPolicyVersion,
     InvestmentPolicyVersionAllocation,
+    PolicyCapitalBucket,
+    PolicyRule,
 )
 from apps.api.policy_schemas import (
     POLICY_TEXT_FIELDS,
@@ -301,6 +303,32 @@ def discard_draft(session: Session, expected_revision: int) -> None:
         )
 
 
+def _copy_policy_governance(session, source_parent, source_id, target_parent, target_id):
+    """Snapshot existing bucket/rule values within the Policy transaction; never reinterpret."""
+    fields_by_model = (
+        (
+            PolicyCapitalBucket,
+            ("bucket_name", "target_pct", "min_pct", "max_pct", "description", "sort_order"),
+        ),
+        (
+            PolicyRule,
+            ("rule_type", "rule_value", "severity", "enabled", "description", "sort_order"),
+        ),
+    )
+    for model, fields in fields_by_model:
+        rows = session.query(model).filter(
+            getattr(model, source_parent + "_id") == source_id
+        ).all()
+        session.add_all(
+            model(
+                **{target_parent + "_id": target_id},
+                **{field: getattr(row, field) for field in fields},
+            )
+            for row in rows
+        )
+    session.flush()
+
+
 def create_new_draft(
     session: Session, payload: CreatePolicyDraftRequest
 ) -> tuple[InvestmentPolicyDraft, list[InvestmentPolicyDraftAllocation]]:
@@ -337,6 +365,8 @@ def create_new_draft(
                 for item in source_allocations
             ]
             allocations = replace_draft_allocations(session, draft.id, allocation_values)
+            if source is not None:
+                _copy_policy_governance(session, "version", source.id, "draft", draft.id)
             policy.updated_at = datetime.now(timezone.utc)
             metadata = {"draft_revision": draft.revision}
             if source is not None:
@@ -414,6 +444,7 @@ def publish_draft(
             ]
             session.add_all(allocations)
             session.flush()
+            _copy_policy_governance(session, "draft", draft.id, "version", version.id)
             version.sealed_at = now
             session.flush()
             session.delete(draft)
@@ -574,6 +605,7 @@ def setup_personal_policy(
             for item in draft_allocations
         ])
         session.flush()
+        _copy_policy_governance(session, "draft", draft.id, "version", version.id)
         version.sealed_at = now
         session.flush()
         session.delete(draft)

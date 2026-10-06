@@ -37,8 +37,9 @@ def _symbol_for_run(session: Session, run_id: UUID) -> str:
     # (e.g. "Research: AAPL" → "AAPL").
     for prefix in ("Research: ", "research: "):
         if title.startswith(prefix):
-            return title[len(prefix):].strip()
+            return title[len(prefix) :].strip()
     return title
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # CommitteeIntegrationService
@@ -50,7 +51,9 @@ class CommitteeIntegrationService:
 
     @staticmethod
     def complete_research(
-        session: Session, run_id: UUID, household_id: UUID,
+        session: Session,
+        run_id: UUID,
+        household_id: UUID,
     ) -> dict:
         # Verify research run exists and has memo
         memo_row = session.execute(
@@ -87,24 +90,34 @@ class CommitteeIntegrationService:
                     " 'Automated AI research has been completed.',"
                     " :st, NOW(), NOW())"
                 ),
-                {"id": session_id, "hid": household_id,
-                 "st": "draft"},
+                {"id": session_id, "hid": household_id, "st": "draft"},
             )
             session.flush()
 
+        from apps.api.services.launch_investment import digest, research_review_context
+        from apps.api.services.valuation import RecommendationUnavailable
+
+        try:
+            context = research_review_context(session, run_id)
+        except RecommendationUnavailable:
+            context = None  # Historical analysis remains readable; approval is unavailable.
+        facts = {
+            "memo_id": str(memo_row[0]),
+            "run_id": str(run_id),
+            "symbol": _symbol_for_run(session, run_id),
+            "thesis": memo_row[1].get("thesis", ""),
+            "confidence": memo_row[2],
+            "review_context": context,
+        }
+
         # Link research request to committee review
         req = session.execute(
-            text(
-                "SELECT request_id FROM research_runs WHERE id = :rid"
-            ),
+            text("SELECT request_id FROM research_runs WHERE id = :rid"),
             {"rid": run_id},
         ).fetchone()
         if req:
             rr = session.execute(
-                text(
-                    "SELECT review_request_id FROM research_requests"
-                    " WHERE id = :req"
-                ),
+                text("SELECT review_request_id FROM research_requests" " WHERE id = :req"),
                 {"req": req[0]},
             ).fetchone()
             if rr:
@@ -118,23 +131,19 @@ class CommitteeIntegrationService:
                         " VALUES (:id, :sid, 'decision',"
                         " 'AI Research Memo', :ch, 'ai_generated',"
                         " :content, NOW(), '0.95', 'medium', 'cmte_v1',"
-                        " NOW())" 
+                        " NOW())"
                     ),
                     {
-                        "id": uuid4(), "sid": session_id,
-                        "ch": str(uuid4()),
-                        "content": json.dumps({
-                            "memo_id": str(memo_row[0]),
-                            "run_id": str(run_id),
-                            "symbol": _symbol_for_run(session, run_id),
-                            "thesis": memo_row[1].get("thesis", ""),
-                            "confidence": memo_row[2],
-                        }),
+                        "id": uuid4(),
+                        "sid": session_id,
+                        "ch": digest(facts),
+                        "content": json.dumps(facts, default=str),
                     },
                 )
 
         return {
-            "session_id": str(session_id), "memo_id": str(memo_row[0]),
+            "session_id": str(session_id),
+            "memo_id": str(memo_row[0]),
             "recommendation": memo_row[4],
         }
 
@@ -177,7 +186,8 @@ class DecisionBridgeService:
 
         title = f"{symbol} investment decision"
         decision, draft = create_decision(
-            session, CreateDecisionRequest(title=title),
+            session,
+            CreateDecisionRequest(title=title),
         )
         payload = UpdateDecisionDraftRequest(
             expected_revision=draft.revision,
@@ -201,10 +211,15 @@ class OwnerDecisionService:
     """
 
     @staticmethod
-    def approve(session: Session, idea_id: UUID, memo_id: UUID,
-                session_id: UUID, confidence: int,
-                household_id: UUID | None = None,
-                rationale: str = "") -> dict:
+    def approve(
+        session: Session,
+        idea_id: UUID,
+        memo_id: UUID,
+        session_id: UUID,
+        confidence: int,
+        household_id: UUID | None = None,
+        rationale: str = "",
+    ) -> dict:
         from apps.api.decision_schemas import ConfirmDecisionRequest
         from apps.api.services.decisions import confirm_draft
 
@@ -214,45 +229,66 @@ class OwnerDecisionService:
 
         # Journal: create draft (minimal mapping)
         decision, draft = DecisionBridgeService.create_decision_draft(
-            session, run_id, symbol, memo["recommendation"],
-            memo["thesis"], memo["risks"],
+            session,
+            run_id,
+            symbol,
+            memo["recommendation"],
+            memo["thesis"],
+            memo["risks"],
         )
 
         # Owner approval: confirm → confirmed snapshot
-        confirm_draft(session, decision.id, ConfirmDecisionRequest(
-            expected_revision=draft.revision, confirmation=True,
-        ))
+        confirm_draft(
+            session,
+            decision.id,
+            ConfirmDecisionRequest(
+                expected_revision=draft.revision,
+                confirmation=True,
+            ),
+        )
 
         # Learning: schedule reviews (30/90/365 days)
         review_ids = LearningLoopService.schedule_reviews(
-            session, decision.id,
+            session,
+            decision.id,
         )
 
-        OwnerDecisionService._audit(session, "investment_decision",
-                                    "approved", str(decision.id))
+        OwnerDecisionService._audit(session, "investment_decision", "approved", str(decision.id))
         return {
             "decision_id": str(decision.id),
             "status": "approved",
+            "classification": "UNVERIFIED_AI_ANALYSIS_REVIEW",
+            "execution": "NONE",
+            "executable": False,
+            "requires_governed_candidate": True,
             "review_ids": [str(r) for r in review_ids],
         }
 
     @staticmethod
-    def reject(session: Session, idea_id: UUID, memo_id: UUID,
-               session_id: UUID, confidence: int,
-               household_id: UUID | None = None,
-               rationale: str = "") -> dict:
+    def reject(
+        session: Session,
+        idea_id: UUID,
+        memo_id: UUID,
+        session_id: UUID,
+        confidence: int,
+        household_id: UUID | None = None,
+        rationale: str = "",
+    ) -> dict:
         memo = OwnerDecisionService._load_memo(session, memo_id)
         run_id = memo["run_id"]
         symbol = _symbol_for_run(session, run_id)
 
         # Journal: create a draft record but do NOT confirm (no decision)
         decision, _draft = DecisionBridgeService.create_decision_draft(
-            session, run_id, symbol, memo["recommendation"],
-            memo["thesis"], memo["risks"],
+            session,
+            run_id,
+            symbol,
+            memo["recommendation"],
+            memo["thesis"],
+            memo["risks"],
         )
 
-        OwnerDecisionService._audit(session, "investment_decision",
-                                    "rejected", str(decision.id))
+        OwnerDecisionService._audit(session, "investment_decision", "rejected", str(decision.id))
         return {"decision_id": str(decision.id), "status": "rejected"}
 
     @staticmethod
@@ -267,17 +303,32 @@ class OwnerDecisionService:
         from apps.api.services.decisions import confirm_draft, read_draft
 
         draft = read_draft(session, decision_id)
-        confirm_draft(session, decision_id, ConfirmDecisionRequest(
-            expected_revision=draft.revision, confirmation=True,
-        ))
-        review_ids = LearningLoopService.schedule_reviews(
-            session, decision_id,
+        confirm_draft(
+            session,
+            decision_id,
+            ConfirmDecisionRequest(
+                expected_revision=draft.revision,
+                confirmation=True,
+            ),
         )
-        OwnerDecisionService._audit(session, "investment_decision",
-                                    "approved", str(decision_id))
+        review_ids = LearningLoopService.schedule_reviews(
+            session,
+            decision_id,
+        )
+        OwnerDecisionService._audit(session, "investment_decision", "approved", str(decision_id))
+        candidate_id = session.execute(
+            text("SELECT candidate_id FROM contribution_decisions WHERE decision_id=:i"),
+            {"i": decision_id},
+        ).scalar()
         return {
             "decision_id": str(decision_id),
             "status": "approved",
+            "classification": "MANUAL_PLAN_APPROVAL"
+            if candidate_id
+            else "UNVERIFIED_AI_ANALYSIS_REVIEW",
+            "execution": "MANUAL" if candidate_id else "NONE",
+            "executable": bool(candidate_id),
+            "requires_governed_candidate": not bool(candidate_id),
             "review_ids": [str(r) for r in review_ids],
         }
 
@@ -292,26 +343,42 @@ class OwnerDecisionService:
         from apps.api.services.decisions import discard_draft, read_draft
 
         draft = read_draft(session, decision_id)
-        discard_draft(session, decision_id, DiscardDecisionRequest(
-            expected_revision=draft.revision,
-        ))
-        OwnerDecisionService._audit(session, "investment_decision",
-                                    "rejected", str(decision_id))
+        from apps.api.models import AuditEvent
+
+        source = session.execute(
+            text("SELECT run_id FROM decision_research_sources WHERE decision_id=:i"),
+            {"i": decision_id},
+        ).scalar()
+        if source:
+            from apps.api.repositories.decisions import get_household_id
+
+            session.add(
+                AuditEvent(
+                    household_id=get_household_id(session),
+                    actor="local-owner",
+                    action="decision.research.rejected",
+                    entity_type="Decision",
+                    entity_id=decision_id,
+                    event_metadata={"run_id": str(source), "execution": "NONE"},
+                )
+            )
+            session.flush()
+        else:
+            discard_draft(
+                session, decision_id, DiscardDecisionRequest(expected_revision=draft.revision)
+            )
+        OwnerDecisionService._audit(session, "investment_decision", "rejected", str(decision_id))
         return {"decision_id": str(decision_id), "status": "rejected"}
 
     @staticmethod
     def _load_memo(session: Session, memo_id: UUID) -> dict:
         memo = session.execute(
-            text(
-                "SELECT memo, recommendation, run_id FROM investment_memos"
-                " WHERE id = :id"
-            ),
+            text("SELECT memo, recommendation, run_id FROM investment_memos" " WHERE id = :id"),
             {"id": memo_id},
         ).fetchone()
         if memo is None:
             raise ValueError("No memo found for decision")
-        memo_json = (memo[0] if isinstance(memo[0], dict)
-                     else json.loads(memo[0]))
+        memo_json = memo[0] if isinstance(memo[0], dict) else json.loads(memo[0])
         return {
             "thesis": memo_json.get("thesis", ""),
             "risks": memo_json.get("risks", []),
@@ -320,9 +387,9 @@ class OwnerDecisionService:
         }
 
     @staticmethod
-    def _audit(session: Session, resource: str, action: str,
-               resource_id: str) -> None:
+    def _audit(session: Session, resource: str, action: str, resource_id: str) -> None:
         import os
+
         env = os.environ.get("ENVIRONMENT", "production")
         if env not in ("development", "test"):
             session.execute(
@@ -333,8 +400,7 @@ class OwnerDecisionService:
                     " VALUES (:id, 'owner.mutation', 'owner',"
                     " :action, :res, :rid, NOW())"
                 ),
-                {"id": uuid4(), "action": action, "res": resource,
-                 "rid": resource_id},
+                {"id": uuid4(), "action": action, "res": resource, "rid": resource_id},
             )
 
 
@@ -357,22 +423,23 @@ class LearningLoopService:
     REVIEW_INTERVALS = [30, 90, 365]  # 365 maps to 1_year
 
     @staticmethod
-    def schedule_reviews(session: Session,
-                         decision_id: UUID) -> list[UUID]:
+    def schedule_reviews(session: Session, decision_id: UUID) -> list[UUID]:
         now = datetime.now(timezone.utc)
         review_ids = []
         for days in LearningLoopService.REVIEW_INTERVALS:
             from datetime import timedelta
+
             rid = uuid4()
             session.execute(
                 text(
                     "INSERT INTO decision_reviews"
                     " (id, decision_id, review_type, scheduled_at,"
                     " created_at)"
-                    " VALUES (:id, :did, :rt, :sd, NOW())" 
+                    " VALUES (:id, :did, :rt, :sd, NOW())"
                 ),
                 {
-                    "id": rid, "did": decision_id,
+                    "id": rid,
+                    "did": decision_id,
                     "rt": "1_year" if days == 365 else f"{days}_day",
                     "sd": now + timedelta(days=days),
                 },
@@ -381,17 +448,22 @@ class LearningLoopService:
         return review_ids
 
     @staticmethod
-    def record_outcome(session: Session, entity_key: str,
-                       decision_id: UUID, return_pct: float,
-                       perspective_scores: Optional[dict] = None,
-                       predicted_confidence: Optional[int] = None,
-                       ) -> None:
-        outcome = json.dumps({
-            "decision_id": str(decision_id),
-            "return_pct": return_pct,
-            "perspective_scores": perspective_scores or {},
-            "recorded_at": datetime.now(timezone.utc).isoformat(),
-        })
+    def record_outcome(
+        session: Session,
+        entity_key: str,
+        decision_id: UUID,
+        return_pct: float,
+        perspective_scores: Optional[dict] = None,
+        predicted_confidence: Optional[int] = None,
+    ) -> None:
+        outcome = json.dumps(
+            {
+                "decision_id": str(decision_id),
+                "return_pct": return_pct,
+                "perspective_scores": perspective_scores or {},
+                "recorded_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
         session.execute(
             text(
                 "INSERT INTO investment_knowledge_memory"
@@ -406,19 +478,27 @@ class LearningLoopService:
         # (Owner-controlled — only when a predicted confidence is given).
         if predicted_confidence is not None:
             LearningLoopService.update_prediction_accuracy(
-                session, entity_key, predicted_confidence, return_pct,
+                session,
+                entity_key,
+                predicted_confidence,
+                return_pct,
             )
 
     @staticmethod
-    def update_prediction_accuracy(session: Session, entity_key: str,
-                                   predicted: int, actual: float,
-                                   ) -> None:
-        accuracy = json.dumps({
-            "predicted_confidence": predicted,
-            "actual_return_pct": actual,
-            "error": predicted - int(actual * 10) if actual else 0,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        })
+    def update_prediction_accuracy(
+        session: Session,
+        entity_key: str,
+        predicted: int,
+        actual: float,
+    ) -> None:
+        accuracy = json.dumps(
+            {
+                "predicted_confidence": predicted,
+                "actual_return_pct": actual,
+                "error": predicted - int(actual * 10) if actual else 0,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
         # Upsert against the (entity_type, entity_key) unique constraint:
         # update the existing row (which may hold past_outcomes) or insert.
         existing = session.execute(
@@ -494,8 +574,10 @@ class ProvenanceService:
             confirmed = row is not None
         if row is not None:
             chain["decision_draft"] = {
-                "id": str(row[0]), "title": row[1],
-                "rationale": row[2], "source": row[3],
+                "id": str(row[0]),
+                "title": row[1],
+                "rationale": row[2],
+                "source": row[3],
                 "confirmed": confirmed,
             }
             run_id = ProvenanceService._parse_run_id(row[3])
@@ -514,7 +596,8 @@ class ProvenanceService:
         if memo is None:
             return chain
         chain["memo"] = {
-            "id": str(memo[0]), "confidence": memo[1],
+            "id": str(memo[0]),
+            "confidence": memo[1],
             "recommendation": memo[2],
         }
 
@@ -528,8 +611,7 @@ class ProvenanceService:
             {"rid": run_id},
         ).fetchall()
         chain["perspectives"] = [
-            {"perspective": p[0], "model": p[1], "conviction": p[2]}
-            for p in perspectives
+            {"perspective": p[0], "model": p[1], "conviction": p[2]} for p in perspectives
         ]
 
         # LLM Execution
@@ -542,8 +624,13 @@ class ProvenanceService:
             {"rid": run_id},
         ).fetchall()
         chain["llm_execution"] = [
-            {"perspective": e[0], "model": e[1], "status": e[2],
-             "input_tokens": e[3], "output_tokens": e[4]}
+            {
+                "perspective": e[0],
+                "model": e[1],
+                "status": e[2],
+                "input_tokens": e[3],
+                "output_tokens": e[4],
+            }
             for e in llm
         ]
 
@@ -555,9 +642,7 @@ class ProvenanceService:
             ),
             {"mid": str(memo[0])},
         ).fetchall()
-        chain["evidence"] = [
-            {"source_title": e[0], "provenance": e[1]} for e in evidence
-        ]
+        chain["evidence"] = [{"source_title": e[0], "provenance": e[1]} for e in evidence]
 
         return chain
 

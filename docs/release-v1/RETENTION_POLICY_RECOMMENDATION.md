@@ -1,0 +1,35 @@
+# Exact retention policy recommendation — Owner review required
+
+This is a recommendation, not a financial Policy change, legal compliance claim or deployed purge implementation. Current append-only history is preserved. MUST RETAIN below means required for safe replay of an admitted decision, contingent on obtaining compatible third-party rights; it does not override a provider license.
+
+| Field | Classification | Actual storage / current behavior | Recommended retention |
+|---|---|---|---|
+| Canonical instrument ID | MUST RETAIN | assets.id; historical ledger/decision FKs | Decision/history lifetime, presently indefinite; never reuse UUID for another identity |
+| Provider identifier | MUST RETAIN | instrument_provider_mappings.provider/provider_id/metadata and quote identity | Same lifetime for mappings/identities actually cited; preserve verified venue/currency/type |
+| Market price | MUST RETAIN when used | market_observations + candidate/evidence numeric inputs | Decision-linked normalized value for decision lifetime with explicit rights; do not substitute later quote |
+| Price timestamp | MUST RETAIN | market_observations.as_of; valuation/evidence price_as_of | Same lifetime; preserve observation time separately from retrieval time |
+| FX rate | MUST RETAIN when used | fx_rates.rate and normalized FX calculation inputs | Same lifetime for rate/direction/inverse used in calculation |
+| FX timestamp | MUST RETAIN | fx_rates.observed_at / normalized FX input time | Same lifetime; never relabel retrieval time as provider observation time |
+| Data quality state | MUST RETAIN | identity/quality/freshness fields and valuation reasons | Same lifetime; include unknown/simulated/cost and readiness blockers |
+| Portfolio valuation inputs | MUST RETAIN | native ledger, common valuation inputs and candidate/evidence facts | Same lifetime; original amount currency, quantity, price/FX source, units/multiplier, account and as_of |
+| Portfolio valuation outputs | MUST RETAIN | candidate evidence/plan/base values/readiness/hash | Same lifetime; exact rounding/conservation and calculation version/release source |
+| Policy result | MUST RETAIN | sealed Policy versions/buckets/rules and effective_policy evidence | Permanent versioned history; do not rewrite published Policy |
+| Guardian result | MUST RETAIN | confirmed checks/events/evaluation and candidate evidence | Same decision lifetime including warning/critical findings |
+| Committee evidence IDs | MUST RETAIN | committee_evidence_items, registry ref/hash/as_of/context, research links | Same decision lifetime; retain resolvable original facts, not only hashes |
+| Committee output | MUST RETAIN | validated committee_reports.report_content, model/prompt/schema/hash/usage | Same decision lifetime; qualitative reasoning retains its original classification |
+| Owner approval | MUST RETAIN | confirmed Journal snapshot, manual approval audit and links | Permanent original approval/corrections; not an automatically executable order |
+| Decision Journal | MUST RETAIN | decisions/confirmed_snapshots/corrections/reviews/contribution_decisions | Permanent authorized history; archive/access controls rather than destructive deletion |
+| Financial AuditEvent | MUST RETAIN | append-only audit_events with ordered metadata | Permanent audit history, including rejection; encrypted backups/access control |
+| Full raw provider payload | SHOULD NOT RETAIN | Yahoo body parsed/discarded; AV adapter returns parsed DTOs; JSON cache is a subset/arbitrary-data store, not a verified raw-body archive | Zero routine disk retention; discard after parsing. Exceptional debugging requires explicit redacted purpose and bounded temporary storage, never indefinite default |
+| Effective AI system prompt/template | MUST RETAIN for replay | prompt_version/schema_version in report; template reconstructed from retained release source, not a full separate request blob | Archive exact approved source/template/schema/config for decision lifetime; do not rely on a mutable name alone |
+| Complete duplicate AI request body | SHOULD NOT RETAIN unnecessarily | session proposal + immutable structured facts retained; no automatic duplicate full network request persistence | Reconstruct from source/session/evidence; MAY retain a redacted exact request snapshot only if needed and permitted, same decision lifetime |
+| Validated AI response | MUST RETAIN | parsed report persisted, full raw HTTP response not stored | Parsed original validated output for decision lifetime; raw wrapper SHOULD NOT RETAIN |
+| Rejected/malformed raw AI response | SHOULD NOT RETAIN | failure status/metadata rather than an approvable report | Keep redacted failure code/model/request metadata; no secret/raw prompt dump. Proposed runtime diagnostics14 days, not financial history deletion |
+| Unused market observations | MAY RETAIN only with permission | Current immutable market_observations do not implement TTL deletion | Prefer no indefinite unused accumulation; rights-compatible bounded design needs separate review because existing immutable triggers prohibit ad hoc purge |
+| Optional market_data_cache | MAY RETAIN under rights | Logical expiry/replacement; not automatic physical deletion | Current eligibility TTL6h price,24h news,168h overview,720h fundamentals/sector,2160h statements; recommend physical expired-cache purge within24h AFTER supplier authorization and separate implementation review |
+| Runtime/container logs | SHOULD RETAIN redacted | Local staging bounded json-file rotation; no exact time-based purge guarantee |14 days proposed for operational logs, exclude keys/cookies/full raw provider/AI bodies; configuration not equivalent to financial AuditEvent retention |
+| Backups | MUST RETAIN recoverable authorized history | Existing retention keeps7 daily/4 weekly/12 monthly plus newest/last healthy locked | Preserve this existing recovery contract; encrypted copies and restoration inherit source rights; document RPO/RTO with Owner |
+
+Duration “decision lifetime” currently means indefinite append-only history; no finite purge is implemented by this sprint. Logs14d and physical cache-expiry+24h are explicitly proposed operations, not claims of implemented TTL. The supplied staging uses bounded size rotation, which is not14-day expiry. If permanent normalized price/FX evidence is disallowed, leave source disabled and select a compatible licensed source or obtain separately reviewed retention design. No historical data has been deleted or rewritten.
+
+Owner adoption must record: applicable individual/entity use class, provider/API agreement/entitlement, allowed normalized/derived retention and backups, AI disclosure, attribution/redistribution obligations, operational log duration, responsible Owner and effective date. Legal/terms authorization remains NOT VERIFIED until documentary evidence is supplied. AI generation cannot be reproduced bit-for-bit merely by temperature0; the retained original output and deterministic input replay are distinct.

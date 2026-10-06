@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 pytestmark = pytest.mark.postgres
 
-HEAD_REVISION = "0034_research_run_status"
+HEAD_REVISION = "0036_launch_hardening"
 
 POSITIONS_CSV = (
     "source_record_id,account_provider_id,symbol,exchange,isin,"

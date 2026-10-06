@@ -85,6 +85,55 @@ RULES:
 """
 
 
+CONTRIBUTION_PROMPT = (
+    SYSTEM_PROMPT
+    + """
+CONTRIBUTION-V1 CONTRACT:
+All quantitative FACTs are exclusively in supplied deterministic evidence.
+Never generate or repeat numerical quantities (digits or spelled-out numbers).
+Every narrative statement is model inference, never a live financial fact.
+Return confidence as exactly low, medium, or high.
+Each citation must copy evidence_id, citation_ref and citation_claim EXACTLY
+from its supplied registry entry, including simulated/historical labels.
+If evidence cannot support alignment, return insufficient_evidence.
+"""
+)
+
+
+def prompt_for(version):
+    if version == "contribution-v1.1":
+        return CONTRIBUTION_PROMPT
+    if version == "v1":
+        return (
+            SYSTEM_PROMPT
+            + "\nCopy each supplied citation_claim/ref exactly; do not invent evidence. "
+            "Never generate numerical facts; all narrative is model inference."
+        )
+    raise ValueError("Unsupported Committee prompt version")
+
+
+def provider_rates(provider):
+    import os
+
+    if provider.provider_name != "deepseek":
+        if os.getenv("ENVIRONMENT") != "test":
+            raise ValueError("Unconfigured production provider")
+        return Decimal(0), Decimal(0)
+    try:
+        rates = tuple(
+            Decimal(os.environ[k])
+            for k in (
+                "COMPOUNDOS_DEEPSEEK_INPUT_USD_PER_MILLION",
+                "COMPOUNDOS_DEEPSEEK_OUTPUT_USD_PER_MILLION",
+            )
+        )
+        if any(not x.is_finite() or x <= 0 for x in rates):
+            raise ValueError
+        return rates
+    except (KeyError, ValueError, ArithmeticError) as exc:
+        raise ValueError("Provider cost configuration required before production call") from exc
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Committee orchestration
 # ═══════════════════════════════════════════════════════════════════════════
@@ -159,7 +208,7 @@ def run_committee(
     provider: AIModelProvider,
     *,
     prompt_version: str = "v1",
-    schema_version: str = "1.0",
+    schema_version: str = "hardening-1",
     temperature: Decimal = Decimal("0.0"),
     max_retries: int = 1,
 ) -> CommitteeReport:
@@ -171,19 +220,56 @@ def run_committee(
     The caller must have already called build_privacy_preview and obtained
     explicit Owner confirmation before calling this function.
     """
+    from sqlalchemy import text
+
     if committee_session.status != "queued":
         raise ValueError("Session must be in 'queued' status to run")
 
+    claimed = session.execute(
+        text(
+            "UPDATE committee_sessions SET status='running' "
+            "WHERE id=:i AND status='queued' RETURNING id"
+        ),
+        {"i": committee_session.id},
+    ).scalar()
+    if not claimed:
+        raise ValueError("Committee already claimed; no duplicate provider call")
     committee_session.status = "running"
     session.commit()
 
-    evidence_ids = {
-        str(e.id) for e in committee_session.evidence_items
-    }
+    try:
+        candidate_id = session.execute(
+            text("SELECT candidate_id FROM contribution_decisions WHERE committee_session_id=:s"),
+            {"s": committee_session.id},
+        ).scalar()
+        if candidate_id:
+            from apps.api.services.launch_investment import digest, validate_candidate
+
+            candidate = validate_candidate(session, committee_session.household_id, candidate_id)
+            evidence = committee_session.evidence_items
+            if (
+                prompt_version != "contribution-v1.1"
+                or len(evidence) != 1
+                or digest(evidence[0].structured_facts) != candidate["content_hash"]
+                or evidence[0].content_hash != candidate["content_hash"]
+            ):
+                raise ValueError(
+                    "Linked contribution requires exact deterministic evidence "
+                    "and contribution prompt"
+                )
+        from apps.api.services.committee_evidence_registry import evidence_registry
+
+        registry = evidence_registry(committee_session)
+    except Exception:
+        _fail_session(session, committee_session, "Invalid evidence/context")
+        raise
+
+    evidence_ids = {str(e.id) for e in committee_session.evidence_items}
     payload = _build_provider_payload(
-        committee_session, committee_session.evidence_items,
+        committee_session,
+        committee_session.evidence_items,
     )
-    token_estimate = len(json.dumps(payload)) // 4
+    token_estimate = len((json.dumps(payload) + prompt_for(prompt_version)).encode())
 
     if token_estimate > MAX_INPUT_TOKENS:
         _fail_session(session, committee_session, "Token budget exceeded")
@@ -197,8 +283,34 @@ def run_committee(
         timeout_seconds=120,
     )
 
-    # Call provider with retry
-    response = _call_with_retry(provider, payload, config, max_retries)
+    # Budget covers all possible attempts before the first network call.
+    try:
+        rates = provider_rates(provider)
+        budget = (token_estimate * rates[0] + MAX_OUTPUT_TOKENS * rates[1]) / 1_000_000
+        if budget * (max_retries + 1) > MAX_COST_USD:
+            raise ValueError("Provider cost budget exceeded")
+        response = _call_with_retry(
+            provider, payload, config, max_retries, system_prompt=prompt_for(prompt_version)
+        )
+    except Exception:
+        _fail_session(session, committee_session, "Provider unavailable/budget rejected")
+        raise
+    if response.input_tokens < 0 or response.output_tokens < 0:
+        _fail_session(session, committee_session, "Invalid usage")
+        raise ValueError("Invalid provider token usage")
+    if provider.provider_name == "deepseek" and (
+        not response.input_tokens or not response.output_tokens
+    ):
+        _fail_session(session, committee_session, "Missing usage")
+        raise ValueError("Provider usage required for cost evidence")
+    actual_cost = (response.input_tokens * rates[0] + response.output_tokens * rates[1]) / 1_000_000
+    if (
+        actual_cost > MAX_COST_USD
+        or response.output_tokens > MAX_OUTPUT_TOKENS
+        or response.input_tokens > MAX_INPUT_TOKENS
+    ):
+        _fail_session(session, committee_session, "Usage exceeded budget")
+        raise ValueError("Provider usage exceeded budget")
 
     # Parse JSON
     try:
@@ -208,19 +320,85 @@ def run_committee(
         raise ValueError(f"Provider returned invalid JSON: {e}")
 
     # Validate
-    validation = validate_provider_output(parsed, evidence_ids)
+    validation = validate_provider_output(parsed, evidence_ids, registry)
     if not validation.passed:
-        error_detail = "; ".join(
-            f"{e.field}: {e.message}" for e in validation.errors
-        )
+        error_detail = "; ".join(f"{e.field}: {e.message}" for e in validation.errors)
         _fail_session(session, committee_session, error_detail)
         raise ValueError(f"Output validation failed: {error_detail}")
 
+    import re
+
+    def inference_text(value):
+        if isinstance(value, dict):
+            return " ".join(
+                inference_text(v)
+                for k, v in value.items()
+                if k not in {"evidence_id", "citation_ref"}
+            )
+        if isinstance(value, list):
+            return " ".join(inference_text(v) for v in value)
+        return str(value)
+
+    numeric_pattern = (
+        r"\d|[零〇一二三四五六七八九十百千万亿]|"
+        r"\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
+        r"thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|"
+        r"forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion|"
+        r"trillion|half|quarter|percent|percentage)(?:fold)?\b"
+    )
+    if re.search(numeric_pattern, inference_text(parsed), re.I):
+        _fail_session(session, committee_session, "Unsupported quantitative model assertion")
+        raise ValueError("Numerical financial facts belong exclusively to deterministic evidence")
+
+    if prompt_version == "contribution-v1.1":
+        # Quantitative FACTs live exclusively in deterministic evidence. Model text is INFERENCE.
+        def model_text(value):
+            if isinstance(value, dict):
+                return " ".join(
+                    model_text(v)
+                    for k, v in value.items()
+                    if k not in {"evidence_id", "citation_ref"}
+                )
+            if isinstance(value, list):
+                return " ".join(model_text(v) for v in value)
+            return str(value)
+
+        if re.search(
+            numeric_pattern,
+            model_text(parsed),
+            re.I,
+        ) or parsed.get("confidence") not in {
+            "low",
+            "medium",
+            "high",
+        }:
+            _fail_session(
+                session,
+                committee_session,
+                "Untrusted numerical assertion or missing qualitative confidence",
+            )
+            raise ValueError(
+                "Contribution Committee must cite evidence without generating numerical facts"
+            )
+        parsed["classification"] = "INFERENCE"
+        parsed["direction_classification"] = "RECOMMENDATION"
+
+    parsed["classification"] = "INFERENCE"
+    parsed["direction_classification"] = "RECOMMENDATION"
+
     # Persist immutable report
     report = _persist_report(
-        session, committee_session, provider, parsed,
-        response, prompt_version, schema_version, temperature,
+        session,
+        committee_session,
+        provider,
+        parsed,
+        response,
+        prompt_version,
+        schema_version,
+        temperature,
+        actual_cost,
     )
+    committee_session.report = report
     committee_session.status = "completed"
     session.commit()
 
@@ -271,11 +449,16 @@ def _build_provider_payload(
     evidence_items: list[CommitteeEvidenceItem],
 ) -> dict:
     """Build the payload sent to the provider."""
+    from apps.api.services.committee_evidence_registry import evidence_registry
+
+    registry = evidence_registry(cs)
     return {
         "proposal": cs.proposal_text,
         "evidence": [
             {
                 "evidence_id": str(e.id),
+                "citation_claim": registry[str(e.id)]["claim"],
+                "evidence_mode": registry[str(e.id)]["mode"],
                 "source_type": e.source_type,
                 "source_title": e.source_title,
                 "citation_ref": e.citation_ref,
@@ -293,13 +476,14 @@ def _call_with_retry(
     payload: dict,
     config: ProviderConfig,
     max_retries: int,
+    system_prompt: str = SYSTEM_PROMPT,
 ) -> ProviderResponse:
     user_prompt = json.dumps(payload)
     last_error: Optional[Exception] = None
 
     for attempt in range(max_retries + 1):
         try:
-            return provider.call(SYSTEM_PROMPT, user_prompt, config)
+            return provider.call(system_prompt, user_prompt, config)
         except (ProviderTimeoutError, ProviderRateLimitError, ProviderServerError) as e:
             last_error = e
             if attempt < max_retries:
@@ -307,9 +491,7 @@ def _call_with_retry(
         except ProviderError:
             raise  # non-retryable — re-raise immediately
 
-    raise RuntimeError(
-        f"Provider call failed after {max_retries + 1} attempts: {last_error}"
-    )
+    raise RuntimeError(f"Provider call failed after {max_retries + 1} attempts: {last_error}")
 
 
 def _persist_report(
@@ -321,6 +503,7 @@ def _persist_report(
     prompt_version: str,
     schema_version: str,
     temperature: Decimal,
+    actual_cost: Decimal = Decimal(0),
 ) -> CommitteeReport:
     content_json = json.dumps(parsed, sort_keys=True)
     content_hash = hashlib.sha256(content_json.encode()).hexdigest()
@@ -329,7 +512,7 @@ def _persist_report(
         id=uuid4(),
         session_id=cs.id,
         provider=provider.provider_name,
-        model_id=response.model or "deepseek-chat",
+        model_id=response.model or ProviderConfig().model,
         model_version=None,
         prompt_version=prompt_version,
         schema_version=schema_version,
@@ -337,7 +520,7 @@ def _persist_report(
         provider_params=None,
         input_tokens=response.input_tokens,
         output_tokens=response.output_tokens,
-        estimated_cost=Decimal("0.0"),  # computed from actual tokens below
+        estimated_cost=actual_cost,
         report_content=parsed,
         content_hash=content_hash,
     )
@@ -363,15 +546,20 @@ def _dispatch_committee_notification(cs: CommitteeSession) -> None:
     the business transaction.
     """
     import logging
+
     logger = logging.getLogger(__name__)
     try:
         from apps.api.database import SessionLocal
         from apps.api.services.notification_service import dispatch_notification
+
         ns = SessionLocal()
         try:
             dispatch_notification(
-                ns, source="committee", event_type="session_complete",
-                severity="info", household_id=cs.household_id,
+                ns,
+                source="committee",
+                event_type="session_complete",
+                severity="info",
+                household_id=cs.household_id,
                 entity_id=str(cs.id),
                 context={"session_id": str(cs.id)},
             )

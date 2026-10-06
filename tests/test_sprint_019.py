@@ -96,9 +96,13 @@ class TestAllocation:
         })
         assert r.status_code == 200
         data = r.json()
-        assert len(data["recommendations"]) == 3
+        assert data["recommendations"] == []
+        assert data["constraints"] == []
+        assert data["cash_alternative"] == {}
+        assert data["status"] == "unavailable"
+        assert data["approval_eligible"] is False
         assert "disclaimer" in data
-        assert "not financial advice" in data["disclaimer"].lower()
+        assert "not implemented" in data["disclaimer"].lower()
 
     def test_sell_options(self):
         r = client.post("/api/os/allocate/sell", json={
@@ -106,7 +110,9 @@ class TestAllocation:
         })
         assert r.status_code == 200
         data = r.json()
-        assert len(data["options"]) >= 1
+        assert data["options"] == []
+        assert data["status"] == "unavailable"
+        assert data["approval_eligible"] is False
 
     def test_no_execution_capability(self):
         r = client.post("/api/os/allocate/deploy", json={

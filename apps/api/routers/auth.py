@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -68,7 +68,8 @@ def _log_audit(
 
 
 @router.post(
-    "/keys", response_model=ApiKeyCreateResponse,
+    "/keys",
+    response_model=ApiKeyCreateResponse,
 )
 def create_api_key(
     label: str = "default",
@@ -86,15 +87,19 @@ def create_api_key(
         {"id": kid, "kh": key_hash, "label": label, "created_by": "owner"},
     )
     _log_audit(
-        session, event_type="owner.mutation",
-        action="create_api_key", resource=str(kid), outcome="success",
+        session,
+        event_type="owner.mutation",
+        action="create_api_key",
+        resource=str(kid),
+        outcome="success",
     )
     session.commit()
     return ApiKeyCreateResponse(id=str(kid), label=label, api_key=api_key)
 
 
 @router.get(
-    "/keys", response_model=list[ApiKeyResponse],
+    "/keys",
+    response_model=list[ApiKeyResponse],
 )
 def list_api_keys(
     session: Session = Depends(get_session),
@@ -108,8 +113,11 @@ def list_api_keys(
     ).fetchall()
     return [
         ApiKeyResponse(
-            id=str(r[0]), label=r[1], created_at=r[2],
-            last_used_at=r[3], revoked_at=r[4],
+            id=str(r[0]),
+            label=r[1],
+            created_at=r[2],
+            last_used_at=r[3],
+            revoked_at=r[4],
         )
         for r in rows
     ]
@@ -141,8 +149,61 @@ def revoke_api_key(
         raise HTTPException(404, "Key not found or already revoked")
     # Audit: key revocation
     _log_audit(
-        session, event_type="owner.mutation",
-        action="revoke_api_key", resource=key_id, outcome="success",
+        session,
+        event_type="owner.mutation",
+        action="revoke_api_key",
+        resource=key_id,
+        outcome="success",
     )
     session.commit()
     return {"status": "revoked"}
+
+
+@router.post("/session")
+def create_web_session(
+    request: Request, response: Response, session: Session = Depends(get_session)
+):
+    """Header-authenticated exchange for revocable, HttpOnly eight-hour browser session."""
+    from datetime import timedelta
+    from secrets import token_urlsafe
+
+    api_key = request.headers.get("X-API-Key")
+    if not api_key:
+        raise HTTPException(401, "X-API-Key required to sign in")
+    key_id = session.execute(
+        text("SELECT id FROM owner_api_keys WHERE key_hash=:h AND revoked_at IS NULL"),
+        {"h": _hash_key(api_key)},
+    ).scalar()
+    if not key_id:
+        raise HTTPException(401, "Invalid API key")
+    token = token_urlsafe(32)
+    session.execute(
+        text("INSERT INTO owner_web_sessions(token_hash,key_id,expires_at) VALUES(:t,:k,:e)"),
+        {"t": _hash_key(token), "k": key_id, "e": datetime.now(timezone.utc) + timedelta(hours=8)},
+    )
+    session.commit()
+    production = os.getenv("ENVIRONMENT", "").lower() not in {"test", "development"}
+    response.set_cookie(
+        "compoundos_session",
+        token,
+        max_age=8 * 3600,
+        httponly=True,
+        secure=production,
+        samesite="strict",
+        path="/",
+    )
+    return {"status": "signed_in", "expires_in": 8 * 3600}
+
+
+@router.delete("/session")
+def logout_web_session(
+    request: Request, response: Response, session: Session = Depends(get_session)
+):
+    token = request.cookies.get("compoundos_session")
+    if token:
+        session.execute(
+            text("DELETE FROM owner_web_sessions WHERE token_hash=:t"), {"t": _hash_key(token)}
+        )
+        session.commit()
+    response.delete_cookie("compoundos_session", path="/")
+    return {"status": "signed_out"}

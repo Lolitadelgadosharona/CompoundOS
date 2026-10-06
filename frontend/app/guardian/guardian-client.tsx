@@ -154,6 +154,19 @@ export default function GuardianClient() {
       const result = oneCheck && selected
         ? await evaluateOne(selected.identity.id, form.eval_date || todayISO())
         : await evaluateAll(form.eval_date || todayISO());
+      if (result.evaluation_run.status === "unavailable") {
+        setEvalResult(`Not evaluated: ${result.evaluation_run.skip_reason ?? "valuation unavailable"}. ${result.valuation?.reasons.join("; ") ?? ""}`);
+        return;
+      }
+      if (result.persisted === false) {
+        const count = result.analysis_findings?.length ?? 0;
+        setEvalResult(`Current ledger analysis: ${count} threshold breach(es). This analysis is not stored as a historical snapshot event.`);
+        return;
+      }
+      if (result.evaluation_run.status.startsWith("skipped")) {
+        setEvalResult(`Not evaluated: ${result.evaluation_run.skip_reason ?? result.evaluation_run.status}.`);
+        return;
+      }
       setEvalResult(
         result.evaluation_run.events_created
           ? `Thresholds exceeded on ${result.evaluation_run.events_created} check(s).`

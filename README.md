@@ -91,7 +91,7 @@ and package-manager decision.
 
 1. Create a virtual environment: `python3 -m venv .venv`
 2. Activate it: `source .venv/bin/activate`
-3. Install dependencies: `python -m pip install -r requirements.txt`
+3. Install dependencies: `python -m pip install -r requirements-dev.txt`
 4. Copy `.env.example` to `.env`, then export it for the current shell with
    `set -a; source .env; set +a`.
 5. Apply the explicit migration: `alembic upgrade head`

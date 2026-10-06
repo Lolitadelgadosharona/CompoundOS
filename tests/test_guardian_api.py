@@ -39,9 +39,7 @@ pytestmark = pytest.mark.postgres
 
 
 def _hid(session: Session) -> UUID:
-    row = session.execute(
-        text("SELECT id FROM household_profiles LIMIT 1")
-    ).fetchone()
+    row = session.execute(text("SELECT id FROM household_profiles LIMIT 1")).fetchone()
     if row is None:
         hid = uuid4()
         session.execute(
@@ -132,8 +130,10 @@ class TestPureEvaluator:
 
     def test_drift_exceeded(self) -> None:
         chk = CheckInput(
-            check_id="c1", check_version_id="cv1",
-            check_type="drift", threshold_value=Decimal("5.00"),
+            check_id="c1",
+            check_version_id="cv1",
+            check_type="drift",
+            threshold_value=Decimal("5.00"),
             severity="info",
             target_category_norm="Global Equity",
             target_holding_category_norm="Global Equity",
@@ -147,8 +147,10 @@ class TestPureEvaluator:
 
     def test_drift_equal_threshold_no_event(self) -> None:
         chk = CheckInput(
-            check_id="c1", check_version_id="cv1",
-            check_type="drift", threshold_value=Decimal("40.00"),
+            check_id="c1",
+            check_version_id="cv1",
+            check_type="drift",
+            threshold_value=Decimal("40.00"),
             severity="info",
             target_category_norm="Global Equity",
             target_holding_category_norm="Global Equity",
@@ -161,9 +163,12 @@ class TestPureEvaluator:
 
     def test_staleness_exceeded(self) -> None:
         chk = CheckInput(
-            check_id="c1", check_version_id="cv1",
-            check_type="staleness", threshold_value=Decimal("1.00"),
-            severity="info", staleness_days=10,
+            check_id="c1",
+            check_version_id="cv1",
+            check_type="staleness",
+            threshold_value=Decimal("1.00"),
+            severity="info",
+            staleness_days=10,
         )
         r = evaluate_staleness(chk, date(2026, 6, 1), date(2026, 7, 17))
         assert r.exceeded is True
@@ -171,17 +176,22 @@ class TestPureEvaluator:
 
     def test_staleness_below_no_event(self) -> None:
         chk = CheckInput(
-            check_id="c1", check_version_id="cv1",
-            check_type="staleness", threshold_value=Decimal("1.00"),
-            severity="info", staleness_days=100,
+            check_id="c1",
+            check_version_id="cv1",
+            check_type="staleness",
+            threshold_value=Decimal("1.00"),
+            severity="info",
+            staleness_days=100,
         )
         r = evaluate_staleness(chk, date(2026, 6, 1), date(2026, 7, 17))
         assert r.exceeded is False
 
     def test_category_exposure_exceeded(self) -> None:
         chk = CheckInput(
-            check_id="c1", check_version_id="cv1",
-            check_type="category_exposure", threshold_value=Decimal("50.00"),
+            check_id="c1",
+            check_version_id="cv1",
+            check_type="category_exposure",
+            threshold_value=Decimal("50.00"),
             severity="info",
             target_holding_category_norm="Global Equity",
         )
@@ -193,8 +203,10 @@ class TestPureEvaluator:
 
     def test_category_exposure_below_no_event(self) -> None:
         chk = CheckInput(
-            check_id="c1", check_version_id="cv1",
-            check_type="category_exposure", threshold_value=Decimal("90.00"),
+            check_id="c1",
+            check_version_id="cv1",
+            check_type="category_exposure",
+            threshold_value=Decimal("90.00"),
             severity="info",
             target_holding_category_norm="Global Equity",
         )
@@ -205,8 +217,10 @@ class TestPureEvaluator:
 
     def test_zero_total_value_no_div_by_zero(self) -> None:
         chk = CheckInput(
-            check_id="c1", check_version_id="cv1",
-            check_type="drift", threshold_value=Decimal("5.00"),
+            check_id="c1",
+            check_version_id="cv1",
+            check_type="drift",
+            threshold_value=Decimal("5.00"),
             severity="info",
             target_category_norm="Global Equity",
             target_holding_category_norm="Global Equity",
@@ -219,8 +233,10 @@ class TestPureEvaluator:
     def test_nfkc_normalization_matches(self) -> None:
         """Category matching is case+NFKC insensitive."""
         chk = CheckInput(
-            check_id="c1", check_version_id="cv1",
-            check_type="drift", threshold_value=Decimal("5.00"),
+            check_id="c1",
+            check_version_id="cv1",
+            check_type="drift",
+            threshold_value=Decimal("5.00"),
             severity="info",
             target_category_norm="global equity",
             target_holding_category_norm="GLOBAL  EQUITY",
@@ -242,8 +258,10 @@ class TestGuardianLifecycle:
     def test_create_drift_check(self, db_session: Session) -> None:
         hid = _hid(db_session)
         result = create_guardian_check(
-            db_session, household_id=hid,
-            name="  Equity Drift  ", check_type="drift",
+            db_session,
+            household_id=hid,
+            name="  Equity Drift  ",
+            check_type="drift",
             threshold_value=Decimal("5.00"),
             target_category="Global Equity",
             target_holding_category="Global Equity",
@@ -255,36 +273,54 @@ class TestGuardianLifecycle:
     def test_name_uniqueness(self, db_session: Session) -> None:
         hid = _hid(db_session)
         create_guardian_check(
-            db_session, household_id=hid, name="Unique",
-            check_type="drift", threshold_value=Decimal("5.00"),
-            target_category="eq", target_holding_category="eq",
+            db_session,
+            household_id=hid,
+            name="Unique",
+            check_type="drift",
+            threshold_value=Decimal("5.00"),
+            target_category="eq",
+            target_holding_category="eq",
         )
         with pytest.raises(NameConflictError):
             create_guardian_check(
-                db_session, household_id=hid, name="  unique  ",
-                check_type="drift", threshold_value=Decimal("5.00"),
-                target_category="eq", target_holding_category="eq",
+                db_session,
+                household_id=hid,
+                name="  unique  ",
+                check_type="drift",
+                threshold_value=Decimal("5.00"),
+                target_category="eq",
+                target_holding_category="eq",
             )
 
     def test_update_revision_conflict(self, db_session: Session) -> None:
         hid = _hid(db_session)
         result = create_guardian_check(
-            db_session, household_id=hid, name="Conflict",
-            check_type="drift", threshold_value=Decimal("5.00"),
-            target_category="eq", target_holding_category="eq",
+            db_session,
+            household_id=hid,
+            name="Conflict",
+            check_type="drift",
+            threshold_value=Decimal("5.00"),
+            target_category="eq",
+            target_holding_category="eq",
         )
         with pytest.raises(DraftConflictError):
             update_guardian_draft(
-                db_session, check_id=UUID(result["identity"]["id"]),
-                expected_revision=999, threshold_value=Decimal("1.00"),
+                db_session,
+                check_id=UUID(result["identity"]["id"]),
+                expected_revision=999,
+                threshold_value=Decimal("1.00"),
             )
 
     def test_confirm_draft(self, db_session: Session) -> None:
         hid = _hid(db_session)
         result = create_guardian_check(
-            db_session, household_id=hid, name="Confirm",
-            check_type="drift", threshold_value=Decimal("5.00"),
-            target_category="eq", target_holding_category="eq",
+            db_session,
+            household_id=hid,
+            name="Confirm",
+            check_type="drift",
+            threshold_value=Decimal("5.00"),
+            target_category="eq",
+            target_holding_category="eq",
         )
         confirmed = confirm_guardian_check(
             db_session,
@@ -297,14 +333,19 @@ class TestGuardianLifecycle:
     def test_discard_never_confirmed(self, db_session: Session) -> None:
         hid = _hid(db_session)
         result = create_guardian_check(
-            db_session, household_id=hid, name="DiscNever",
-            check_type="drift", threshold_value=Decimal("5.00"),
-            target_category="eq", target_holding_category="eq",
+            db_session,
+            household_id=hid,
+            name="DiscNever",
+            check_type="drift",
+            threshold_value=Decimal("5.00"),
+            target_category="eq",
+            target_holding_category="eq",
         )
         cid = UUID(result["identity"]["id"])
         discard_guardian_check(db_session, cid)
         # Verify check no longer exists in DB
         from sqlalchemy import text
+
         row = db_session.execute(
             text("SELECT 1 FROM guardian_checks WHERE id = :cid"), {"cid": cid}
         ).fetchone()
@@ -314,13 +355,19 @@ class TestGuardianLifecycle:
         hid = _hid(db_session)
         with pytest.raises(InvalidCheckTypeFieldsError):
             create_guardian_check(
-                db_session, household_id=hid, name="BadDrift",
-                check_type="drift", threshold_value=Decimal("5.00"),
+                db_session,
+                household_id=hid,
+                name="BadDrift",
+                check_type="drift",
+                threshold_value=Decimal("5.00"),
             )
         with pytest.raises(InvalidCheckTypeFieldsError):
             create_guardian_check(
-                db_session, household_id=hid, name="BadStale",
-                check_type="staleness", threshold_value=Decimal("1.00"),
+                db_session,
+                household_id=hid,
+                name="BadStale",
+                check_type="staleness",
+                threshold_value=Decimal("1.00"),
             )
 
 
@@ -352,12 +399,17 @@ class TestGuardianEvaluation:
         _create_policy(db_session, hid)
         _create_portfolio(db_session, hid, "100000")
         r = create_guardian_check(
-            db_session, household_id=hid, name="Drift",
-            check_type="drift", threshold_value=Decimal("5.00"),
-            target_category="Global Equity", target_holding_category="Global Equity",
+            db_session,
+            household_id=hid,
+            name="Drift",
+            check_type="drift",
+            threshold_value=Decimal("5.00"),
+            target_category="Global Equity",
+            target_holding_category="Global Equity",
         )
         confirm_guardian_check(
-            db_session, check_id=UUID(r["identity"]["id"]),
+            db_session,
+            check_id=UUID(r["identity"]["id"]),
             expected_revision=r["draft"]["expected_revision"],
         )
         result = evaluate_all_checks(db_session, household_id=hid, as_of_date=date(2026, 7, 17))
@@ -368,12 +420,16 @@ class TestGuardianEvaluation:
         _create_policy(db_session, hid)
         _create_portfolio(db_session, hid, "10000")
         r = create_guardian_check(
-            db_session, household_id=hid, name="Stale",
-            check_type="staleness", threshold_value=Decimal("1.00"),
+            db_session,
+            household_id=hid,
+            name="Stale",
+            check_type="staleness",
+            threshold_value=Decimal("1.00"),
             staleness_days=10,
         )
         confirm_guardian_check(
-            db_session, check_id=UUID(r["identity"]["id"]),
+            db_session,
+            check_id=UUID(r["identity"]["id"]),
             expected_revision=r["draft"]["expected_revision"],
         )
         result = evaluate_all_checks(db_session, household_id=hid, as_of_date=date(2026, 7, 17))
@@ -384,12 +440,16 @@ class TestGuardianEvaluation:
         _create_policy(db_session, hid)
         _create_portfolio(db_session, hid, "10000")
         r = create_guardian_check(
-            db_session, household_id=hid, name="StaleLow",
-            check_type="staleness", threshold_value=Decimal("1.00"),
+            db_session,
+            household_id=hid,
+            name="StaleLow",
+            check_type="staleness",
+            threshold_value=Decimal("1.00"),
             staleness_days=100,
         )
         confirm_guardian_check(
-            db_session, check_id=UUID(r["identity"]["id"]),
+            db_session,
+            check_id=UUID(r["identity"]["id"]),
             expected_revision=r["draft"]["expected_revision"],
         )
         result = evaluate_all_checks(db_session, household_id=hid, as_of_date=date(2026, 7, 17))
@@ -400,17 +460,24 @@ class TestGuardianEvaluation:
         _create_policy(db_session, hid)
         _create_portfolio(db_session, hid, "100000")
         r = create_guardian_check(
-            db_session, household_id=hid, name="One",
-            check_type="drift", threshold_value=Decimal("5.00"),
-            target_category="Global Equity", target_holding_category="Global Equity",
+            db_session,
+            household_id=hid,
+            name="One",
+            check_type="drift",
+            threshold_value=Decimal("5.00"),
+            target_category="Global Equity",
+            target_holding_category="Global Equity",
         )
         confirm_guardian_check(
-            db_session, check_id=UUID(r["identity"]["id"]),
+            db_session,
+            check_id=UUID(r["identity"]["id"]),
             expected_revision=r["draft"]["expected_revision"],
         )
         result = evaluate_one_check(
-            db_session, check_id=UUID(r["identity"]["id"]),
-            household_id=hid, as_of_date=date(2026, 7, 17),
+            db_session,
+            check_id=UUID(r["identity"]["id"]),
+            household_id=hid,
+            as_of_date=date(2026, 7, 17),
         )
         assert result["evaluation_run"]["checks_evaluated"] == 1
 
@@ -419,12 +486,17 @@ class TestGuardianEvaluation:
         _create_policy(db_session, hid)
         _create_portfolio(db_session, hid, "100000")
         r = create_guardian_check(
-            db_session, household_id=hid, name="Dedup",
-            check_type="drift", threshold_value=Decimal("5.00"),
-            target_category="Global Equity", target_holding_category="Global Equity",
+            db_session,
+            household_id=hid,
+            name="Dedup",
+            check_type="drift",
+            threshold_value=Decimal("5.00"),
+            target_category="Global Equity",
+            target_holding_category="Global Equity",
         )
         confirm_guardian_check(
-            db_session, check_id=UUID(r["identity"]["id"]),
+            db_session,
+            check_id=UUID(r["identity"]["id"]),
             expected_revision=r["draft"]["expected_revision"],
         )
         r1 = evaluate_all_checks(db_session, household_id=hid, as_of_date=date(2026, 7, 17))
@@ -433,6 +505,7 @@ class TestGuardianEvaluation:
         assert r1["evaluation_run"]["events_created"] >= 1
         # Dedup verified via actual events table: at most 1 event for same fingerprint
         from sqlalchemy import text
+
         total_events = db_session.execute(
             text("SELECT count(*) FROM guardian_events WHERE check_type = 'drift'")
         ).scalar()
@@ -449,28 +522,40 @@ class TestAPIContract:
 
     def test_all_routes_registered(self, api_client) -> None:
         """All 13 design routes are registered in the router."""
-        guardian_routes = [r for r in api_client.app.routes if hasattr(r, 'path') and hasattr(r, 'methods') and r.path.startswith('/api/guardian')]
-        # 13 route registrations (12 unique paths + 1 duplicate: GET+POST on /checks)
-        assert len(guardian_routes) == 13, f"Expected 13 route registrations, got {len(guardian_routes)}"
-        paths = {r.path for r in guardian_routes}
-        assert any('/draft/confirm' in p for p in paths)
-        assert any('/draft/discard' in p for p in paths)
-        assert '/api/guardian/evaluate' in paths
-        assert '/api/guardian/evaluations' in paths
-        assert any('/evaluations/{' in p for p in paths)
-        assert '/api/guardian/events' in paths
-        assert any('/events/{' in p for p in paths)
-        assert '/api/guardian/audit' in paths
+        # Verify public OpenAPI contract; FastAPI now lazily includes routers.
+        schema = api_client.get("/openapi.json").json()
+        paths = {path for path in schema["paths"] if path.startswith("/api/guardian")}
+        guardian_routes = [
+            (path, method)
+            for path in paths
+            for method in schema["paths"][path]
+            if method in {"get", "post", "put", "patch", "delete"}
+        ]
+        assert len(guardian_routes) == 13
+        assert any("/draft/confirm" in p for p in paths)
+        assert any("/draft/discard" in p for p in paths)
+        assert "/api/guardian/evaluate" in paths
+        assert "/api/guardian/evaluations" in paths
+        assert any("/evaluations/{" in p for p in paths)
+        assert "/api/guardian/events" in paths
+        assert any("/events/{" in p for p in paths)
+        assert "/api/guardian/audit" in paths
 
     def test_old_confirm_path_not_found(self, api_client) -> None:
         """Old /checks/{id}/confirm path returns 404 (not 405)."""
         # No household needed — should fail before hitting household check
-        resp = api_client.post("/api/guardian/checks/00000000-0000-0000-0000-000000000001/confirm", json={"expected_revision": 1, "confirmation": True})
+        resp = api_client.post(
+            "/api/guardian/checks/00000000-0000-0000-0000-000000000001/confirm",
+            json={"expected_revision": 1, "confirmation": True},
+        )
         assert resp.status_code == 404
 
     def test_old_discard_path_not_found(self, api_client) -> None:
         """Old /checks/{id}/discard path returns 404."""
-        resp = api_client.post("/api/guardian/checks/00000000-0000-0000-0000-000000000001/discard", json={"confirmation": True})
+        resp = api_client.post(
+            "/api/guardian/checks/00000000-0000-0000-0000-000000000001/discard",
+            json={"confirmation": True},
+        )
         assert resp.status_code == 404
 
     def test_old_runs_path_not_found(self, api_client) -> None:
@@ -502,11 +587,17 @@ class TestAPIContract:
 
 def _create_household_via_api(client) -> None:
     """Create household via API if not exists."""
-    resp = client.post("/api/households", json={
-        "household_name": "Test", "base_currency": "USD",
-        "investment_horizon": "Long term",
-        "liquidity_needs": "", "risk_statement": "", "notes": "",
-    })
+    resp = client.post(
+        "/api/households",
+        json={
+            "household_name": "Test",
+            "base_currency": "USD",
+            "investment_horizon": "Long term",
+            "liquidity_needs": "",
+            "risk_statement": "",
+            "notes": "",
+        },
+    )
     if resp.status_code not in (201, 409):
         # 409 means already exists (singleton)
         pass
@@ -524,17 +615,25 @@ class TestAuditAndEventIsolation:
         """GET /events/{id} returns event detail after evaluation."""
         _create_household_via_api(api_client)
         # Create + confirm a staleness check (minimal setup)
-        resp = api_client.post("/api/guardian/checks", json={
-            "name": "EvtDetail", "check_type": "staleness",
-            "threshold_value": "1.00", "staleness_days": 200,
-        })
+        resp = api_client.post(
+            "/api/guardian/checks",
+            json={
+                "name": "EvtDetail",
+                "check_type": "staleness",
+                "threshold_value": "1.00",
+                "staleness_days": 200,
+            },
+        )
         cid = resp.json()["identity"]["id"]
         draft_rev = resp.json()["draft"]["expected_revision"]
-        api_client.post(f"/api/guardian/checks/{cid}/draft/confirm",
-                        json={"expected_revision": draft_rev, "confirmation": True})
+        api_client.post(
+            f"/api/guardian/checks/{cid}/draft/confirm",
+            json={"expected_revision": draft_rev, "confirmation": True},
+        )
         # Evaluate (may skip — but that's fine, test 404 path below)
-        eval_resp = api_client.post("/api/guardian/evaluate",
-                                    json={"as_of_date": "2026-07-17", "confirmation": True})
+        eval_resp = api_client.post(
+            "/api/guardian/evaluate", json={"as_of_date": "2026-07-17", "confirmation": True}
+        )
         # If evaluation completed and created events, test event detail
         if eval_resp.json()["evaluation_run"]["events_created"] > 0:
             eid = eval_resp.json()["events"][0]["id"]
@@ -552,11 +651,16 @@ class TestAuditAndEventIsolation:
         """Audit events are scoped to the requesting household."""
         _create_household_via_api(api_client)
         # Create a check to generate audit events
-        api_client.post("/api/guardian/checks", json={
-            "name": "AuditIso", "check_type": "drift",
-            "threshold_value": "5.00",
-            "target_category": "eq", "target_holding_category": "eq",
-        })
+        api_client.post(
+            "/api/guardian/checks",
+            json={
+                "name": "AuditIso",
+                "check_type": "drift",
+                "threshold_value": "5.00",
+                "target_category": "eq",
+                "target_holding_category": "eq",
+            },
+        )
         resp = api_client.get("/api/guardian/audit?limit=100")
         assert resp.status_code == 200
         events = resp.json()["audit_events"]
@@ -569,15 +673,25 @@ class TestAuditAndEventIsolation:
         """Audit events are ordered by occurred_at DESC."""
         _create_household_via_api(api_client)
         # Create two checks → at least 2 audit events
-        api_client.post("/api/guardian/checks", json={
-            "name": "AuditSeq1", "check_type": "drift",
-            "threshold_value": "5.00",
-            "target_category": "eq", "target_holding_category": "eq",
-        })
-        api_client.post("/api/guardian/checks", json={
-            "name": "AuditSeq2", "check_type": "staleness",
-            "threshold_value": "1.00", "staleness_days": 30,
-        })
+        api_client.post(
+            "/api/guardian/checks",
+            json={
+                "name": "AuditSeq1",
+                "check_type": "drift",
+                "threshold_value": "5.00",
+                "target_category": "eq",
+                "target_holding_category": "eq",
+            },
+        )
+        api_client.post(
+            "/api/guardian/checks",
+            json={
+                "name": "AuditSeq2",
+                "check_type": "staleness",
+                "threshold_value": "1.00",
+                "staleness_days": 30,
+            },
+        )
         resp = api_client.get("/api/guardian/audit?limit=100")
         events = resp.json()["audit_events"]
         assert len(events) >= 2
@@ -588,15 +702,25 @@ class TestAuditAndEventIsolation:
     def test_audit_pagination(self, api_client) -> None:
         """Audit respects limit parameter."""
         _create_household_via_api(api_client)
-        api_client.post("/api/guardian/checks", json={
-            "name": "AuditPage1", "check_type": "drift",
-            "threshold_value": "5.00",
-            "target_category": "eq", "target_holding_category": "eq",
-        })
-        api_client.post("/api/guardian/checks", json={
-            "name": "AuditPage2", "check_type": "staleness",
-            "threshold_value": "1.00", "staleness_days": 30,
-        })
+        api_client.post(
+            "/api/guardian/checks",
+            json={
+                "name": "AuditPage1",
+                "check_type": "drift",
+                "threshold_value": "5.00",
+                "target_category": "eq",
+                "target_holding_category": "eq",
+            },
+        )
+        api_client.post(
+            "/api/guardian/checks",
+            json={
+                "name": "AuditPage2",
+                "check_type": "staleness",
+                "threshold_value": "1.00",
+                "staleness_days": 30,
+            },
+        )
         full = api_client.get("/api/guardian/audit?limit=100")
         paged = api_client.get("/api/guardian/audit?limit=1")
         assert paged.status_code == 200
@@ -606,11 +730,16 @@ class TestAuditAndEventIsolation:
     def test_audit_metadata_redaction(self, api_client) -> None:
         """Audit metadata contains structural IDs but no financial values."""
         _create_household_via_api(api_client)
-        api_client.post("/api/guardian/checks", json={
-            "name": "Redact", "check_type": "drift",
-            "threshold_value": "5.00",
-            "target_category": "eq", "target_holding_category": "eq",
-        })
+        api_client.post(
+            "/api/guardian/checks",
+            json={
+                "name": "Redact",
+                "check_type": "drift",
+                "threshold_value": "5.00",
+                "target_category": "eq",
+                "target_holding_category": "eq",
+            },
+        )
         resp = api_client.get("/api/guardian/audit?limit=10")
         for evt in resp.json()["audit_events"]:
             meta = evt["metadata"]
@@ -622,15 +751,26 @@ class TestAuditAndEventIsolation:
         """GET /evaluations/{run_id} returns evaluation detail when run exists."""
         _create_household_via_api(api_client)
         # Create + confirm a check that will skip (no policy needed)
-        resp = api_client.post("/api/guardian/checks", json={
-            "name": "EvalDet", "check_type": "staleness",
-            "threshold_value": "1.00", "staleness_days": 200,
-        })
+        resp = api_client.post(
+            "/api/guardian/checks",
+            json={
+                "name": "EvalDet",
+                "check_type": "staleness",
+                "threshold_value": "1.00",
+                "staleness_days": 200,
+            },
+        )
         cid = resp.json()["identity"]["id"]
-        api_client.post(f"/api/guardian/checks/{cid}/draft/confirm",
-                        json={"expected_revision": resp.json()["draft"]["expected_revision"], "confirmation": True})
-        eval_resp = api_client.post("/api/guardian/evaluate",
-                                    json={"as_of_date": "2026-07-17", "confirmation": True})
+        api_client.post(
+            f"/api/guardian/checks/{cid}/draft/confirm",
+            json={
+                "expected_revision": resp.json()["draft"]["expected_revision"],
+                "confirmation": True,
+            },
+        )
+        eval_resp = api_client.post(
+            "/api/guardian/evaluate", json={"as_of_date": "2026-07-17", "confirmation": True}
+        )
         run_id = eval_resp.json()["evaluation_run"]["id"]
         detail = api_client.get(f"/api/guardian/evaluations/{run_id}")
         assert detail.status_code == 200
@@ -659,17 +799,23 @@ class TestDiscardPersistence:
     def test_discard_never_confirmed_deletes_all(self, api_client) -> None:
         """Discard a never-confirmed check — identity + draft gone."""
         _create_household_via_api(api_client)
-        resp = api_client.post("/api/guardian/checks", json={
-            "name": "DelAll", "check_type": "drift",
-            "threshold_value": "5.00",
-            "target_category": "eq", "target_holding_category": "eq",
-        })
+        resp = api_client.post(
+            "/api/guardian/checks",
+            json={
+                "name": "DelAll",
+                "check_type": "drift",
+                "threshold_value": "5.00",
+                "target_category": "eq",
+                "target_holding_category": "eq",
+            },
+        )
         cid = resp.json()["identity"]["id"]
         assert resp.status_code == 201
 
         # Discard via HTTP
-        discard_resp = api_client.post(f"/api/guardian/checks/{cid}/draft/discard",
-                                        json={"confirmation": True})
+        discard_resp = api_client.post(
+            f"/api/guardian/checks/{cid}/draft/discard", json={"confirmation": True}
+        )
         assert discard_resp.status_code == 204
 
         # New request — GET should 404
@@ -679,23 +825,31 @@ class TestDiscardPersistence:
     def test_discard_after_confirm_retains_identity(self, api_client) -> None:
         """Discard after confirm deletes draft but retains identity + version."""
         _create_household_via_api(api_client)
-        resp = api_client.post("/api/guardian/checks", json={
-            "name": "KeepIdent", "check_type": "drift",
-            "threshold_value": "5.00",
-            "target_category": "eq", "target_holding_category": "eq",
-        })
+        resp = api_client.post(
+            "/api/guardian/checks",
+            json={
+                "name": "KeepIdent",
+                "check_type": "drift",
+                "threshold_value": "5.00",
+                "target_category": "eq",
+                "target_holding_category": "eq",
+            },
+        )
         cid = resp.json()["identity"]["id"]
         draft_rev = resp.json()["draft"]["expected_revision"]
 
         # Confirm via HTTP
-        confirm_resp = api_client.post(f"/api/guardian/checks/{cid}/draft/confirm",
-                                        json={"expected_revision": draft_rev, "confirmation": True})
+        confirm_resp = api_client.post(
+            f"/api/guardian/checks/{cid}/draft/confirm",
+            json={"expected_revision": draft_rev, "confirmation": True},
+        )
         assert confirm_resp.status_code == 200
         assert confirm_resp.json()["latest_version"]["version_number"] == 1
 
         # Discard via HTTP
-        discard_resp = api_client.post(f"/api/guardian/checks/{cid}/draft/discard",
-                                        json={"confirmation": True})
+        discard_resp = api_client.post(
+            f"/api/guardian/checks/{cid}/draft/discard", json={"confirmation": True}
+        )
         assert discard_resp.status_code == 204
 
         # New request — identity exists, draft gone, version retained

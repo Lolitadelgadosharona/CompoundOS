@@ -74,7 +74,10 @@ export type GuardianEvaluationRun = {
 };
 
 export type GuardianEvaluateResponse = {
-  evaluation_run: GuardianEvaluationRun;
+  evaluation_run: Omit<GuardianEvaluationRun, "id"> & { id: string | null };
+  persisted?: boolean;
+  valuation?: { status: string; base_currency: string; recommendation_ready: boolean; reasons: string[] };
+  analysis_findings?: { check_id: string; check_type: string; exceeded: boolean }[];
   events: GuardianEvent[];
 };
 
@@ -88,7 +91,7 @@ export type GuardianAuditEvent = {
   occurred_at: string;
 };
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 export class GuardianApiError extends Error {
   constructor(message: string, readonly status: number) {

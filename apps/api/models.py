@@ -1933,6 +1933,8 @@ class FxRate(Base):
     from_currency: Mapped[str] = mapped_column(Text, nullable=False)
     to_currency: Mapped[str] = mapped_column(Text, nullable=False)
     rate: Mapped[Decimal] = mapped_column(Numeric(20, 10), nullable=False)
+    identity: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    quality: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     rate_source: Mapped[str] = mapped_column(Text, nullable=False)
     observed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False

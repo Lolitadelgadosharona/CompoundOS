@@ -18,7 +18,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 pytestmark = pytest.mark.postgres
 
 
-HEAD_REVISION = "0034_research_run_status"
+HEAD_REVISION = "0036_launch_hardening"
 PREVIOUS_REVISION = "0006_portfolio_snapshot_status"
 
 GUARDIAN_TABLES = {
@@ -71,6 +71,8 @@ def _current_revision(engine: Engine) -> str:
 @pytest.fixture()
 def fresh_db(postgres_engine: Engine):
     """Truncate all, downgrade to 0006, re-upgrade to head."""
+    from tests.conftest import _truncate_all_tables
+    _truncate_all_tables(postgres_engine)
     with postgres_engine.begin() as conn:
         conn.execute(text(
             "TRUNCATE TABLE portfolio_snapshot_holdings, portfolio_snapshots,"

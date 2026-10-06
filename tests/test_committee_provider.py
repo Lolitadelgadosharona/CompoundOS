@@ -45,34 +45,40 @@ pytestmark = pytest.mark.postgres
 
 def _create_household(db_session: Session) -> UUID:
     hid = uuid4()
-    db_session.execute(text(
-        "INSERT INTO household_profiles"
-        " (id, household_name, base_currency, singleton_key,"
-        "  investment_horizon, liquidity_needs, risk_statement, notes,"
-        "  created_at, updated_at)"
-        " VALUES (:id, 'Test', 'USD', true, 'Long', 'None', 'Low', '', now(), now())"
-    ), {"id": str(hid)})
+    db_session.execute(
+        text(
+            "INSERT INTO household_profiles"
+            " (id, household_name, base_currency, singleton_key,"
+            "  investment_horizon, liquidity_needs, risk_statement, notes,"
+            "  created_at, updated_at)"
+            " VALUES (:id, 'Test', 'USD', true, 'Long', 'None', 'Low', '', now(), now())"
+        ),
+        {"id": str(hid)},
+    )
     db_session.commit()
     return hid
 
 
 def _create_session(db_session: Session, hid: UUID) -> CommitteeSession:
     cs = create_committee_session(
-        db_session, hid, "Test", "Should we increase equity exposure?",
+        db_session,
+        hid,
+        "Test",
+        "Should we increase equity exposure?",
     )
     return cs
 
 
-def _valid_report() -> dict:
-    return {
+def _valid_report(cs=None) -> dict:
+    report = {
         "supporting_arguments": ["Strong equity returns historically"],
         "opposing_arguments": ["Current elevated valuations"],
         "risks": ["Market drawdown risk"],
-        "policy_alignment": "Aligned with 70% equity target",
+        "policy_alignment": "Assess alignment against supplied policy",
         "minority_opinions": ["Consider waiting for better entry"],
         "evidence_citations": [],
         "limitations": ["No market data available"],
-        "recommended_direction": "conditionally_aligned",
+        "recommended_direction": "insufficient_evidence",
         "sections": {
             "long_term_compounding": "Equities support long-term compounding.",
             "index_passive_investing": "Passive approach is consistent.",
@@ -83,6 +89,18 @@ def _valid_report() -> dict:
             "synthesis_chair": "Balanced view: aligned, but cautious.",
         },
     }
+
+    if cs is not None:
+        from apps.api.services.committee_evidence_registry import evidence_registry
+
+        registry = evidence_registry(cs)
+        report["evidence_citations"] = [
+            {"evidence_id": key, "citation_ref": value["citation_ref"], "claim": value["claim"]}
+            for key, value in registry.items()
+        ]
+        if registry:
+            report["recommended_direction"] = "conditionally_aligned"
+    return report
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -120,24 +138,36 @@ class TestDeepSeekProvider:
 
 class TestCredentialManager:
     def test_env_fallback_disabled_by_default(self) -> None:
-        with patch.dict("os.environ", {
-            "COMPOUNDOS_DEEPSEEK_API_KEY": "test-key",
-        }, clear=True):
+        with patch.dict(
+            "os.environ",
+            {
+                "COMPOUNDOS_DEEPSEEK_API_KEY": "test-key",
+            },
+            clear=True,
+        ):
             with pytest.raises(CredentialError):
                 get_api_key("deepseek")
 
     def test_env_fallback_explicitly_enabled(self) -> None:
-        with patch.dict("os.environ", {
-            "COMPOUNDOS_ALLOW_ENV_CREDENTIALS": "1",
-            "COMPOUNDOS_DEEPSEEK_API_KEY": "test-key",
-        }, clear=True):
+        with patch.dict(
+            "os.environ",
+            {
+                "COMPOUNDOS_ALLOW_ENV_CREDENTIALS": "1",
+                "COMPOUNDOS_DEEPSEEK_API_KEY": "test-key",
+            },
+            clear=True,
+        ):
             assert get_api_key("deepseek") == "test-key"
 
     def test_credential_available(self) -> None:
-        with patch.dict("os.environ", {
-            "COMPOUNDOS_ALLOW_ENV_CREDENTIALS": "1",
-            "COMPOUNDOS_DEEPSEEK_API_KEY": "test-key",
-        }, clear=True):
+        with patch.dict(
+            "os.environ",
+            {
+                "COMPOUNDOS_ALLOW_ENV_CREDENTIALS": "1",
+                "COMPOUNDOS_DEEPSEEK_API_KEY": "test-key",
+            },
+            clear=True,
+        ):
             assert credential_available("deepseek") is True
 
     def test_missing_raises(self) -> None:
@@ -184,7 +214,9 @@ class TestOutputValidator:
 
     def test_citation_in_valid_set_passes(self) -> None:
         report = _valid_report()
-        report["evidence_citations"] = [{"evidence_id": "evt-real"}]
+        report["evidence_citations"] = [
+            {"evidence_id": "evt-real", "citation_ref": "reference", "claim": "inference"}
+        ]
         result = validate_provider_output(report, {"evt-real"})
         assert result.passed
 
@@ -232,7 +264,7 @@ class TestOrchestration:
         cs.status = "queued"
         db_session.commit()
 
-        valid = _valid_report()
+        valid = _valid_report(cs)
         fake = FakeProvider(
             response_text=json.dumps(valid),
             input_tokens=100,
@@ -269,7 +301,7 @@ class TestOrchestration:
         cs.status = "queued"
         db_session.commit()
 
-        invalid = _valid_report()
+        invalid = _valid_report(cs)
         del invalid["opposing_arguments"]
         fake = FakeProvider(response_text=json.dumps(invalid))
         with pytest.raises(ValueError, match="validation failed"):
@@ -289,7 +321,7 @@ class TestOrchestration:
             call_count[0] += 1
             if call_count[0] == 1:
                 raise ProviderTimeoutError()
-            valid = _valid_report()
+            valid = _valid_report(cs)
             return ProviderResponse(
                 raw_text=json.dumps(valid),
                 input_tokens=10,
@@ -328,7 +360,7 @@ class TestOrchestration:
         cs.status = "queued"
         db_session.commit()
 
-        valid = _valid_report()
+        valid = _valid_report(cs)
         fake = FakeProvider(response_text=json.dumps(valid))
         run_committee(db_session, cs, fake)
 
@@ -343,7 +375,7 @@ class TestOrchestration:
             build_privacy_preview(db_session, hid, cs)
             cs.status = "queued"
             db_session.commit()
-            valid = _valid_report()
+            valid = _valid_report(cs)
             fake = FakeProvider(response_text=json.dumps(valid))
             run_committee(db_session, cs, fake)
 
@@ -358,7 +390,7 @@ class TestOrchestration:
         build_privacy_preview(db_session, hid, cs)
         cs.status = "queued"
         db_session.commit()
-        valid = _valid_report()
+        valid = _valid_report(cs)
         fake = FakeProvider(response_text=json.dumps(valid))
         run_committee(db_session, cs, fake)
 
@@ -373,20 +405,23 @@ class TestOrchestration:
 
 class TestReportImmutability:
     def test_report_cannot_be_updated_after_creation(
-        self, db_session: Session, postgres_engine: Engine,
+        self,
+        db_session: Session,
+        postgres_engine: Engine,
     ) -> None:
         hid = _create_household(db_session)
         cs = _create_session(db_session, hid)
         build_privacy_preview(db_session, hid, cs)
         cs.status = "queued"
         db_session.commit()
-        valid = _valid_report()
+        valid = _valid_report(cs)
         fake = FakeProvider(response_text=json.dumps(valid))
         report = run_committee(db_session, cs, fake)
 
         with pytest.raises(Exception, match="committee_report_immutable"):
             with postgres_engine.connect() as conn:
-                conn.execute(text(
-                    "UPDATE committee_reports SET model_id = 'new' WHERE id = :id"
-                ), {"id": str(report.id)})
+                conn.execute(
+                    text("UPDATE committee_reports SET model_id = 'new' WHERE id = :id"),
+                    {"id": str(report.id)},
+                )
                 conn.commit()

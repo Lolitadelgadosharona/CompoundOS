@@ -503,20 +503,17 @@ def test_concurrent_confirm_one_current(
 
 
 def validate_revision_ids(revision_ids: list[str]) -> None:
-    """Validate new (0004+) revision IDs are <= 32 chars.
-    Pre-existing 0001-0003 revs may be longer (historical)."""
+    """Validate against the existing VARCHAR(64) version column (migration 0002)."""
     if not revision_ids:
         raise AssertionError("No revision IDs provided")
     for rev_id in revision_ids:
-        if rev_id.startswith(("0001", "0002", "0003")):
-            continue
-        assert 0 < len(rev_id) <= 32, (
-            f"Revision '{rev_id}' is {len(rev_id)} chars (max 32, min 1)"
+        assert 0 < len(rev_id) <= 64, (
+            f"Revision '{rev_id}' is {len(rev_id)} chars (max 64, min 1)"
         )
 
 
 def test_alembic_revision_chain_valid(postgres_engine) -> None:
-    """All revision IDs <= 32 chars, exactly one head, head is 0006."""
+    """Existing version column accommodates all IDs; exactly one current head."""
     from alembic.config import Config
     from alembic.script import ScriptDirectory
 
@@ -535,16 +532,16 @@ def test_alembic_revision_chain_valid(postgres_engine) -> None:
 
     heads = list(script.get_revisions("heads"))
     assert len(heads) == 1, f"Expected 1 head, got {len(heads)}: {heads}"
-    assert heads[0].revision == "0034_research_run_status", (
-        f"Expected head 0034_research_run_status, "
+    assert heads[0].revision == "0036_launch_hardening", (
+        f"Expected head 0036_launch_hardening, "
         f"got {heads[0].revision}"
     )
 
 
 def test_validate_revision_ids_rejects_overlong() -> None:
-    """validate_revision_ids rejects IDs > 32 chars."""
-    with pytest.raises(AssertionError, match="0006_portfolio_snapshot_status_transition"):
-        validate_revision_ids(["0006_portfolio_snapshot_status_transition"])
+    """Identifiers longer than the existing storage contract are rejected."""
+    with pytest.raises(AssertionError, match="65 chars"):
+        validate_revision_ids(["x" * 65])
 
 
 def test_validate_revision_ids_rejects_empty() -> None:
@@ -686,5 +683,5 @@ def test_migration_chain_0004_0005_0006(postgres_engine) -> None:
     with postgres_engine.connect() as conn:
         row = conn.execute(text("SELECT version_num FROM alembic_version")).fetchone()
         assert row is not None
-        assert row[0] == "0034_research_run_status"
+        assert row[0] == "0036_launch_hardening"
         assert len(row[0]) <= 32
