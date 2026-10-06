@@ -7,7 +7,7 @@ VERIFIED FACT: source code retains the following, with no finite automatic expir
 | Class | Stored content / tables | Retention and safety purpose |
 |---|---|---|
 | A CompoundOS-generated facts | Asset UUID, provider mapping/dimensions, ownership, request/session IDs | Indefinite until separately authorized lifecycle change; stable identity/FKs |
-| B Derived calculations | contribution_candidates.evidence/content_hash, plan, valuation/FX inputs, drift, effective_policy, Guardian | Immutable candidate evidence; candidate expires in one hour for approval, record not purged |
+| B Derived calculations | contribution_candidates.evidence/content_hash, plan, valuation/FX inputs, drift, effective_policy, Guardian | Immutable candidate evidence; candidate expires at the earlier of one hour or input freshness deadline for approval, record not purged |
 | C Provider metadata | instrument_provider_mappings.metadata/provider_id/verified_at; source/as_of/quality/identity | Persisted canonical reconciliation, quote replay/provenance |
 | D Provider data | normalized market_observations (price/currency/as_of), fx_rates (rate/pair/quality), optional market_data_cache JSON; research snapshots/evidence may copy normalized data | Full Yahoo chart/search and HTTP response not automatically retained. Normalized observations retained; cache expires logically and can be overwritten, not automatically erased at TTL |
 | E AI reasoning | committee_reports.report_content with hash/model/prompt/schema/tokens/cost; investment_memos, perspective_analyses, knowledge memory | Historical reasoning retained; reasoning is not deterministic financial FACT |
@@ -25,3 +25,6 @@ OPEN QUESTION / OWNER ACTION: obtain explicit authorization for current indefini
 The [DeepSeek privacy policy](https://cdn.deepseek.com/policies/en-US/deepseek-privacy-policy.html) discusses input/output processing, improvement/training and variable retention; it does not establish zero retention for this deployment. Confirm applicable open-platform terms, opt-out/retention arrangements and disclosure of portfolio/Policy facts. No confidential real Owner evidence was transmitted in this sprint.
 
 Owner-only UI/API is not public redistribution; there is no V1 public market-data API or public evidence share flow verified. Export/download/backups and sending facts to LLMs still require applicable rights. No claim of legal compliance is inferred from personal use alone.
+
+
+2026-10-05 final readiness update: exact per-field MUST/SHOULD/MAY/SHOULD NOT recommendations and durations are in RETENTION_POLICY_RECOMMENDATION.md. These are Owner-review recommendations, not license acceptance or automatic purge implementation. Existing authoritative financial records remain intact.
