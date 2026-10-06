@@ -36,6 +36,10 @@ from apps.api.routers.research import router as research_router
 from apps.api.routers.research_workflow import router as research_workflow_router
 from apps.api.routers.scale import router as scale_router
 from apps.api.routers.setup import router as setup_router
+from apps.api.services.owner_preview import enabled as preview_enabled
+from apps.api.services.owner_preview import validate_environment
+
+validate_environment()
 
 app = FastAPI(title="CompoundOS API", version="0.1.0")
 
@@ -68,7 +72,10 @@ async def auth_middleware(request: Request, call_next):
     if cookie_token and request.method in {"POST", "PUT", "PATCH", "DELETE"}:
         origin = request.headers.get("origin")
 
-        expected_origin = os.getenv("COMPOUNDOS_PUBLIC_ORIGIN") or f"{request.url.scheme}://{request.headers.get('host')}"
+        expected_origin = (
+            os.getenv("COMPOUNDOS_PUBLIC_ORIGIN")
+            or f"{request.url.scheme}://{request.headers.get('host')}"
+        )
         if not origin or origin != expected_origin:
             return JSONResponse(status_code=403, content={"detail": "Same-origin request required"})
     if not api_key and not cookie_token:
@@ -215,3 +222,87 @@ def version():
     from apps.api.services.build_info import build_info
 
     return build_info()
+
+
+@app.middleware("http")
+async def preview_boundary(request: Request, call_next):
+    if preview_enabled():
+        host = request.headers.get("host", "").split(":")[0]
+        if host not in {"localhost", "127.0.0.1", "api", "testserver"}:
+            return JSONResponse(status_code=403, content={"detail": "Local Owner Preview only"})
+        if any(
+            word in request.url.path.lower()
+            for word in ("transaction", "broker", "order", "execution")
+        ):
+            return JSONResponse(
+                status_code=403, content={"detail": "No financial execution in Preview"}
+            )
+        if request.url.path.startswith(
+            (
+                "/api/research",
+                "/api/cio",
+                "/api/automation",
+                "/api/intelligence",
+                "/api/backups",
+                "/api/production",
+                "/api/real-ops",
+            )
+        ):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "External/live operations disabled in Owner Preview"},
+            )
+        safe_api = (
+            "/api/investment/",
+            "/api/portfolio",
+            "/api/household",
+            "/api/policies",
+            "/api/guardian",
+            "/api/decisions",
+            "/api/committee",
+            "/api/dashboard",
+            "/api/health",
+            "/api/version",
+            "/api/auth",
+            "/api/observability",
+            "/api/notifications",
+        )
+        if request.url.path.startswith("/api/") and not request.url.path.startswith(safe_api):
+            return JSONResponse(status_code=403, content={"detail": "Unavailable in Preview"})
+        if not request.url.path.startswith("/api/") and request.method not in {
+            "GET",
+            "HEAD",
+            "OPTIONS",
+        }:
+            return JSONResponse(status_code=403, content={"detail": "Preview API mutations only"})
+        origin = request.headers.get("origin")
+        if (
+            request.method not in {"GET", "HEAD", "OPTIONS"}
+            and origin
+            and origin
+            not in {"http://localhost:3802", "http://127.0.0.1:3802", "http://localhost:8002"}
+        ):
+            return JSONResponse(status_code=403, content={"detail": "Preview same-origin only"})
+    response = await call_next(request)
+    if preview_enabled() and "text/html" in response.headers.get("content-type", ""):
+        from starlette.responses import Response
+
+        body = b"".join([chunk async for chunk in response.body_iterator])
+        banner = (
+            b'<aside style="position:sticky;top:0;z-index:9999;padding:16px;'
+            b'background:#fff0b3;color:#422c00;font-weight:bold">'
+            b"OWNER PREVIEW / DEMO DATA / NO REAL INVESTMENT RECOMMENDATION / "
+            b"NO TRADES WILL BE EXECUTED</aside>"
+        )
+        body = body.replace(b"<body>", b"<body>" + banner, 1)
+        headers = {
+            k: v
+            for k, v in response.headers.items()
+            if k.lower() not in {"content-length", "content-encoding"}
+        }
+        response = Response(
+            body, status_code=response.status_code, headers=headers, background=response.background
+        )
+    if preview_enabled():
+        response.headers["X-CompoundOS-Data-Mode"] = "DEMO"
+    return response

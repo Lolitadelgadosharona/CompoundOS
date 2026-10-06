@@ -1,0 +1,13 @@
+# Optional reuse of exact local RC dependencies; application code remains this worktree.
+services:
+  api:
+    build: !reset null
+    image: compoundos-v1-readiness-api:review
+  migrate:
+    build: !reset null
+    image: compoundos-v1-readiness-api:review
+  web:
+    build: !reset null
+    image: compoundos-v1-readiness-web:review
+    volumes:
+      - ./frontend/.next:/app/.next:ro

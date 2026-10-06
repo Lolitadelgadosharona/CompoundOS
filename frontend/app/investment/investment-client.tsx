@@ -142,6 +142,15 @@ export default function InvestmentClient() {
       application_version: string;
       status: string;
     } | null>(null);
+  const loadBalancedDemo = async () => {
+    const targets: Target[] = [];
+    for (const symbol of ["VTI", "QQQ", "VXUS", "SGOV", "AAPL", "BRK.B"]) {
+      const i = await api<Instrument>("investment/instruments", "POST", {provider_id:symbol});
+      targets.push({...i, asset_id:i.asset_id!, weight:symbol === "BRK.B" ? "16.65" : "16.67", leverage_status:"unleveraged", equity_exposure_pct:symbol === "SGOV" ? "0" : "100"});
+    }
+    setSelected(targets);
+    setMessage("DEMO balanced targets loaded. Save configuration. Existing 20% Policy unchanged; this is not investment advice.");
+  };
   const reload = useCallback(async () => {
     setSnapshot(await api<Snapshot>("investment/dashboard"));
   }, []);
@@ -220,7 +229,8 @@ export default function InvestmentClient() {
       </details>
       {error && <p role="alert">{error}</p>}
       {message && <p role="status">{message}</p>}
-      <section>
+      {process.env.NEXT_PUBLIC_COMPOUNDOS_PREVIEW_MODE === "true" && <button disabled={busy} onClick={() => void act(loadBalancedDemo)}>Load balanced DEMO targets — existing 20% limit</button>}
+      <section id="portfolio">
         <h2>Portfolio</h2>
         <p>
           Value: {money(snapshot?.valuation.total_value)}{" "}
@@ -535,7 +545,7 @@ export default function InvestmentClient() {
           Existing Policy and Guardian constraints apply.
         </p>
       </section>
-      <section>
+      <section id="owner-review">
         <h2>Owner review and decision history</h2>
         {snapshot?.candidates.map((c) => (
           <article key={c.id}>
@@ -619,7 +629,7 @@ export default function InvestmentClient() {
                 busy ||
                 !c.evidence.recommendation_ready ||
                 c.decision_status === "rejected" ||
-                c.committee_status !== "not_requested"
+                (c.committee_status !== "not_requested" && !(process.env.NEXT_PUBLIC_COMPOUNDOS_PREVIEW_MODE === "true" && c.committee_status === "draft"))
               }
               onClick={() =>
                 void act(async () => {
@@ -646,12 +656,12 @@ export default function InvestmentClient() {
                 void act(async () => {
                   await api(`investment/candidates/${c.id}/approve`, "POST");
                   setMessage(
-                    "Approved for manual execution only. No trade was placed. Exact plan is stored in the Decision Journal.",
+                    process.env.NEXT_PUBLIC_COMPOUNDOS_PREVIEW_MODE === "true" ? "SIMULATED approval: Manual Demo Plan saved in Preview Journal. No execution allowed." : "Approved for manual execution only. No trade was placed. Exact plan is stored in the Decision Journal.",
                   );
                 })
               }
             >
-              Approve manual plan
+              {process.env.NEXT_PUBLIC_COMPOUNDOS_PREVIEW_MODE === "true" ? "APPROVE DEMO PLAN" : "Approve manual plan"}
             </button>
             <button
               disabled={
@@ -675,10 +685,9 @@ export default function InvestmentClient() {
         <section>
           <h2>Committee privacy preview</h2>
           <p>
-            The configured DeepSeek provider will receive this candidate’s
-            portfolio value, holdings, targets, contribution, observed prices/FX
-            and Policy/Guardian evaluations. No account credentials are
-            included.
+            {process.env.NEXT_PUBLIC_COMPOUNDOS_PREVIEW_MODE === "true"
+              ? "SIMULATED COMMITTEE — NOT REAL AI ANALYSIS. Demo evidence is processed locally; nothing is sent to DeepSeek or another external AI provider."
+              : "The configured DeepSeek provider will receive this candidate’s portfolio value, holdings, targets, contribution, observed prices/FX and Policy/Guardian evaluations. No account credentials are included."}
           </p>
           <p>Evidence hash: {preview.content_hash}</p>
           <label>
@@ -687,7 +696,7 @@ export default function InvestmentClient() {
               checked={consent}
               onChange={(e) => setConsent(e.target.checked)}
             />
-            I confirm disclosure of this evidence to the configured provider.
+            {process.env.NEXT_PUBLIC_COMPOUNDOS_PREVIEW_MODE === "true" ? "I confirm local simulated analysis of DEMO evidence." : "I confirm disclosure of this evidence to the configured provider."}
           </label>
           <button
             disabled={busy || !consent}
@@ -702,7 +711,7 @@ export default function InvestmentClient() {
               })
             }
           >
-            Confirm and run existing Committee
+            {process.env.NEXT_PUBLIC_COMPOUNDOS_PREVIEW_MODE === "true" ? "Confirm and run SIMULATED COMMITTEE" : "Confirm and run existing Committee"}
           </button>
         </section>
       )}

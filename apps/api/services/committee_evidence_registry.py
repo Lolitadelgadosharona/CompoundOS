@@ -4,6 +4,8 @@ import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 
+from apps.api.services.owner_preview import enabled as preview_enabled
+
 TYPES = {
     "portfolio_snapshot",
     "policy_version",
@@ -38,7 +40,11 @@ def evidence_registry(cs):
         serialized = json.dumps(item.structured_facts, default=str).lower()
         mode = (
             "SIMULATED"
-            if any(x in serialized for x in ["synthetic", "simulation", "fake-model"])
+            if any(
+                x in serialized
+                for x in ["synthetic", "simulation", "fake-model"]
+                + (["simulated", "demo_provider"] if preview_enabled() else [])
+            )
             else "HISTORICAL"
             if (
                 item.source_type in {"portfolio_snapshot", "decision"}

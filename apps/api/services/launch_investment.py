@@ -38,6 +38,8 @@ from apps.api.services.launch_providers import (
     get_instrument_provider,
     get_market_provider,
 )
+from apps.api.services.owner_preview import enabled as preview_enabled
+from apps.api.services.owner_preview import qualities as source_qualities
 from apps.api.services.valuation import (
     MAX_AGE,
     RecommendationUnavailable,
@@ -65,11 +67,13 @@ def audit(session, hid, action, eid, metadata):
     session.add(
         AuditEvent(
             household_id=hid,
-            actor="local-owner",
-            action=action,
+            actor="preview-owner" if preview_enabled() else "local-owner",
+            action="preview." + action if preview_enabled() else action,
             entity_type="Contribution",
             entity_id=eid,
-            event_metadata=metadata,
+            event_metadata=dict(metadata, data_mode="SIMULATED", execution_allowed=False)
+            if preview_enabled()
+            else metadata,
         )
     )
     session.flush()
@@ -197,7 +201,7 @@ def check_observation(obs, now):
         or now - stamp > MAX_AGE
     ):
         raise RecommendationUnavailable("Missing, invalid, future or stale price/FX observation")
-    if obs.quality not in {"OBSERVED", "DELAYED"} or not obs.provider:
+    if obs.quality not in source_qualities() or not obs.provider:
         raise RecommendationUnavailable("Untrusted market/FX source quality")
 
 
@@ -491,7 +495,7 @@ def evaluate(session, hid, config, now=None, funding="monthly"):
             not quote
             or quote["as_of"] > now
             or now - quote["as_of"] > MAX_AGE
-            or quote["quality"] not in {"OBSERVED", "DELAYED"}
+            or quote["quality"] not in source_qualities()
             or not trusted_source(quote["provider"])
         ):
             raise RecommendationUnavailable("Missing/stale target price: " + instrument.symbol)
@@ -523,7 +527,7 @@ def evaluate(session, hid, config, now=None, funding="monthly"):
     )
     # A reported import value cannot stand in for required market observations.
     for entry in v.positions():
-        if entry.get("quote_quality") not in {"OBSERVED", "DELAYED"}:
+        if entry.get("quote_quality") not in source_qualities():
             raise RecommendationUnavailable(
                 "Observed price required for every held canonical asset"
             )
@@ -690,6 +694,7 @@ def evaluate(session, hid, config, now=None, funding="monthly"):
     guardian_blocked = any(f.get("severity") == "critical" for f in guardian_findings)
     return {
         "classification": "FACT",
+        "data_mode": "SIMULATED" if preview_enabled() else "LIVE",
         "effective_policy": {
             "version_id": str(version.id),
             "bucket_weight_scope": "positions_only",
@@ -905,7 +910,12 @@ def preview_committee(session, hid, cid):
     )
     session.add(item)
     decision, draft = create_decision(
-        session, CreateDecisionRequest(title="Manual contribution plan")
+        session,
+        CreateDecisionRequest(
+            title="PREVIEW / SIMULATED contribution plan"
+            if preview_enabled()
+            else "Manual contribution plan"
+        ),
     )
     draft = update_draft(
         session,
@@ -1003,12 +1013,15 @@ def approve(session, hid, cid):
         hid,
         "contribution.manual.approved",
         cid,
-        {"execution": "MANUAL", "evidence_hash": row["content_hash"]},
+        {
+            "execution": "PREVIEW_ONLY" if preview_enabled() else "MANUAL",
+            "evidence_hash": row["content_hash"],
+        },
     )
     session.commit()
     return {
         "status": "approved",
-        "execution": "MANUAL",
+        "execution": "PREVIEW_ONLY" if preview_enabled() else "MANUAL",
         "plan": row["evidence"]["plan"],
         "decision_id": row["decision_id"],
     }

@@ -202,20 +202,39 @@ def _configured_yahoo():
 
 
 def get_instrument_provider():
+    from apps.api.services.owner_preview import enabled
+
+    if enabled():
+        from apps.api.services.preview_providers import DemoProvider
+
+        return DemoProvider()
     return _configured_yahoo()
 
 
 def get_market_provider():
+    from apps.api.services.owner_preview import enabled
+
+    if enabled():
+        from apps.api.services.preview_providers import DemoProvider
+
+        return DemoProvider()
     return _configured_yahoo()
 
 
 def get_fx_provider():
+    from apps.api.services.owner_preview import enabled
+
+    if enabled():
+        from apps.api.services.preview_providers import DemoProvider
+
+        return DemoProvider()
     return _configured_yahoo()
 
 
 def configured_data_sources():
     """Authoritative adapter registry; business services do not name a market vendor."""
     import os
+
     adapters = [get_instrument_provider(), get_market_provider(), get_fx_provider()]
     if any(getattr(p, "test_only", False) for p in adapters) and os.getenv("ENVIRONMENT") != "test":
         raise InstrumentUnavailable("Test-only provider cannot support production recommendations")

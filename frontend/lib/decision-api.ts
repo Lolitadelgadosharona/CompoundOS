@@ -75,8 +75,8 @@ export type SnapshotDetail = {
   decision_date: string;
   review_date: string | null;
   confirmed_at: string;
-  policy_version_number: number;
-  snapshot_id: string;
+  policy_version_number: number | null;
+  snapshot_id: string | null;
 };
 
 export type DecisionDetailResponse = {
@@ -186,6 +186,10 @@ export async function listDecisions(
   if (params?.status) url.searchParams.set("status", params.status);
   if (params?.limit) url.searchParams.set("limit", String(params.limit));
   if (params?.cursor) url.searchParams.set("cursor", params.cursor);
+  if (process.env.NEXT_PUBLIC_COMPOUNDOS_PREVIEW_MODE === "true") {
+    const data = await request<{items: DecisionListItem[]}>(url.toString(), {signal});
+    return {decisions:data.items, total:data.items.length};
+  }
   return request<DecisionListResponse>(url.toString(), { signal });
 }
 
@@ -230,6 +234,17 @@ export async function confirmDraft(
 }
 
 export async function readDecisionDetail(decisionId: string, signal?: AbortSignal): Promise<DecisionDetailResponse> {
+  if (process.env.NEXT_PUBLIC_COMPOUNDOS_PREVIEW_MODE === "true") {
+    const raw = await request<DecisionDetailResponse & {original_snapshot:SnapshotDetail|null; effective_snapshot:SnapshotDetail|null}>(`${API_BASE_URL}${BASE_PATH}/${decisionId}`, {signal});
+    const audit = await readDecisionAudit(decisionId,undefined,signal);
+    const event = audit.events.find(e => e.action === "decision.confirmed");
+    const number = event?.metadata.policy_version_number;
+    const snapshot = (value:SnapshotDetail|null):SnapshotDetail|null => value ? {...value,
+      policy_version_number:typeof number === "number" ? number : null,
+      snapshot_id:value.snapshot_id ?? null} : null;
+    return {...raw, original:snapshot(raw.original_snapshot), confirmed:snapshot(raw.effective_snapshot),
+      draft:raw.status === "draft" ? await readDraft(decisionId,signal) : null};
+  }
   return request<DecisionDetailResponse>(`${API_BASE_URL}${BASE_PATH}/${decisionId}`, { signal });
 }
 
@@ -256,6 +271,10 @@ export async function unarchiveDecision(decisionId: string, signal?: AbortSignal
 }
 
 export async function readCorrections(decisionId: string, signal?: AbortSignal): Promise<CorrectionListResponse> {
+  if (process.env.NEXT_PUBLIC_COMPOUNDOS_PREVIEW_MODE === "true") {
+    const data = await request<{items:Correction[]}>(`${API_BASE_URL}${BASE_PATH}/${decisionId}/corrections`,{signal});
+    return {corrections:data.items,total:data.items.length};
+  }
   return request<CorrectionListResponse>(`${API_BASE_URL}${BASE_PATH}/${decisionId}/corrections`, { signal });
 }
 
@@ -289,9 +308,14 @@ export async function readDecisionAudit(
   params?: { before_sequence_number?: number; limit?: number },
   signal?: AbortSignal,
 ): Promise<DecisionAuditListResponse> {
-  const url = new URL(`${API_BASE_URL}${BASE_PATH}/${decisionId}/audit`, window.location.origin);
+  const auditPath = process.env.NEXT_PUBLIC_COMPOUNDOS_PREVIEW_MODE === "true" ? "audit-events" : "audit";
+  const url = new URL(`${API_BASE_URL}${BASE_PATH}/${decisionId}/${auditPath}`, window.location.origin);
   if (params?.before_sequence_number) url.searchParams.set("before_sequence_number", String(params.before_sequence_number));
   if (params?.limit) url.searchParams.set("limit", String(params.limit));
+  if (process.env.NEXT_PUBLIC_COMPOUNDOS_PREVIEW_MODE === "true") {
+    const data = await request<{items:DecisionAuditEvent[]; next_before_sequence_number:number|null}>(url.toString(),{signal});
+    return {events:data.items,has_more:data.next_before_sequence_number !== null};
+  }
   return request<DecisionAuditListResponse>(url.toString(), { signal });
 }
 

@@ -25,8 +25,8 @@ from apps.api.models import (
     CommitteeSession,
 )
 from apps.api.services import committee_orchestration as orch
-from apps.api.services.ai_provider import DeepSeekProvider
 from apps.api.services.credential_manager import CredentialError
+from apps.api.services.preview_providers import committee_provider
 
 router = APIRouter(prefix="/api/committee", tags=["committee"])
 
@@ -230,7 +230,7 @@ def run_committee(
     session.commit()
 
     try:
-        provider = DeepSeekProvider()
+        provider = committee_provider(cs)
         report = orch.run_committee(session, cs, provider)
         return RunResponse(
             session_id=cs.id,

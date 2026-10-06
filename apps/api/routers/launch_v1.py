@@ -262,9 +262,10 @@ def committee(cid: UUID, body: CommitteeConsent, session: Session = Depends(get_
     ):
         raise HTTPException(409, "Preview exact evidence and confirm provider disclosure first")
     from apps.api.models import CommitteeSession
-    from apps.api.services.ai_provider import DeepSeekProvider, ProviderError
+    from apps.api.services.ai_provider import ProviderError
     from apps.api.services.committee_orchestration import run_committee
     from apps.api.services.credential_manager import CredentialError
+    from apps.api.services.preview_providers import committee_provider
 
     cs = session.get(CommitteeSession, UUID(row["committee_session_id"]), with_for_update=True)
     if cs.status != "draft":
@@ -273,7 +274,7 @@ def committee(cid: UUID, body: CommitteeConsent, session: Session = Depends(get_
     session.commit()
     try:
         run_committee(
-            session, cs, DeepSeekProvider(), prompt_version="contribution-v1.1", max_retries=0
+            session, cs, committee_provider(cs), prompt_version="contribution-v1.1", max_retries=0
         )
     except (ValueError, RuntimeError, CredentialError, ProviderError) as exc:
         raise HTTPException(

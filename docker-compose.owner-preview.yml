@@ -1,0 +1,38 @@
+# Overlay of existing local architecture; new Compose project and volumes only.
+services:
+  postgres:
+    ports: !override []
+  redis:
+    ports: !override []
+  migrate:
+    entrypoint: []
+    image: compoundos-owner-preview-api
+    environment:
+      ENVIRONMENT: test
+      COMPOUNDOS_PREVIEW_MODE: 'true'
+      COMPOUNDOS_GIT_SHA: ${GIT_SHA}
+      COMPOUNDOS_BUILD_TIMESTAMP: ${BUILD_TIMESTAMP}
+  api:
+    entrypoint: []
+    command: ["python", "-m", "uvicorn", "apps.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    image: compoundos-owner-preview-api
+    ports: !override ['127.0.0.1:8002:8000']
+    environment:
+      ENVIRONMENT: test
+      COMPOUNDOS_PREVIEW_MODE: 'true'
+      COMPOUNDOS_GIT_SHA: ${GIT_SHA}
+      COMPOUNDOS_BUILD_TIMESTAMP: ${BUILD_TIMESTAMP}
+      COMPOUNDOS_YAHOO_ACCESS_AUTHORIZED: '0'
+      COMPOUNDOS_ALLOW_ENV_CREDENTIALS: '0'
+    volumes:
+      - ./apps:/app/apps:ro
+  web:
+    image: compoundos-owner-preview-web
+    build:
+      args:
+        OWNER_PREVIEW: 'true'
+    environment:
+      COMPOUNDOS_PREVIEW_MODE: 'true'
+      COMPOUNDOS_GIT_SHA: ${GIT_SHA}
+      COMPOUNDOS_BUILD_TIMESTAMP: ${BUILD_TIMESTAMP}
+    ports: !override ['127.0.0.1:3802:3000']

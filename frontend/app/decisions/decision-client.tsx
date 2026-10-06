@@ -523,7 +523,7 @@ function SnapshotReadOnly({ snapshot, label }: { snapshot: SnapshotDetail; label
         </div>
         <div>
           <dt>Policy version</dt>
-          <dd>Version {snapshot.policy_version_number}</dd>
+          <dd>Version {snapshot.policy_version_number ?? "Unknown"}</dd>
         </div>
       </dl>
       {snapshot.snapshot_id ? (

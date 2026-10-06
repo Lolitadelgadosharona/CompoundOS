@@ -6,6 +6,9 @@ from decimal import Decimal
 
 from sqlalchemy import text
 
+from apps.api.services.owner_preview import enabled as preview_enabled
+from apps.api.services.owner_preview import qualities as source_qualities
+
 MAX_AGE = timedelta(hours=24)
 
 
@@ -56,6 +59,7 @@ class Valuation:
     def contract(self):
         return {
             "version": "valuation-v1",
+            "data_mode": "DEMO" if preview_enabled() else "LIVE",
             "base_currency": self.base_currency,
             "as_of": self.as_of.isoformat(),
             "status": self.status,
@@ -158,7 +162,7 @@ def value_rows(base_currency, positions, cash, rates, as_of=None):
             e["price_unit_multiplier"] = str(_currency(row.get("market_price_currency"))[1])
             errors = []
             if kind == "position":
-                if row.get("quote_quality") in {"OBSERVED", "DELAYED"} and (
+                if row.get("quote_quality") in source_qualities() and (
                     not row.get("identity_verified")
                     or not row.get("quote_identity_verified")
                     or not trusted_source(row.get("source"))
@@ -166,7 +170,7 @@ def value_rows(base_currency, positions, cash, rates, as_of=None):
                     errors.append("QUOTE_IDENTITY_UNRESOLVED_OR_UNTRUSTED")
                 if not row.get("identity_verified") or not row.get("quote_identity_verified"):
                     result.trust_blockers.append(f"position {key}: INSTRUMENT_IDENTITY_UNRESOLVED")
-                if row.get("quote_quality") not in {"OBSERVED", "DELAYED"} or not trusted_source(
+                if row.get("quote_quality") not in source_qualities() or not trusted_source(
                     row.get("source")
                 ):
                     result.trust_blockers.append(f"position {key}: UNTRUSTED_QUOTE")
@@ -209,7 +213,7 @@ def value_rows(base_currency, positions, cash, rates, as_of=None):
                         identity = r.get("identity") or {}
                         if (
                             not trusted_source(r["rate_source"])
-                            or r.get("quality") not in {"OBSERVED", "DELAYED"}
+                            or r.get("quality") not in source_qualities()
                             or any(identity.get(k) != v for k, v in expected.items())
                         ):
                             result.trust_blockers.append(f"{kind} {key}: UNTRUSTED_FX")
