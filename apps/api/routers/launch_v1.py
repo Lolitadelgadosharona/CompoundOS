@@ -343,9 +343,30 @@ def owner_overview(session: Session = Depends(get_session)):
             current_review = True
         except (RecommendationUnavailable, ValueError):
             pass
+    active_candidate = None
+    if analysis and snapshot["candidates"]:
+        from datetime import datetime, timezone
+
+        latest = snapshot["candidates"][0]
+        evidence = latest["evidence"]
+        if (
+            latest["expires_at"] > datetime.now(timezone.utc)
+            and svc.digest(evidence) == latest["content_hash"]
+            and evidence.get("fingerprint") == analysis["fingerprint"]
+            and svc.digest(evidence.get("market_data")) == svc.digest(analysis["market_data"])
+        ):
+            # Readable blocked candidates persist in presentation after reload.
+            # This does not grant readiness; validate_candidate is authoritative.
+            active_candidate = latest
     from apps.api.services.broker_connections import connection_directory
+    from apps.api.services.preview_review import discussion, strategy_view
 
     return {
+        "active_candidate": active_candidate,
+        "strategy": strategy_view(snapshot),
+        "committee_discussion": discussion(
+            analysis, snapshot["candidates"][0] if snapshot["candidates"] else None, current_review
+        ),
         "snapshot": snapshot,
         "analysis": analysis,
         "unavailable_reason": reason,

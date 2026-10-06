@@ -1,14 +1,16 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
+import CommitteeDiscussionPanel from "./committee-discussion";
 import {
   ownerApi,
   amount,
   planExplanation,
   Candidate,
-  planStatus,
   ownerFinding,
   committeeText,
+  candidateLifecycle,
+  Overview,
 } from "../../lib/owner-data";
 import {
   useOverview,
@@ -18,18 +20,25 @@ import {
   Governance,
 } from "./shared";
 export default function OwnerInvestmentPlan() {
-  const { data, error } = useOverview();
-  const [selected, setSelected] = useState<Candidate | null>(null),
+  const { data: initial, error } = useOverview();
+  const [updated, setUpdated] = useState<Overview | null>(null);
+  const data = updated ?? initial;
+  const [selection, setSelected] = useState<Candidate | null>(null),
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState(""),
     [problem, setProblem] = useState(""),
     [disclosure, setDisclosure] = useState(false),
     [consent, setConsent] = useState(false);
+  const selected =
+    selection ??
+    data?.active_candidate ??
+    (data?.current_review ? data.snapshot.candidates[0] : null);
   const act = async (fn: () => Promise<void>) => {
     setBusy(true);
     setProblem("");
     try {
       await fn();
+      setUpdated(await ownerApi<Overview>("investment/owner-overview"));
     } catch (e) {
       setProblem(
         e instanceof Error ? e.message : "Unable to complete this step.",
@@ -100,15 +109,19 @@ export default function OwnerInvestmentPlan() {
           <span>Review status</span>
           <strong>
             {selected
-              ? planStatus(selected.decision_status)
-              : "Not prepared for decision"}
+              ? candidateLifecycle(a, selected)
+              : (data.committee_discussion?.state ?? "CANDIDATE")}
           </strong>
         </article>
       </section>
       {a ? (
         <>
           <section className="panel">
-            <h2>Proposed purchases</h2>
+            <h2>CANDIDATE ALLOCATION</h2>
+            <p>
+              Awaiting Committee Review. Calculated amounts are not approved
+              purchases.
+            </p>
             <PurchaseTable analysis={a} currency={currency} />
             <h3>Why this plan?</h3>
             <p>{planExplanation(a.plan.rows)}</p>
@@ -118,7 +131,19 @@ export default function OwnerInvestmentPlan() {
             </p>
           </section>
           <section className="panel">
-            <h2>Current and target allocation</h2>
+            <h2>Current holdings vs Owner-approved strategic allocation</h2>
+            <p>
+              Holdings never define targets. DEMO strategy; no automatic sale of
+              non-target assets.
+            </p>
+            <p>
+              {data.strategy?.targets
+                .filter((t) => Number(t.weight) === 0)
+                .map(
+                  (t) => `${t.symbol}: strategic target 0% — outside strategy`,
+                )
+                .join(" · ")}
+            </p>
             <AllocationTable
               data={selected ? { ...data, analysis: selected.evidence } : data}
             />
@@ -170,8 +195,7 @@ export default function OwnerInvestmentPlan() {
                     "not_aligned_with_policy"
                   ? "Not supportive"
                   : "Further review needed"}{" "}
-              · Confidence:{" "}
-              {selected.committee_report.confidence ?? "Not available"}
+              · Confidence: {"NOT AVAILABLE"}
             </p>
             <div className="owner-two-column">
               <div>
@@ -206,11 +230,16 @@ export default function OwnerInvestmentPlan() {
             evidence. Existing evidence validation still applies.
           </p>
         )}
+        <p>
+          Lifecycle: CANDIDATE → REVIEWING → READY_FOR_DECISION → APPROVED /
+          REJECTED. Safeguards may set BLOCKED; missing required evidence
+          remains NOT EVALUATED.
+        </p>
         <div className="actions">
           {!selected && (
             <button
               className="primary-button"
-              disabled={busy || !a?.recommendation_ready}
+              disabled={busy || !a}
               onClick={() =>
                 void act(async () => {
                   setSelected(
@@ -219,12 +248,12 @@ export default function OwnerInvestmentPlan() {
                     }),
                   );
                   setMessage(
-                    "Demo plan prepared. No holdings or cash were changed.",
+                    "Candidate saved. Review its safeguards; blocked candidates cannot begin governance review. Holdings and cash were unchanged.",
                   );
                 })
               }
             >
-              Prepare DEMO plan for review
+              Review with Investment Committee
             </button>
           )}
           {selected && (
@@ -251,7 +280,7 @@ export default function OwnerInvestmentPlan() {
                   })
                 }
               >
-                ASK COMMITTEE
+                Review with Investment Committee
               </button>
               <button
                 className="primary-button"
@@ -277,7 +306,7 @@ export default function OwnerInvestmentPlan() {
                   })
                 }
               >
-                APPROVE DEMO PLAN
+                Approve Plan
               </button>
               <button
                 disabled={
@@ -297,7 +326,7 @@ export default function OwnerInvestmentPlan() {
                   })
                 }
               >
-                REJECT
+                Reject Plan
               </button>
             </>
           )}
@@ -344,6 +373,12 @@ export default function OwnerInvestmentPlan() {
           </div>
         )}
       </section>
+      {data.committee_discussion && (
+        <CommitteeDiscussionPanel
+          report={data.committee_discussion}
+          data={data}
+        />
+      )}
       <section className="panel">
         <h2>Evidence & records</h2>
         <details>

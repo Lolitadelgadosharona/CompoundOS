@@ -1,7 +1,12 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
-import { amount, planStatus, planExplanation } from "../../lib/owner-data";
+import {
+  amount,
+  planStatus,
+  planExplanation,
+  ownerFinding,
+} from "../../lib/owner-data";
 import { wealthScenario } from "../../lib/wealth-scenario";
 import {
   useOverview,
@@ -43,6 +48,46 @@ export default function OwnerDashboard() {
           As of {new Date(s.valuation.as_of).toLocaleString()}
         </small>
       </header>
+      <section className="panel owner-monthly" aria-label="Action required">
+        <p className="eyebrow">ACTION REQUIRED</p>
+        <h2>
+          {data.committee_discussion?.state ??
+            (!a
+              ? "NOT EVALUATED"
+              : a.recommendation_ready
+                ? "CANDIDATE"
+                : "BLOCKED")}
+        </h2>
+        <p>
+          {data.committee_discussion?.state === "READY_FOR_DECISION"
+            ? "Ready for your decision. Review the exact candidate and approve or reject."
+            : data.committee_discussion?.state === "HOLD"
+              ? "Committee recommends HOLD. Review the opposing case and missing evidence."
+              : a?.guardian.status === "BLOCKED" ||
+                  a?.policy.status === "BLOCKED"
+                ? "Investment plan blocked. Published safeguards must be reviewed; approval is unavailable."
+                : !a || !a.recommendation_ready
+                  ? "Additional evidence is required. Review missing data before a governance review."
+                  : "Candidate allocation awaits Investment Committee review."}
+        </p>
+        {a?.guardian.findings
+          .filter((f) => f.severity !== "not_evaluated")
+          .slice(0, 2)
+          .map((f, i) => (
+            <p key={i}>{ownerFinding(f.detail, data)}</p>
+          ))}
+        <Link className="primary-button" href="/investment-plan#governance">
+          {a?.guardian.status === "BLOCKED" || a?.policy.status === "BLOCKED"
+            ? "Review Policy & safeguards"
+            : data.committee_discussion?.state === "READY_FOR_DECISION"
+              ? "Review & Approve"
+              : data.committee_discussion?.state === "HOLD"
+                ? "Review Committee"
+                : !a?.recommendation_ready
+                  ? "See Missing Data"
+                  : "Review with Committee"}
+        </Link>
+      </section>
       <section className="owner-summary-grid" aria-label="Wealth summary">
         {[
           ["Total Portfolio Value", amount(s.valuation.total_value, currency)],
@@ -64,9 +109,14 @@ export default function OwnerDashboard() {
                 ? "Needs attention"
                 : a.guardian.status === "BLOCKED"
                   ? "Blocked"
-                  : "Within checks",
+                  : a.guardian.status === "NOT EVALUATED"
+                    ? "NOT EVALUATED"
+                    : "Within checks",
           ],
-          ["Latest Investment Plan Status", planStatus(c?.decision_status)],
+          [
+            "Latest Investment Plan Status",
+            data.committee_discussion?.state ?? "CANDIDATE",
+          ],
         ].map(([label, value]) => (
           <article className="owner-summary" key={label}>
             <span>{label}</span>
@@ -125,6 +175,39 @@ export default function OwnerDashboard() {
         )}
       </section>
       <section className="panel">
+        <h2>Owner-approved strategic allocation · DEMO</h2>
+        <p>
+          Separate from current holdings. Imports never acquire a target; zero
+          target never authorizes a sale.
+        </p>
+        <div className="owner-table-wrap">
+          <table className="owner-table">
+            <thead>
+              <tr>
+                <th>Asset</th>
+                <th>Strategic target</th>
+                <th>Role / data coverage</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.strategy?.targets.map((t) => (
+                <tr key={t.symbol}>
+                  <td>{t.symbol}</td>
+                  <td>
+                    {t.weight}% · {t.status}
+                  </td>
+                  <td>{Object.values(t.metadata).join(" · ")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <details>
+          <summary>Strategy approval & version</summary>
+          <p>
+            {data.strategy?.approval} · {data.strategy?.version_id}
+          </p>
+        </details>
         <div className="section-heading-row">
           <h2>Where your money is invested</h2>
           <Link href="/portfolio">View Portfolio →</Link>
@@ -178,9 +261,9 @@ export default function OwnerDashboard() {
                 </span>
               </div>
             ))}
-          {!s.candidates.some((c) => c.decision_id || c.decision_status === "rejected") && (
-            <p>No decisions recorded yet.</p>
-          )}
+          {!s.candidates.some(
+            (c) => c.decision_id || c.decision_status === "rejected",
+          ) && <p>No decisions recorded yet.</p>}
         </section>
       </div>
       <section className="panel owner-scenario">

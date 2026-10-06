@@ -218,15 +218,15 @@ it("shows Owner decision history instead of raw audit rows", async () => {
 it("keeps approval unavailable until actual Committee validation", async () => {
   mockFetch();
   render(<OwnerInvestmentPlan />);
-  await screen.findByText("Proposed purchases");
+  await screen.findByText("CANDIDATE ALLOCATION");
   expect(
-    screen.queryByRole("button", { name: "APPROVE DEMO PLAN" }),
+    screen.queryByRole("button", { name: "Approve Plan" }),
   ).toBeNull();
   expect(
     screen.getByText("SIMULATED COMMITTEE · NOT REAL AI ANALYSIS"),
   ).toBeTruthy();
   expect(
-    screen.getByRole("button", { name: "Prepare DEMO plan for review" }),
+    screen.getByRole("button", { name: "Review with Investment Committee" }),
   ).toBeTruthy();
 });
 it("offers coherent navigation with household inside Settings", () => {

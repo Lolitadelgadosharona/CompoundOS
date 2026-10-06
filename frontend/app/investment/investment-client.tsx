@@ -142,14 +142,14 @@ export default function InvestmentClient() {
       application_version: string;
       status: string;
     } | null>(null);
-  const loadBalancedDemo = async () => {
+  const loadOwnerStrategyDemo = async () => {
     const targets: Target[] = [];
-    for (const symbol of ["VTI", "QQQ", "VXUS", "SGOV", "AAPL", "BRK.B"]) {
+    for (const [symbol, weight] of [["VTI", "50"], ["QQQ", "30"], ["VXUS", "10"], ["SGOV", "10"]]) {
       const i = await api<Instrument>("investment/instruments", "POST", {provider_id:symbol});
-      targets.push({...i, asset_id:i.asset_id!, weight:symbol === "BRK.B" ? "16.65" : "16.67", leverage_status:"unleveraged", equity_exposure_pct:symbol === "SGOV" ? "0" : "100"});
+      targets.push({...i, asset_id:i.asset_id!, weight, leverage_status:"unleveraged", equity_exposure_pct:symbol === "SGOV" ? "0" : "100"});
     }
     setSelected(targets);
-    setMessage("DEMO balanced targets loaded. Save configuration. Existing 20% Policy unchanged; this is not investment advice.");
+    setMessage("Owner DEMO strategy loaded. Save explicitly to approve this strategy. Holdings outside these targets remain at zero target; no sales. Existing 20% Policy may block the candidate.");
   };
   const reload = useCallback(async () => {
     setSnapshot(await api<Snapshot>("investment/dashboard"));
@@ -229,7 +229,7 @@ export default function InvestmentClient() {
       </details>
       {error && <p role="alert">{error}</p>}
       {message && <p role="status">{message}</p>}
-      {process.env.NEXT_PUBLIC_COMPOUNDOS_PREVIEW_MODE === "true" && <button disabled={busy} onClick={() => void act(loadBalancedDemo)}>Load balanced DEMO targets — existing 20% limit</button>}
+      {process.env.NEXT_PUBLIC_COMPOUNDOS_PREVIEW_MODE === "true" && <button disabled={busy} onClick={() => void act(loadOwnerStrategyDemo)}>Load Owner-approved DEMO strategy — 50/30/10/10</button>}
       <section id="portfolio">
         <h2>Portfolio</h2>
         <p>

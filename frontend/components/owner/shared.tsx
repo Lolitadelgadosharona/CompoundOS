@@ -6,6 +6,7 @@ import {
   pct,
   ownerApi,
   committeeOpinion,
+  ownerFinding,
   reasonFor,
   Overview,
   Analysis,
@@ -96,7 +97,20 @@ export function AllocationTable({ data }: { data: Overview }) {
                   {amount(p.value, data.snapshot.valuation.base_currency)}
                 </td>
                 <td>{pct(r?.current_weight ?? p.weight)}</td>
-                <td>{pct(r?.target_weight ?? configured?.weight)}</td>
+                <td>
+                  {pct(
+                    r?.target_weight ??
+                      configured?.weight ??
+                      (data.snapshot.configuration ? "0" : undefined),
+                  )}
+                  {!configured && data.snapshot.configuration && (
+                    <small>
+                      {" "}
+                      · NON-TARGET HOLDING · Outside strategic allocation · No
+                      automatic sale
+                    </small>
+                  )}
+                </td>
                 <td>
                   {r ? (
                     <>
@@ -116,8 +130,10 @@ export function AllocationTable({ data }: { data: Overview }) {
                         pp
                       </small>
                     </>
+                  ) : !configured && data.snapshot.configuration ? (
+                    "Outside strategy — no automatic sale"
                   ) : (
-                    "Not assessed"
+                    "NOT EVALUATED"
                   )}
                 </td>
               </tr>
@@ -141,7 +157,7 @@ export function PurchaseTable({
         <thead>
           <tr>
             <th>Asset</th>
-            <th>Proposed amount</th>
+            <th>Candidate amount</th>
             <th>Reason</th>
           </tr>
         </thead>
@@ -201,10 +217,7 @@ export function Governance({
         <Badge status={committeeOpinion(direction)} />
         <small>
           {direction ? "SIMULATED opinion" : "Current review required"} ·
-          Confidence:{" "}
-          {direction
-            ? (candidate?.committee_report?.confidence ?? "Not available")
-            : "Not available"}
+          Confidence: {direction ? "NOT AVAILABLE" : "NOT AVAILABLE"}
         </small>
       </div>
     </div>
@@ -219,12 +232,14 @@ export function RiskCard({ data }: { data: Overview }) {
       <h2>Risk & safeguards</h2>
       <p className="owner-value">
         {!a
-          ? "Not assessed"
+          ? "NOT EVALUATED"
           : a.guardian.status === "BLOCKED"
             ? "Plan blocked"
             : a.guardian.status === "WARNING"
               ? "Needs attention"
-              : "Within checked limits"}
+              : a.guardian.status === "NOT EVALUATED"
+                ? "NOT EVALUATED"
+                : "Within checked limits"}
       </p>
       <dl className="owner-detail-list">
         <div>
@@ -239,10 +254,10 @@ export function RiskCard({ data }: { data: Overview }) {
         </div>
         <div>
           <dt>Equity exposure</dt>
-          <dd>Not available</dd>
+          <dd>NOT EVALUATED — no complete verified look-through</dd>
         </div>
         <div>
-          <dt>Cash</dt>
+          <dt>Liquidity / Cash</dt>
           <dd>
             {amount(
               data.snapshot.cash_value,
@@ -259,13 +274,16 @@ export function RiskCard({ data }: { data: Overview }) {
           <dd>{a ? a.guardian.findings.length : "Not assessed"}</dd>
         </div>
       </dl>
+      <p>
+        Data coverage: NOT EVALUATED — sector classification / ETF look-through
+        and macro evidence unavailable.
+      </p>
       {a?.guardian.findings.map((f, i) => (
         <p key={i} className="owner-risk-note">
-          {f.check === "sector"
-            ? "Sector exposure needs review."
-            : f.check === "concentration"
-              ? "Position concentration needs review."
-              : "A safeguard needs your attention."}
+          {f.severity === "not_evaluated"
+            ? "NOT EVALUATED: "
+            : "RISK DETECTED: "}
+          {ownerFinding(f.detail, data)}
         </p>
       ))}
       <Link href="/investment-plan#governance">Review safeguards →</Link>

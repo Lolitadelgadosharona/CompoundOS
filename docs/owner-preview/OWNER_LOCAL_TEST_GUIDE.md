@@ -16,3 +16,18 @@ Open **http://localhost:3802**. No terminal, login or API key is required for no
 Existing records are preserved. History contains both approval and rejection examples created during verification. Current CNY cash is distinct from the next planned monthly contribution. Performance metrics without trusted history stay Not available.
 
 Developer start/stop remains `./scripts/start-owner-preview.sh` / `./scripts/stop-owner-preview.sh`; stop preserves volumes and never touches other projects. Do not enter real credentials or copy this Preview DB into LIVE.
+
+## Review round 2
+
+Start with ACTION REQUIRED at http://localhost:3802. The authorized DEMO strategy is
+50/30/10/10, with AAPL and BRK.B at zero target. Current holdings are independent.
+The unchanged 20% concentration rule honestly blocks this example. Do not expect
+an approval button to become enabled while concentration or required coverage fails.
+
+Committee navigation opens the six-perspective simulated discussion. Ask why VTI
+receives capital, the strongest opposition, and which evidence is missing. Macro is
+NOT EVALUATED and confidence NOT AVAILABLE. This discussion is not completed governance.
+Modification execution is deferred and cannot bypass fresh candidate review.
+
+Old approved/rejected DEMO records remain historical records of their original configurations.
+Restart preserves the new strategy and any subsequent explicitly saved Owner edits.

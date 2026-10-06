@@ -33,3 +33,12 @@ BrokerConnectionProvider declares ACCOUNT_READ, POSITIONS_READ, CASH_READ, TRANS
 Full backend1619, frontend271 (17files), types/lint/build pass. Browser Dashboard→Plan→simulated Committee→Demo approval→History and Accounts verified. Actual rejection/duplicate rejection/approval refusal verified by HTTP; database transactions remain0. Prior Preview startup/namespace/Host/Origin/data quality boundaries remain enabled. No migration, real record changes, real providers, broker, production deployment, push or PR121 change.
 
 Stop only Owner Preview and run the prior local commit/start script to revert UI; Preview volumes/history remain. Code is a dedicated local experiment awaiting Owner review, not production readiness.
+
+## Superseding product semantics: Owner review round 2
+
+See `OWNER_PRODUCT_REVIEW_2.md`. The previous equal-six demo configuration/button
+is superseded by the user-authorized fictional 50/30/10/10 strategy. Holdings are
+not targets. Missing sector data is NOT EVALUATED, not a concentration risk fact.
+The original 20% concentration rule still blocks this particular candidate.
+Six simulated perspectives and prominent Action Required are available; discussion
+cannot count as valid Committee governance or override the candidate.

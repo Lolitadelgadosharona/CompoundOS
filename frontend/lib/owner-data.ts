@@ -57,7 +57,41 @@ export type Connections = {
   credentials_accepted: boolean;
   order_execution_supported: boolean;
 };
+export type CommitteeDiscussion = {
+  state: string;
+  overall: string;
+  review_kind: string;
+  confidence: string;
+  perspectives: {
+    name: string;
+    view: string;
+    key_reason: string;
+    data_limitations: string;
+    evidence_references: { citation_ref: string; claim: string }[];
+  }[];
+  supporting_case: string[];
+  opposing_case: string[];
+  key_risks: string[];
+  data_limitations: string[];
+  what_changes_mind: string[];
+  alternatives: string[];
+  modification: string;
+  questions: { question: string; answer: string }[];
+};
 export type Overview = {
+  active_candidate?: Candidate | null;
+  strategy?: {
+    version_id: string;
+    approval: string;
+    targets: {
+      asset_id: string | null;
+      symbol: string;
+      weight: string;
+      status: string;
+      metadata: Record<string, string>;
+    }[];
+  } | null;
+  committee_discussion?: CommitteeDiscussion;
   snapshot: {
     valuation: {
       total_value: string | null;
@@ -168,3 +202,33 @@ export const committeeText = (text: string) =>
   text
     .replace(/^\[model inference\]\s*/i, "")
     .replace(/^SIMULATED COMMITTEE:\s*/i, "");
+
+export function candidateLifecycle(
+  analysis: Analysis | null,
+  candidate?: Candidate | null,
+) {
+  if (candidate?.decision_status === "rejected") return "REJECTED";
+  if (
+    candidate?.decision_status === "confirmed" ||
+    candidate?.decision_status === "archived"
+  )
+    return "APPROVED";
+  if (!analysis) return "NOT EVALUATED";
+  if (
+    analysis.guardian.status === "BLOCKED" ||
+    analysis.policy.status === "BLOCKED"
+  )
+    return "BLOCKED";
+  if (!analysis.recommendation_ready) return "NOT EVALUATED";
+  if (
+    candidate?.committee_status === "running" ||
+    candidate?.committee_status === "queued"
+  )
+    return "REVIEWING";
+  if (candidate?.committee_status === "completed")
+    return candidate.committee_report?.recommended_direction ===
+      "aligned_with_policy" && candidate.decision_status === "draft"
+      ? "READY_FOR_DECISION"
+      : "HOLD";
+  return "CANDIDATE";
+}

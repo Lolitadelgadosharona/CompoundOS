@@ -107,16 +107,34 @@ class PreviewCommittee(AIModelProvider):
             else "insufficient_evidence",
             "confidence": "low",
             "sections": {
-                name: narrative
-                for name in (
-                    "long_term_compounding",
-                    "index_passive_investing",
-                    "macroeconomic_context",
-                    "risk_capital_preservation",
-                    "devils_advocate",
-                    "policy_alignment_role",
-                    "synthesis_chair",
-                )
+                "long_term_compounding": (
+                    "[model inference] Strategic consistency and contribution discipline "
+                    "support compounding; future returns remain unknown"
+                ),
+                "index_passive_investing": (
+                    "[model inference] Broad-market categories can aid simplicity; fund "
+                    "costs and overlapping exposures are not supplied"
+                ),
+                "macroeconomic_context": (
+                    "[model inference] NOT EVALUATED: no current rates, inflation or "
+                    "economic-regime evidence supplied"
+                ),
+                "risk_capital_preservation": (
+                    "[model inference] Policy and Guardian remain authoritative; missing "
+                    "coverage cannot establish safety"
+                ),
+                "devils_advocate": (
+                    "[model inference] Hidden overlap and incomplete suitability evidence "
+                    "challenge the candidate"
+                ),
+                "policy_alignment_role": (
+                    "[model inference] Deterministic contribution-first gaps inform this "
+                    "candidate; calculations cannot predict performance"
+                ),
+                "synthesis_chair": (
+                    "[model inference] Review supporting and opposing cases; Owner "
+                    "approval is mandatory and alternatives need fresh governance"
+                ),
             },
             "evidence_citations": [
                 {"evidence_id": key, "citation_ref": item["citation_ref"], "claim": item["claim"]}
