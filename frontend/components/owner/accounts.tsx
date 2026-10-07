@@ -43,12 +43,19 @@ export default function OwnerAccounts() {
             {data.brokers.map((b) => (
               <article className="panel owner-card" key={b.name}>
                 <h2>{b.name}</h2>
-                <p className="owner-value">Not Connected</p>
+                <p className="owner-value">{b.status === "NOT_CONNECTED" ? "Not Connected" : b.status}</p>
                 <p className="owner-badge">READ ONLY · PLANNED</p>
                 <p>
                   Future imports may include accounts, positions, cash, cost
                   basis and transaction history, subject to provider permission.
                 </p>
+                <dl>
+                  <dt>Last sync</dt><dd>{b.last_sync ?? "Never synced"}</dd>
+                  <dt>Accounts discovered</dt><dd>{b.accounts_discovered ?? "Unknown"}</dd>
+                  <dt>Cash / positions</dt><dd>{b.cash ?? "Unknown"} / {b.positions ?? "Unknown"}</dd>
+                  <dt>Data quality</dt><dd>{b.data_quality ?? "UNKNOWN"}</dd>
+                  <dt>Planned read capabilities</dt><dd>{b.capabilities.join(", ")}</dd>
+                </dl>
                 <button disabled>Connection unavailable in Preview</button>
               </article>
             ))}

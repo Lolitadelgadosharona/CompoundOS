@@ -17,6 +17,8 @@ class FutureOrderCapability(str, Enum):
 
     ORDER_PREVIEW = "ORDER_PREVIEW"
     ORDER_EXECUTE = "ORDER_EXECUTE"
+    TRANSFER = "TRANSFER"
+    WITHDRAWAL = "WITHDRAWAL"
 
 
 class BrokerConnectionProvider(Protocol):
@@ -50,6 +52,11 @@ def connection_directory(manual_accounts):
                 "status": r.status,
                 "mode": "READ_ONLY",
                 "capabilities": [c.value for c in r.capabilities],
+                "last_sync": None,
+                "accounts_discovered": 0,
+                "cash": None,
+                "positions": None,
+                "data_quality": "UNKNOWN",
                 "available": False,
                 "external_connection": False,
             }

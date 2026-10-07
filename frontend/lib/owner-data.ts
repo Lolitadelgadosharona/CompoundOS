@@ -50,6 +50,11 @@ export type Connections = {
     name: string;
     status: string;
     mode: string;
+    last_sync?: string | null;
+    accounts_discovered?: number;
+    cash?: string | null;
+    positions?: number | null;
+    data_quality?: string;
     available: boolean;
     capabilities: string[];
   }[];
