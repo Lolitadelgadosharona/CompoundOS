@@ -1,0 +1,20 @@
+# Owner-invoked native API bridge; separate local DB, no gateway/container forwarding.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Private local database password required}
+      POSTGRES_DB: compoundos_owner_preview_test
+    ports: ['127.0.0.1:55474:5432']
+    volumes: ['postgres_data:/var/lib/postgresql/data']
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d compoundos_owner_preview_test']
+      interval: 2s
+      timeout: 5s
+      retries: 30
+  redis:
+    image: redis:7-alpine
+    ports: ['127.0.0.1:55475:6379']
+volumes:
+  postgres_data:
