@@ -1,0 +1,9 @@
+# Owner decision (no action executed)
+
+TECHNICAL RECOMMENDATION: first IBKR official TWS/IB Gateway read-only inventory adapter, conditional on Owner actually holding an eligible IBKR account. It offers documented portfolio APIs plus broker-side Read Only. Web API is an alternative after verifying authentication eligibility, session requirements and limits; not interchangeable with TWS read-only mode. Need Owner account/region/type confirmation, approved official API setup and local gateway authorization, paper test, cost-basis/history completeness and statement reconciliation. Do not provide raw passwords to CompoundOS. Complexity medium/high: asynchronous events, reconnect/pagination, conId crosswalk, corporate actions and historical statement normalization. Full transaction history may need separately approved Flex/report access.
+
+If Owner holds only Schwab, reconsider Schwab official individual OAuth API after developer approval/scopes and permission review. Fidelity direct personal developer access NOT VERIFIED; sanctioned aggregator/partner route only. No assumed Owner account preferences.
+
+TECHNICAL RECOMMENDATION: Twelve Data for market + FX contract evaluation, not approved purchase/use. RIGHTS/LICENSE CONFIRMED: NO. Owner must confirm plan/exchange entitlement, personal/internal classification, native CNY coverage, adjusted history, caching/backup duration, immutable decision evidence, derived analytics, display, LLM disclosure and termination deletion. Obtain written clarification for any unclear right; configure secrets only in later explicitly authorized sprint. No provider accounts/subscriptions created.
+
+Next Owner decision: review this foundation, choose actual first account/provider and approve durable schema/security scope. No broker implementation, setup or live connection automatically follows.
