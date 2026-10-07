@@ -57,6 +57,15 @@ export type Connections = {
     data_quality?: string;
     available: boolean;
     capabilities: string[];
+    connection_type?: "NONE" | "PAPER" | "LIVE";
+    last_attempt?: string | null;
+    sync_id?: string | null;
+    error_code?: string | null;
+    unresolved?: number;
+    valuation_mode?: string;
+    accounts?: { reference: string; currency: string; source: string }[];
+    cash_balances?: { account: string; currency: string; amount: string; as_of: string; quality: string }[];
+    holdings?: { account: string; symbol: string; conid: string; quantity: string; currency: string; average_cost: string | null; canonical_id: string | null; identity_status: string; target: string; non_target: boolean; quality: string; source: string }[];
   }[];
   manual: { name: string; status: string; mode: string };
   credentials_accepted: boolean;

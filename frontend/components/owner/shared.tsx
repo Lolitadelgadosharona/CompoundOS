@@ -301,7 +301,7 @@ export function ConnectionsSummary({ data }: { data: Overview }) {
         {data.connections.brokers.map((b) => (
           <li key={b.name}>
             <span>{b.name}</span>
-            <small>Not Connected · Read only planned</small>
+            <small>{b.status} · {b.connection_type ?? "Planned"} · Read only</small>
           </li>
         ))}
         <li>
@@ -314,7 +314,7 @@ export function ConnectionsSummary({ data }: { data: Overview }) {
         </li>
       </ul>
       <p className="hint">
-        Preview never connects to a broker. Your manual records remain local.
+        Broker reads require separate local Owner setup and authorization. Manual records remain local.
       </p>
     </section>
   );

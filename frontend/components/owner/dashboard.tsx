@@ -7,6 +7,7 @@ import {
   planExplanation,
   ownerFinding,
 } from "../../lib/owner-data";
+import IBKRInventory from "./ibkr-inventory";
 import { wealthScenario } from "../../lib/wealth-scenario";
 import {
   useOverview,
@@ -43,11 +44,12 @@ export default function OwnerDashboard() {
           </p>
         </div>
         <small>
-          DEMO workspace
+          {s.valuation.data_mode === "MIXED" ? "MIXED DATA · NOT LIVE VALUATION" : "DEMO workspace"}
           <br />
           As of {new Date(s.valuation.as_of).toLocaleString()}
         </small>
       </header>
+      {data.connections.brokers.filter((b) => b.connection_type && b.connection_type !== "NONE").map((b) => <IBKRInventory key={b.name} broker={b} />)}
       <section className="panel owner-monthly" aria-label="Action required">
         <p className="eyebrow">ACTION REQUIRED</p>
         <h2>
