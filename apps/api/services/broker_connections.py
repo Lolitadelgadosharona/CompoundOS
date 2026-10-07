@@ -41,11 +41,11 @@ class ReadOnlyConnection:
             raise ValueError("V1 connections cannot authorize order capabilities")
 
 
-def connection_directory(manual_accounts):
+def connection_directory(manual_accounts, session=None, household_id=None):
     rows = [
         ReadOnlyConnection(name) for name in ("Interactive Brokers", "Fidelity", "Charles Schwab")
     ]
-    return {
+    result = {
         "brokers": [
             {
                 "name": r.name,
@@ -71,3 +71,9 @@ def connection_directory(manual_accounts):
         "credentials_accepted": False,
         "order_execution_supported": False,
     }
+
+    if session is not None and household_id is not None:
+        from apps.api.services.ibkr_sync import summary
+
+        result["brokers"][0] = summary(session, household_id)
+    return result

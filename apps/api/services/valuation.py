@@ -20,6 +20,7 @@ class Valuation:
     reasons: list[str] = field(default_factory=list)
     cost_estimate: bool = False
     trust_blockers: list[str] = field(default_factory=list)
+    broker_data: dict | None = None
 
     @property
     def status(self):
@@ -59,7 +60,9 @@ class Valuation:
     def contract(self):
         return {
             "version": "valuation-v1",
-            "data_mode": "DEMO" if preview_enabled() else "LIVE",
+            "data_mode": "MIXED" if self.broker_data else "DEMO" if preview_enabled() else "LIVE",
+            "broker_data": self.broker_data,
+            "market_data_mode": "DEMO" if preview_enabled() else "SEPARATE",
             "base_currency": self.base_currency,
             "as_of": self.as_of.isoformat(),
             "status": self.status,
@@ -328,7 +331,16 @@ def load_valuation(session, household_id, as_of=None):
                 or row["asset_type"],
             )
         projected.append(row)
-    return value_rows(base, projected, cash, rates, as_of)
+    result = value_rows(base, projected, cash, rates, as_of)
+    from apps.api.services.ibkr_sync import trust_state
+
+    result.broker_data = trust_state(session, household_id)
+    if result.broker_data:
+        result.reasons.append(
+            "IBKR inventory: separate trusted market data and full identity/freshness "
+            "verification required; NOT LIVE"
+        )
+    return result
 
 
 class RecommendationUnavailable(ValueError):

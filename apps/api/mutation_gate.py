@@ -14,7 +14,7 @@ from apps.api.config import get_database_url
 
 MUTATION_METHODS = {"POST", "PATCH", "PUT", "DELETE"}
 ALLOWED_PATHS = {"/api/health/live", "/api/health/ready", "/api/health/full"}
-EXPECTED_HEAD = "0036_launch_hardening"
+EXPECTED_HEAD = "0037_ibkr_read_only"
 
 
 async def mutation_gate(request: Request, call_next):

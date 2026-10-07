@@ -252,6 +252,7 @@ def test_migration_contains_only_approved_product_tables(postgres_engine) -> Non
         "owner_web_sessions", "instrument_provider_mappings", "market_observations",
         "investment_configurations", "contribution_candidates", "contribution_decisions",
         "decision_research_sources",
+        "ibkr_read_connections", "ibkr_read_sync_runs",
         "audit_events",
         "household_profiles",
         "investment_policies",

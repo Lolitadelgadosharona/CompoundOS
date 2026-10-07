@@ -226,6 +226,20 @@ def version():
 
 @app.middleware("http")
 async def preview_boundary(request: Request, call_next):
+    if request.url.path in {"/api/investment/ibkr/sync", "/api/investment/ibkr/disconnect"}:
+        host = request.headers.get("host", "").split(":")[0]
+        origin = request.headers.get("origin")
+        if host not in {"localhost", "127.0.0.1", "testserver"} or origin not in {
+            "http://localhost:3802",
+            "http://127.0.0.1:3802",
+            "http://localhost:8002",
+            "http://localhost:3882",
+            "http://127.0.0.1:3882",
+            "http://localhost:8182",
+        }:
+            return JSONResponse(
+                status_code=403, content={"detail": "Local same-origin Owner action required"}
+            )
     if preview_enabled():
         host = request.headers.get("host", "").split(":")[0]
         if host not in {"localhost", "127.0.0.1", "api", "testserver"}:
@@ -291,7 +305,8 @@ async def preview_boundary(request: Request, call_next):
         banner = (
             b'<aside style="position:sticky;top:0;z-index:9999;padding:16px;'
             b'background:#fff0b3;color:#422c00;font-weight:bold">'
-            b"OWNER PREVIEW / DEMO DATA / NO REAL INVESTMENT RECOMMENDATION / "
+            b"OWNER PREVIEW / DEMO MARKET DATA / OPTIONAL MIXED BROKER INVENTORY / "
+            b"NO REAL INVESTMENT RECOMMENDATION / "
             b"NO TRADES WILL BE EXECUTED</aside>"
         )
         body = body.replace(b"<body>", b"<body>" + banner, 1)
@@ -304,5 +319,5 @@ async def preview_boundary(request: Request, call_next):
             body, status_code=response.status_code, headers=headers, background=response.background
         )
     if preview_enabled():
-        response.headers["X-CompoundOS-Data-Mode"] = "DEMO"
+        response.headers["X-CompoundOS-Data-Mode"] = "DEMO_MARKET_DATA_POSSIBLE_MIXED_INVENTORY"
     return response

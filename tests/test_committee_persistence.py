@@ -24,7 +24,7 @@ from apps.api.models import (
 
 pytestmark = pytest.mark.postgres
 
-HEAD_REVISION = "0036_launch_hardening"
+HEAD_REVISION = "0037_ibkr_read_only"
 PREVIOUS_REVISION = "0011_fencing_closure"
 
 COMMITTEE_TABLES = {

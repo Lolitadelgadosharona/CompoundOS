@@ -190,8 +190,9 @@ class StagingStore:
                 BrokerCapability.ACCOUNT_READ,
                 BrokerCapability.POSITIONS_READ,
                 BrokerCapability.CASH_READ,
-                BrokerCapability.TRANSACTIONS_READ,
             }
+            if snapshot.transactions:
+                required.add(BrokerCapability.TRANSACTIONS_READ)
             if not required <= connection.capabilities:
                 raise ValueError("Missing read permission")
             accounts = {a.external_id for a in snapshot.accounts}

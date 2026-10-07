@@ -372,7 +372,7 @@ def owner_overview(session: Session = Depends(get_session)):
         "unavailable_reason": reason,
         "current_review": current_review,
         "connections": connection_directory(
-            [a for a in snapshot["accounts"] if a["source"] == "manual"]
+            [a for a in snapshot["accounts"] if a["source"] == "manual"], session, hid
         ),
     }
 
@@ -387,4 +387,27 @@ def connections(session: Session = Depends(get_session)):
     from apps.api.services.portfolio_reality import list_accounts
 
     accounts = list_accounts(session, household(session))
-    return connection_directory([a for a in accounts if a["source"] == "manual"])
+    return connection_directory(
+        [a for a in accounts if a["source"] == "manual"], session, household(session)
+    )
+
+
+class IBKRAction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+@router.post("/ibkr/sync")
+def ibkr_sync(body: IBKRAction, session: Session = Depends(get_session)):
+    from apps.api.services.ibkr_sync import sync
+
+    try:
+        return sync(session, household(session))
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from None
+
+
+@router.post("/ibkr/disconnect")
+def ibkr_disconnect(body: IBKRAction, session: Session = Depends(get_session)):
+    from apps.api.services.ibkr_sync import disconnect
+
+    return disconnect(session, household(session))

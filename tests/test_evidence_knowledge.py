@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 
 pytestmark = pytest.mark.postgres
 
-HEAD_REVISION = "0036_launch_hardening"
+HEAD_REVISION = "0037_ibkr_read_only"
 
 
 def _now():
