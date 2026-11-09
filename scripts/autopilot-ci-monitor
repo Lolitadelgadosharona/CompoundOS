@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+"""
+CompoundOS Safe Autopilot — CI Monitor
+Polls GitHub Actions for the latest workflow runs on main.
+Reports status and detects CI unavailability.
+"""
+import json, os, sys, subprocess, time
+from datetime import datetime, timezone, timedelta
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+AUTOPILOT_ROOT = os.path.join(REPO_ROOT, '.autopilot')
+
+STATE_FILE = os.path.join(AUTOPILOT_ROOT, 'state', 'ci_state.json')
+UNAVAILABLE_TIMEOUT_MINUTES = 30
+
+def check_ci():
+    """Check the latest CI run on main."""
+    try:
+        result = subprocess.run(
+            ['gh', 'run', 'list', '--branch', 'main', '--limit', '5',
+             '--json', 'status,conclusion,createdAt,databaseId,headSha,name'],
+            cwd=REPO_ROOT, capture_output=True, text=True, timeout=30
+        )
+        if result.returncode != 0:
+            return {'available': False, 'error': result.stderr.strip()}
+        
+        runs = json.loads(result.stdout)
+        if not runs:
+            return {'available': True, 'runs': [], 'message': 'No runs found'}
+        
+        latest = runs[0]
+        return {
+            'available': True,
+            'latest': latest,
+            'all_runs': runs,
+            'checked_at': datetime.now(timezone.utc).isoformat()
+        }
+    except subprocess.TimeoutExpired:
+        return {'available': False, 'error': 'gh command timeout'}
+    except Exception as e:
+        return {'available': False, 'error': str(e)}
+
+def update_state(status):
+    os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+    
+    prev = {}
+    if os.path.isfile(STATE_FILE):
+        try:
+            with open(STATE_FILE) as f:
+                prev = json.load(f)
+        except Exception:
+            pass
+    
+    consecutive_failures = prev.get('consecutive_failures', 0)
+    
+    if not status.get('available'):
+        consecutive_failures += 1
+    else:
+        consecutive_failures = 0
+    
+    unavailable_since = prev.get('unavailable_since')
+    if consecutive_failures > 0 and unavailable_since is None:
+        unavailable_since = datetime.now(timezone.utc).isoformat()
+    elif consecutive_failures == 0:
+        unavailable_since = None
+    
+    minutes_unavailable = 0
+    if unavailable_since:
+        try:
+            since = datetime.fromisoformat(unavailable_since)
+            minutes_unavailable = (datetime.now(timezone.utc) - since).total_seconds() / 60
+        except Exception:
+            pass
+    
+    state = {
+        'updated_at': datetime.now(timezone.utc).isoformat(),
+        'consecutive_failures': consecutive_failures,
+        'unavailable_since': unavailable_since,
+        'minutes_unavailable': round(minutes_unavailable, 1),
+        'ci_unavailable': minutes_unavailable > UNAVAILABLE_TIMEOUT_MINUTES,
+        'latest_status': status
+    }
+    
+    with open(STATE_FILE, 'w') as f:
+        json.dump(state, f, indent=2)
+    
+    return state
+
+def format_summary(state):
+    """Print a human-readable CI summary."""
+    print("=== GitHub Actions CI Status ===")
+    print(f"Checked: {state['updated_at']}")
+    print(f"Consecutive failures: {state['consecutive_failures']}")
+    
+    if state.get('ci_unavailable'):
+        print(f"CI UNAVAILABLE for {state['minutes_unavailable']} minutes (threshold: {UNAVAILABLE_TIMEOUT_MINUTES}m)")
+    else:
+        print("CI: Available")
+    
+    if state.get('latest_status', {}).get('latest'):
+        latest = state['latest_status']['latest']
+        print(f"\nLatest run: {latest.get('name', 'unknown')}")
+        print(f"  Status: {latest.get('status')}")
+        print(f"  Conclusion: {latest.get('conclusion')}")
+        print(f"  SHA: {latest.get('headSha', 'unknown')[:12]}")
+    
+    # Show all recent runs
+    if state.get('latest_status', {}).get('all_runs'):
+        print("\nRecent runs:")
+        for run in state['latest_status']['all_runs'][:5]:
+            icon = "✓" if run.get('conclusion') == 'success' else "✗" if run.get('conclusion') == 'failure' else "⋯"
+            print(f"  {icon} {run.get('name','?')}: {run.get('conclusion','pending')}")
+
+if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser(description='CompoundOS CI Monitor')
+    parser.add_argument('--json', action='store_true', help='Output JSON')
+    args = parser.parse_args()
+    
+    status = check_ci()
+    state = update_state(status)
+    
+    if args.json:
+        print(json.dumps(state, indent=2))
+    else:
+        format_summary(state)
+    
+    if state.get('ci_unavailable'):
+        sys.exit(1)

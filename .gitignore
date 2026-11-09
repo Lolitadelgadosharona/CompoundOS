@@ -28,3 +28,19 @@ npm-debug.log*
 
 # Docker
 *.local
+
+# Autopilot runtime state (committed config/schema/tests are tracked explicitly)
+.autopilot/locks/
+.autopilot/logs/
+.autopilot/state/supervisor.pid
+.autopilot/worktrees/
+.autopilot/queue/approved/
+.autopilot/queue/queued/
+.autopilot/queue/running/
+.autopilot/queue/review/
+.autopilot/queue/blocked/
+.autopilot/queue/done/
+.autopilot/queue/failed/
+.autopilot/handoff/QODER_CURRENT_TASK.md
+autopilot-pr13-*.md
+*.tmp

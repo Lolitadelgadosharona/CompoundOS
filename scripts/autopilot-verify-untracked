@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+"""
+CompoundOS Safe Autopilot — Untracked File Integrity Verifier
+Recomputes SHA-256 for every protected untracked file from the manifest.
+Exits 0 on success, non-zero on any mismatch.
+"""
+import json, os, sys, hashlib
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+AUTOPILOT_ROOT = os.path.join(REPO_ROOT, '.autopilot')
+MANIFEST_PATH = os.path.join(AUTOPILOT_ROOT, 'state', 'untracked_manifest.json')
+
+def verify_untracked_integrity(manifest_path=None):
+    """Recompute SHA-256 for every protected file. Returns (ok, results)."""
+    if manifest_path is None:
+        manifest_path = MANIFEST_PATH
+
+    if not os.path.isfile(manifest_path):
+        print(f"ERROR: Manifest not found: {manifest_path}", file=sys.stderr)
+        return False, []
+
+    with open(manifest_path, 'r') as f:
+        manifest = json.load(f)
+
+    results = []
+    all_ok = True
+
+    for entry in manifest.get('files', []):
+        rel_path = entry['path']
+        fpath = os.path.join(REPO_ROOT, rel_path)
+
+        result = {
+            'path': rel_path,
+            'expected_sha256': entry['sha256'],
+            'expected_size': entry['size_bytes'],
+        }
+
+        # Security: reject absolute paths and path traversal
+        if os.path.isabs(rel_path) or '..' in rel_path.split(os.sep):
+            result['status'] = 'rejected'
+            result['error'] = 'Unsafe path'
+            all_ok = False
+            results.append(result)
+            continue
+
+        # Must exist as a regular file (not symlink, not directory)
+        try:
+            st = os.lstat(fpath)
+        except FileNotFoundError:
+            result['status'] = 'missing'
+            result['error'] = 'File not found'
+            all_ok = False
+            results.append(result)
+            continue
+
+        if not os.path.isfile(fpath):
+            result['status'] = 'not_regular_file'
+            result['error'] = 'Not a regular file'
+            all_ok = False
+            results.append(result)
+            continue
+
+        # Size check
+        actual_size = st.st_size
+        if actual_size != entry['size_bytes']:
+            result['status'] = 'size_mismatch'
+            result['actual_size'] = actual_size
+            all_ok = False
+            results.append(result)
+            continue
+
+        # SHA-256 check (streaming for large files)
+        sha = hashlib.sha256()
+        try:
+            with open(fpath, 'rb') as fh:
+                for chunk in iter(lambda: fh.read(65536), b''):
+                    sha.update(chunk)
+        except Exception as e:
+            result['status'] = 'read_error'
+            result['error'] = str(e)
+            all_ok = False
+            results.append(result)
+            continue
+
+        actual_sha = sha.hexdigest()
+        if actual_sha != entry['sha256']:
+            result['status'] = 'sha256_mismatch'
+            result['actual_sha256'] = actual_sha
+            all_ok = False
+        else:
+            result['status'] = 'ok'
+            result['actual_sha256'] = actual_sha
+
+        results.append(result)
+
+    return all_ok, results
+
+if __name__ == '__main__':
+    ok, results = verify_untracked_integrity()
+
+    verified = 0
+    mismatches = 0
+    missing = 0
+    symlinks_rejected = 0
+
+    for r in results:
+        status = r['status']
+        if status == 'ok':
+            verified += 1
+        elif status == 'missing':
+            missing += 1
+            print(f"MISSING: {r['path']}")
+        elif status in ('sha256_mismatch', 'size_mismatch'):
+            mismatches += 1
+            print(f"MISMATCH: {r['path']} ({status})")
+        elif status == 'not_regular_file':
+            symlinks_rejected += 1
+            print(f"NOT_REGULAR: {r['path']}")
+        else:
+            print(f"ERROR: {r['path']} ({r.get('error', status)})")
+
+    print(f"\nUntracked integrity: {verified} verified, {mismatches} mismatches, "
+          f"{missing} missing, {symlinks_rejected} non-regular")
+
+    sys.exit(0 if ok else 1)

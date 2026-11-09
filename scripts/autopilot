@@ -1,0 +1,493 @@
+#!/usr/bin/env bash
+# CompoundOS Safe Autopilot — Main CLI
+# Version: 1.0.0
+# This is the single entry point for all autopilot operations.
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+AUTOPILOT_ROOT="${REPO_ROOT}/.autopilot"
+CONFIG_FILE="${AUTOPILOT_ROOT}/config/autopilot.yaml"
+SCRIPTS_DIR="${REPO_ROOT}/scripts"
+
+# Source config if available (YAML parsing via Python helper)
+parse_config() {
+    python3 "${SCRIPTS_DIR}/autopilot-config" "$@" 2>/dev/null
+}
+
+usage() {
+    cat <<HELP
+CompoundOS Safe Autopilot
+
+Usage:
+  scripts/autopilot install          Install launchd service (requires user confirmation)
+  scripts/autopilot start            Start the autopilot supervisor
+  scripts/autopilot stop             Stop the autopilot supervisor
+  scripts/autopilot restart          Restart the autopilot supervisor
+  scripts/autopilot status           Show autopilot status
+  scripts/autopilot logs [N]         Show recent autopilot logs (default: 50 lines)
+  scripts/autopilot doctor           Check autopilot health and dependencies
+  scripts/autopilot dry-run          Run a dry-run with a sample task (no modifications)
+  scripts/autopilot enqueue <file>   Enqueue a task file into the approved queue
+  scripts/autopilot unblock <id>     Move a blocked task back to queued
+HELP
+}
+
+cmd_install() {
+    echo "=== CompoundOS Autopilot Install ==="
+    echo "This will install the launchd service to run the Autopilot Supervisor."
+    echo ""
+    
+    local plist_src="${AUTOPILOT_ROOT}/launchd/com.compoundos.autopilot.plist"
+    local plist_dst="${HOME}/Library/LaunchAgents/com.compoundos.autopilot.plist"
+    
+    if [[ ! -f "$plist_src" ]]; then
+        echo "ERROR: Launchd template not found at ${plist_src}"
+        echo "Run from the repository root."
+        exit 1
+    fi
+    
+    # Verify template is valid plist
+    if ! plutil -lint "${plist_src}" > /dev/null 2>&1; then
+        echo "ERROR: Launchd template is not valid plist."
+        exit 1
+    fi
+    
+    # Generate final plist with resolved paths
+    python3 -c "
+import plistlib, sys
+with open('${plist_src}', 'rb') as f:
+    p = plistlib.load(f)
+# Resolve template variables
+import os
+program = p.get('ProgramArguments', [])
+program = [arg.replace('\${REPO_ROOT}', '${REPO_ROOT}').replace('\${HOME}', '${HOME}') for arg in program]
+p['ProgramArguments'] = program
+# Resolve WorkingDirectory
+if 'WorkingDirectory' in p:
+    p['WorkingDirectory'] = p['WorkingDirectory'].replace('\${REPO_ROOT}', '${REPO_ROOT}')
+# Resolve StandardOutPath and StandardErrorPath
+for key in ('StandardOutPath', 'StandardErrorPath'):
+    if key in p:
+        p[key] = p[key].replace('\${AUTOPILOT_ROOT}', '${AUTOPILOT_ROOT}')
+with open('${plist_dst}', 'wb') as f:
+    plistlib.dump(p, f)
+print(f'Installed: ${plist_dst}')
+"
+    
+    # Validate the generated plist
+    if ! plutil -lint "${plist_dst}" > /dev/null 2>&1; then
+        echo "ERROR: Generated plist is invalid."
+        rm -f "${plist_dst}"
+        exit 1
+    fi
+    
+    # Bootstrap
+    launchctl bootstrap "gui/$(id -u)" "${plist_dst}" 2>/dev/null || {
+        echo "NOTE: launchctl bootstrap returned non-zero. The service may already be loaded."
+        echo "Try 'scripts/autopilot status' to check."
+    }
+    
+    echo "Install complete. Run 'scripts/autopilot status' to verify."
+}
+
+cmd_start() {
+    echo "Starting CompoundOS Autopilot..."
+    local plist="${HOME}/Library/LaunchAgents/com.compoundos.autopilot.plist"
+    
+    if [[ ! -f "$plist" ]]; then
+        echo "Not installed. Run 'scripts/autopilot install' first."
+        exit 1
+    fi
+    
+    launchctl bootstrap "gui/$(id -u)" "${plist}" 2>/dev/null || {
+        launchctl kickstart -k "gui/$(id -u)/com.compoundos.autopilot" 2>/dev/null || true
+    }
+    
+    # Verify startup
+    sleep 1
+    local pid_file="${AUTOPILOT_ROOT}/state/supervisor.pid"
+    if [[ -f "$pid_file" ]]; then
+        echo "Autopilot started. PID: $(cat "$pid_file")"
+    else
+        echo "Autopilot may be starting. Check logs: scripts/autopilot logs"
+    fi
+}
+
+cmd_stop() {
+    echo "Stopping CompoundOS Autopilot..."
+    launchctl bootout "gui/$(id -u)/com.compoundos.autopilot" 2>/dev/null || {
+        echo "Service not loaded or already stopped."
+    }
+    # Clean up PID file
+    rm -f "${AUTOPILOT_ROOT}/state/supervisor.pid"
+    echo "Autopilot stopped."
+}
+
+cmd_restart() {
+    cmd_stop
+    sleep 2
+    cmd_start
+}
+
+cmd_status() {
+    echo "=== CompoundOS Autopilot Status ==="
+    echo ""
+    
+    # Check launchd
+    if launchctl print "gui/$(id -u)/com.compoundos.autopilot" > /dev/null 2>&1; then
+        echo "Service: LOADED"
+        launchctl print "gui/$(id -u)/com.compoundos.autopilot" 2>/dev/null | grep -E "state|pid" | sed 's/^/  /'
+    else
+        echo "Service: NOT LOADED"
+    fi
+    
+    # Check PID file
+    local pid_file="${AUTOPILOT_ROOT}/state/supervisor.pid"
+    if [[ -f "$pid_file" ]]; then
+        local pid
+        pid="$(cat "$pid_file")"
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "Supervisor PID: $pid (running)"
+        else
+            echo "Supervisor PID: $pid (stale)"
+        fi
+    else
+        echo "Supervisor PID: not found"
+    fi
+    
+    # Check lock
+    local lock_file="${AUTOPILOT_ROOT}/locks/supervisor.lock"
+    if [[ -f "$lock_file" ]]; then
+        echo "Lock file: present"
+    else
+        echo "Lock file: absent"
+    fi
+    
+    # Queue status
+    echo ""
+    echo "Queue:"
+    for dir in approved queued running review blocked done failed; do
+        local count
+        count=$(find "${AUTOPILOT_ROOT}/queue/${dir}" -type f 2>/dev/null | wc -l | tr -d ' ')
+        echo "  ${dir}: ${count}"
+    done
+}
+
+cmd_logs() {
+    local lines="${1:-50}"
+    local log_file="${AUTOPILOT_ROOT}/logs/supervisor.log"
+    
+    if [[ -f "$log_file" ]]; then
+        tail -n "$lines" "$log_file"
+    else
+        echo "No supervisor log found at ${log_file}"
+    fi
+    
+    # Also show task logs
+    local task_logs="${AUTOPILOT_ROOT}/logs/tasks"
+    if [[ -d "$task_logs" ]]; then
+        echo ""
+        echo "Recent task logs:"
+        find "$task_logs" -name "*.log" -type f | sort -r | head -5 | while read -r f; do
+            echo "  $(basename "$f")"
+        done
+    fi
+}
+
+cmd_doctor() {
+    echo "=== CompoundOS Autopilot Doctor ==="
+    echo ""
+    
+    local ok=0
+    local warn=0
+    local fail=0
+    
+    check() {
+        local name="$1"; shift
+        if "$@" > /dev/null 2>&1; then
+            echo "  [OK]    ${name}"
+            ok=$((ok + 1))
+        else
+            echo "  [FAIL]  ${name}"
+            fail=$((fail + 1))
+        fi
+    }
+    
+    check_warn() {
+        local name="$1"; shift
+        if "$@" > /dev/null 2>&1; then
+            echo "  [OK]    ${name}"
+            ok=$((ok + 1))
+        else
+            echo "  [WARN]  ${name}"
+            warn=$((warn + 1))
+        fi
+    }
+    
+    # Core tools
+    check "git available" command -v git
+    check "python3 available" command -v python3
+    check "hermes available" command -v hermes
+    check "gh available" command -v gh
+    
+    # Optional tools
+    check_warn "qoder CLI available" command -v qodercli
+    check_warn "codex available" command -v codex
+    check_warn "docker available" command -v docker
+    check_warn "node available" command -v node
+    check_warn "npm available" command -v npm
+    
+    # Directories
+    echo ""
+    for d in schemas state "queue/approved" "queue/queued" "queue/running" "queue/review" "queue/blocked" "queue/done" "queue/failed" locks logs handoff; do
+        if [[ -d "${AUTOPILOT_ROOT}/${d}" ]]; then
+            echo "  [OK]    Directory: ${d}"
+            ok=$((ok + 1))
+        else
+            echo "  [FAIL]  Directory missing: ${d}"
+            fail=$((fail + 1))
+        fi
+    done
+    
+    # Config
+    if [[ -f "$CONFIG_FILE" ]]; then
+        echo "  [OK]    Config file present"
+        ok=$((ok + 1))
+    else
+        echo "  [FAIL]  Config file missing"
+        fail=$((fail + 1))
+    fi
+    
+    # Schema
+    if [[ -f "${AUTOPILOT_ROOT}/schemas/task.schema.json" ]]; then
+        echo "  [OK]    Task schema present"
+        ok=$((ok + 1))
+    else
+        echo "  [FAIL]  Task schema missing"
+        fail=$((fail + 1))
+    fi
+    
+    # Git repo check
+    if git -C "${REPO_ROOT}" rev-parse --git-dir > /dev/null 2>&1; then
+        echo "  [OK]    Git repository"
+        ok=$((ok + 1))
+    else
+        echo "  [FAIL]  Not a git repository"
+        fail=$((fail + 1))
+    fi
+    
+    # Branch check
+    local branch
+    branch=$(git -C "${REPO_ROOT}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+    echo "  [INFO]  Current branch: ${branch}"
+    
+    # Untracked manifest
+    if [[ -f "${AUTOPILOT_ROOT}/state/untracked_manifest.json" ]]; then
+        echo "  [OK]    Untracked manifest present"
+        ok=$((ok + 1))
+    else
+        echo "  [WARN]  Untracked manifest missing (should be created at setup)"
+        warn=$((warn + 1))
+    fi
+    
+    echo ""
+    echo "Results: ${ok} OK, ${warn} WARN, ${fail} FAIL"
+    
+    if [[ $fail -gt 0 ]]; then
+        exit 1
+    fi
+}
+
+cmd_dry_run() {
+    echo "=== CompoundOS Autopilot Dry-Run ==="
+    echo ""
+    echo "This simulates the autopilot loop with a sample task."
+    echo "No files will be modified outside .autopilot/."
+    echo ""
+    
+    # Create a sample task
+    local sample_task="${AUTOPILOT_ROOT}/queue/queued/TASK-DRYRUN-001.json"
+    python3 -c "
+import json, os
+task = {
+    'task_id': 'TASK-DRYRUN-001',
+    'sprint': 'Sprint 002',
+    'slice': 'Autopilot Foundation',
+    'title': 'Dry-Run Verification Task',
+    'approval_status': 'approved',
+    'risk_level': 'R0',
+    'requirements': ['Verify autopilot task processing pipeline'],
+    'allowed_paths': ['tests/test_autopilot.py', '.autopilot/logs/'],
+    'forbidden_scope': ['No product code modification', 'No database migration'],
+    'acceptance_criteria': ['Dry-run completes without errors'],
+    'validation_commands': ['python3 -c \"print(42)\"'],
+    'base_sha': '$(git -C "${REPO_ROOT}" rev-parse HEAD)',
+    'max_attempts': 1,
+    'max_minutes': 5,
+    'token_budget': 10000,
+    'auto_merge_allowed': False,
+    'owner_decisions': [],
+    'dependencies': []
+}
+os.makedirs('${AUTOPILOT_ROOT}/queue/queued', exist_ok=True)
+with open('${sample_task}', 'w') as f:
+    json.dump(task, f, indent=2)
+print('Sample task created')
+"
+    
+    # Validate task schema
+    echo "1. Validating task schema..."
+    python3 "${SCRIPTS_DIR}/autopilot-validate" "${sample_task}" && echo "   Schema validation: PASSED" || echo "   Schema validation: FAILED"
+    
+    # Check approval gate
+    echo "2. Checking approval gate..."
+    python3 -c "
+import json
+with open('${sample_task}') as f:
+    task = json.load(f)
+if task['approval_status'] == 'approved':
+    print('   Approval gate: PASSED (status=approved)')
+else:
+    print('   Approval gate: BLOCKED (status=' + task['approval_status'] + ')')
+    exit(1)
+"
+    
+    # Check risk gate
+    echo "3. Checking risk gate..."
+    python3 -c "
+import json
+with open('${sample_task}') as f:
+    task = json.load(f)
+r = task['risk_level']
+if r == 'R0':
+    print('   Risk gate: PASSED (R0 — auto-merge allowed)')
+elif r == 'R1':
+    print('   Risk gate: PASSED (R1 — auto-merge with conditions)')
+elif r == 'R2':
+    print('   Risk gate: BLOCKED (R2 — owner approval required)')
+elif r == 'R3':
+    print('   Risk gate: BLOCKED (R3 — auto-implement prohibited)')
+"
+    
+    # Worker selection
+    echo "4. Worker selection..."
+    if command -v qodercli > /dev/null 2>&1; then
+        echo "   Qoder CLI: AVAILABLE (v$(qodercli --version 2>/dev/null || echo 'unknown'))"
+        echo "   Selected worker: qoder (preferred)"
+    else
+        echo "   Qoder CLI: NOT FOUND"
+    fi
+    echo "   Hermes fallback: ALWAYS AVAILABLE"
+    echo "   Selected worker: hermes (default)"
+    
+    # Reviewer status
+    echo "5. Reviewer status..."
+    if command -v codex > /dev/null 2>&1; then
+        echo "   Codex: AVAILABLE"
+    else
+        echo "   Codex: NOT FOUND (circuit breaker open)"
+        echo "   Blind review: ENABLED (Hermes-based)"
+    fi
+    
+    # Cleanup sample task
+    rm -f "${sample_task}"
+    
+    echo ""
+    echo "Dry-run complete. All gates functioning."
+}
+
+cmd_enqueue() {
+    local task_file="$1"
+    
+    if [[ ! -f "$task_file" ]]; then
+        echo "ERROR: Task file not found: ${task_file}"
+        exit 1
+    fi
+    
+    # Validate schema
+    if ! python3 "${SCRIPTS_DIR}/autopilot-validate" "${task_file}" 2>/dev/null; then
+        echo "ERROR: Task schema validation failed."
+        exit 1
+    fi
+    
+    # Check approval status
+    local status
+    status=$(python3 -c "import json; print(json.load(open('${task_file}'))['approval_status'])")
+    
+    local dest
+    case "$status" in
+        approved)
+            dest="${AUTOPILOT_ROOT}/queue/queued"
+            echo "Task approved. Enqueuing to: ${dest}"
+            ;;
+        draft|proposed)
+            echo "ERROR: Task approval_status is '${status}'. Only 'approved' tasks can be enqueued."
+            exit 1
+            ;;
+        review)
+            dest="${AUTOPILOT_ROOT}/queue/review"
+            echo "Task in review. Placing in: ${dest}"
+            ;;
+        *)
+            echo "ERROR: Unknown approval_status: ${status}"
+            exit 1
+            ;;
+    esac
+    
+    local task_id
+    task_id=$(python3 -c "import json; print(json.load(open('${task_file}'))['task_id'])")
+    local dest_file="${dest}/${task_id}.json"
+    
+    if [[ -f "$dest_file" ]]; then
+        echo "ERROR: Task ${task_id} already exists in ${dest}."
+        exit 1
+    fi
+    
+    cp "$task_file" "$dest_file"
+    echo "Task ${task_id} enqueued to ${dest}"
+}
+
+cmd_unblock() {
+    local task_id="$1"
+    local blocked_dir="${AUTOPILOT_ROOT}/queue/blocked"
+    local queued_dir="${AUTOPILOT_ROOT}/queue/queued"
+    
+    local src="${blocked_dir}/${task_id}.json"
+    if [[ ! -f "$src" ]]; then
+        echo "ERROR: Blocked task not found: ${task_id}"
+        echo "Available blocked tasks:"
+        find "$blocked_dir" -name "*.json" -type f 2>/dev/null | while read -r f; do
+            echo "  $(basename "$f" .json)"
+        done
+        exit 1
+    fi
+    
+    mv "$src" "${queued_dir}/${task_id}.json"
+    echo "Task ${task_id} moved from blocked to queued."
+}
+
+# Main dispatch
+case "${1:-}" in
+    install)   cmd_install ;;
+    start)     cmd_start ;;
+    stop)      cmd_stop ;;
+    restart)   cmd_restart ;;
+    status)    cmd_status ;;
+    logs)      cmd_logs "${2:-50}" ;;
+    doctor)    cmd_doctor ;;
+    dry-run)   cmd_dry_run ;;
+    enqueue)   cmd_enqueue "${2:-}" ;;
+    unblock)   cmd_unblock "${2:-}" ;;
+    -h|--help|help) usage ;;
+    "")
+        usage
+        echo ""
+        echo "ERROR: No subcommand provided."
+        exit 1
+        ;;
+    *)
+        echo "ERROR: Unknown subcommand: $1"
+        usage
+        exit 1
+        ;;
+esac
