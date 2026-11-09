@@ -1,5 +1,26 @@
 # Changelog
 
+## Cleanup — Remove fixture-backed Sprint 016–023 layer (2026-11-09)
+
+Removed eight API groups that never read the database and returned
+hardcoded, in-memory, or unverified values while presenting them as real
+Owner state. No UI page called them; only their own sprint tests did.
+
+- Removed routes: `/api/ops/*`, `/api/os/*`, `/api/ops-real/*`,
+  `/api/scale/*`, `/api/intel/*`, `/api/household/*` (singular; the real
+  `/api/households/*` is unchanged), `/api/hardening/*`, and
+  `/api/portfolio/{analytics,benchmark,brief,bond/*}`.
+- Removed services: `daily_ops`, `investment_os`, `real_ops`,
+  `scale_intelligence`, `intelligence_expansion`, `portfolio_upgrade`,
+  `production_hardening`, `real_world_ops`.
+- Removed tests: `tests/test_sprint_016.py` – `tests/test_sprint_023.py`.
+- Examples of what was fabricated: fixed monthly review ($1,310,000, AAPL
+  22%), fixed capital deployment (GOOGL/BRK.B/VOO), fixed daily brief,
+  fixed macro snapshot, three-bond lookup table, incorrect drawdown/Sharpe.
+- No migration, model, or DB-backed workflow changed. Capabilities such as
+  analytics, macro context, or wealth planning should be rebuilt on
+  persisted Portfolio/Policy data when they are prioritized.
+
 ## M5-003 — Production Hardening (Research Pipeline Reliability) — COMPLETE (2026-08-14)
 
 ### ResponseValidator JSON robustness
