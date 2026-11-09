@@ -1,0 +1,5 @@
+# Local development dependency alias.
+# production requirements.txt now includes jinja2 + the LLM SDKs (anthropic,
+# openai, google-genai), so this simply delegates to it — single source of truth,
+# no version drift.
+-r requirements.txt

@@ -1,0 +1,52 @@
+# CompoundOS LOCAL development stack (created by Hermes, 2026-08-14).
+# Isolated from production AND from the unrelated local `commerce-os` stack.
+#
+# API is exposed on 127.0.0.1:8001 because port 8000 is already bound by the
+# commerce-os-api container. db/redis stay internal to the compose network.
+
+name: compoundos-local
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: compoundos
+      POSTGRES_PASSWORD: "${COMPOUNDOS_LOCAL_POSTGRES_PASSWORD:?set COMPOUNDOS_LOCAL_POSTGRES_PASSWORD}"
+      POSTGRES_DB: compoundos
+    volumes:
+      - local_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U compoundos -d compoundos"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - local_redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.local
+    env_file:
+      - .env
+    environment:
+      ENVIRONMENT: development
+    ports:
+      - "127.0.0.1:8001:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  local_pgdata:
+  local_redisdata:
